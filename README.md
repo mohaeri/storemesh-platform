@@ -23,3 +23,8 @@ Work is delivered as small issues and pull requests. Every feature must identify
 
 Login -> Receiving Session -> Scale Measurement -> Batch Creation -> QR Print Queue.
 
+## Current runnable prototype
+
+The first integrated release includes receiving, idempotent retries, weight history, zone movements, transformations with genealogy, packaging, shipment conflict protection, print queues, site outbox events, a management dashboard, terminal and PDA clients, cloud aggregation, multi-site Docker topology, and black-box scenarios.
+
+The prototype is an engineering baseline for iterative validation. Production readiness still requires persistent PostgreSQL storage, authentication hardening, device certification, migration tooling, observability, and deployment-specific security review.
