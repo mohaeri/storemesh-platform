@@ -27,4 +27,8 @@ Login -> Receiving Session -> Scale Measurement -> Batch Creation -> QR Print Qu
 
 The first integrated release includes receiving, idempotent retries, weight history, zone movements, transformations with genealogy, packaging, shipment conflict protection, print queues, site outbox events, a management dashboard, terminal and PDA clients, cloud aggregation, multi-site Docker topology, and black-box scenarios.
 
-The prototype is an engineering baseline for iterative validation. Production readiness still requires persistent PostgreSQL storage, authentication hardening, device certification, migration tooling, observability, and deployment-specific security review.
+The current release includes normalized PostgreSQL persistence and migrations, signed authentication and role permissions, audit/outbox delivery, health/readiness/Prometheus endpoints, automated backups with restore validation, and CI coverage for the multi-site scenario. Physical scale/scanner/printer certification and deployment-specific security review remain environment-dependent acceptance activities.
+
+## Run the complete stack
+
+Clone all implementation repositories into one parent directory, enter `storemesh-infrastructure`, and run `docker compose up --build`. The operational dashboard is then available at http://localhost:8080 and connects to the Iran site API at http://localhost:3000.
