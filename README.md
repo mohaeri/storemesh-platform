@@ -10,7 +10,7 @@ This repository is the governance and architecture hub. Implementation is split 
 - `storemesh-site-server`: transactional application server deployed at each site
 - `storemesh-web`: management and operational web application
 - `storemesh-terminal`: Raspberry Pi terminal, scales, scanners, and printers
-- `storemesh-pda`: Android industrial PDA application
+- `storemesh-pda`: installable PWA for Android industrial PDAs
 - `storemesh-cloud`: read-only cross-site aggregation and reporting
 - `storemesh-infrastructure`: deployment, backup, monitoring, and per-site configuration
 - `storemesh-e2e`: end-to-end operational acceptance tests
@@ -27,7 +27,7 @@ Login -> Receiving Session -> Scale Measurement -> Batch Creation -> QR Print Qu
 
 The first integrated release includes receiving, idempotent retries, weight history, zone movements, transformations with genealogy, packaging, shipment conflict protection, print queues, site outbox events, a management dashboard, terminal and PDA clients, cloud aggregation, multi-site Docker topology, and black-box scenarios.
 
-The current release includes normalized PostgreSQL persistence and migrations, signed authentication and role permissions, audit/outbox delivery, health/readiness/Prometheus endpoints, automated backups with restore validation, and CI coverage for the multi-site scenario. Physical scale/scanner/printer certification and deployment-specific security review remain environment-dependent acceptance activities.
+The current release includes normalized PostgreSQL persistence and migrations, standard HS256 JWT authentication and granular role permissions, audit/outbox delivery, health/readiness/Prometheus endpoints, automated backups with restore validation, and CI coverage. Physical scale/scanner/printer certification, production secrets, and deployment-specific security review remain environment-dependent acceptance activities and are not represented as completed.
 
 The user experience is delivered as three complete, connected surfaces: a responsive RTL operations console covering receiving, inventory, containers, production, quality, packaging, shipment, cross-site transfer, tasks, printing, traceability, configuration, overrides, audit, cloud, and system health; a touch-oriented receiving terminal; and an offline-capable industrial PDA interface.
 
