@@ -29,6 +29,8 @@ The first integrated release includes receiving, idempotent retries, weight hist
 
 The current release includes normalized PostgreSQL persistence and migrations, signed authentication and role permissions, audit/outbox delivery, health/readiness/Prometheus endpoints, automated backups with restore validation, and CI coverage for the multi-site scenario. Physical scale/scanner/printer certification and deployment-specific security review remain environment-dependent acceptance activities.
 
+The user experience is delivered as three complete, connected surfaces: a responsive RTL operations console covering receiving, inventory, containers, production, quality, packaging, shipment, cross-site transfer, tasks, printing, traceability, configuration, overrides, audit, cloud, and system health; a touch-oriented receiving terminal; and an offline-capable industrial PDA interface.
+
 ## Run the complete stack
 
 Clone all implementation repositories into one parent directory, enter `storemesh-infrastructure`, and run `docker compose up --build`. The operational dashboard is then available at http://localhost:8080 and connects to the Iran site API at http://localhost:3000.
