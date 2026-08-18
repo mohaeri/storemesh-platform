@@ -13,7 +13,7 @@ This file is the executable audit ledger for the chapter-by-chapter implementati
 | Zone inventory and FIFO recommendation | Complete | FIFO deviations warn without blocking, are scoped by product+grade+size, and create audit evidence |
 | Multi-level packaging | Partial | Hierarchy and basic state transitions exist; package-by-package scan evidence and the exact package state machine remain |
 | Label identity, attempts and safe reprint | Complete | Separate labels/attempts, verified scanner capture, device-attributed printing |
-| Session auto-save and recovery | Partial | Draft persistence/resume and manager/admin JWT-session revocation exist; inactivity timeout, handover and complete operational lifecycle remain |
+| Session auto-save and recovery | Partial | Draft persistence/resume and PostgreSQL-backed manager/admin JWT-session revocation survive restart; inactivity timeout, handover and complete operational lifecycle remain |
 | Task management | Partial | Create/claim exists; work orders, eligibility, assignment/reassignment, pause/fail/recovery and dependencies remain |
 | Device management | Partial | Device identity is captured; registry, assignment, heartbeat and online status remain |
 | Processing cycles | Complete | Identity-preserving freezer/freeze-dryer/dryer cycles, exclusive scanned-container lock, strict transitions/history, final yield and packaging-task tests |
