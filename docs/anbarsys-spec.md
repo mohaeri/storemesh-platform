@@ -31364,3 +31364,45 @@ Each site requires stable local Wi-Fi/wired connectivity for its terminals to re
 
 Every non-functional requirement in this chapter is evaluated per site first, and only secondarily at the aggregate (Cloud) level. A requirement that can only be satisfied by assuming a single shared server or database is not compatible with this system's architecture (Chapter A, 4.6; Chapter C, 3.39b; Chapter K, 11.73) and must be rewritten before it is accepted. 
 
+
+---
+
+# Addendum 01 — Container, Zone, Fresh Export and Consumables Extensions
+
+This addendum is normative and permanently extends sections 2.15, 4.2.4, 4.2.5 and the packaging/export scope.
+
+## Container management extensions
+
+- A container may be designated for multiple active zones simultaneously.
+- Reusable containers (`BASKET`, `CRATE`, `TRAY`) carry an empty/tare weight and a cleaning status (`CLEAN`, `DIRTY`, `CLEANING`). A gross weighing may derive net product weight by subtracting tare.
+- `SINGLE_USE` identifies supplier packaging used directly at receiving. It is QR-labelled like other containers, carries a single-use marker, has no tare calculation and is not returned to circulation.
+- Re-containerization from a single-use or reusable container into a reusable container is permitted at any operational stage, subject to capacity, lock and active-session checks.
+- Container label printing is an explicit optional action. Container creation itself must not create a blocking print job.
+
+## Zone management extensions
+
+- Cold storage is split into `COLD_ROOM_CLEAN` and `COLD_ROOM_DIRTY`.
+- `RECEIVING` and `SORTING` transitions are reversible.
+- A container that has moved to or through `WASHING` and is later moved to either cold-room zone is allowed to move, but the system must show and audit a warning and raise a durable manager-review exception.
+- Physical zone transitions operate per container. Batch-only movement controls must not create a mismatch between batch and container locations.
+
+## Receiving and cold-storage transfer
+
+- Harvest period is computed from the receiving timestamp's calendar week and is not a manually required master-data record.
+- Grade and size options may be scoped to one or more product codes; receiving and sorting reject invalid product/grade/size combinations.
+- Every single receiving result creates actionable cold-storage work.
+- Completing a multi-container delivery exposes its physical container list and a convenience action to move those containers individually to `COLD_ROOM_DIRTY`. This does not introduce all-or-nothing batch movement.
+
+## Fresh Export
+
+- `FRESH_EXPORT` is a valid sorting destination and `FRESH_EXPORT_OPERATOR` is a distinct station role.
+- A Fresh Net Lot records source batch, configured unit weight, count and total weight. Individual nets do not receive independent QR identities.
+- Partial packing decrements only the consumed batch weight; compatible remainder stays available under the original batch identity with genealogy intact.
+- A Fresh Shipping Box is a distinct QR-labelled entity assembled from one or more Net Lots and may mix batches, grades and sizes.
+
+## Consumables and packaging supplies
+
+- Consumables are master records distinct from saleable products and track unit, current quantity, reorder threshold and status.
+- Inbound receipts record quantity, source and date.
+- Consumption is transactional and automatically decrements relevant stock when cartons or fresh shipping boxes are built.
+- Reaching or crossing the reorder threshold raises a durable operational exception.
