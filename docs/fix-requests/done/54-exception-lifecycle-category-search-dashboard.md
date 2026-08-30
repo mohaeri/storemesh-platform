@@ -34,8 +34,8 @@ Real PostgreSQL: `postgresql://postgres@127.0.0.1:55439/storemesh_fr50` with `DA
 
 ## Commits and PRs
 
-- Backend: `ee9553c` — https://github.com/mohaeri/storemesh-site-server/pull/21
-- Web: `7057af3` — https://github.com/mohaeri/storemesh-web/pull/9
-- Contracts: `d497aa7` — https://github.com/mohaeri/storemesh-contracts/pull/8
+- Backend: `ee9553c297c9ff0dfcc4828662a1db4fc66244c2` — https://github.com/mohaeri/storemesh-site-server/pull/21
+- Web: `7057af34535b64d97dcd145ce5bf1229fcb37b98` — https://github.com/mohaeri/storemesh-web/pull/9
+- Contracts: `d497aa7d3390733d40b41f3bb024417e053cd744` — https://github.com/mohaeri/storemesh-contracts/pull/8
 
 All three affected product-repository working trees were clean after commit and push.
