@@ -37,7 +37,7 @@ Backend tests used real PostgreSQL 17 at `postgresql://postgres:postgres@127.0.0
 - Backend: `6db11857e597862d0e0bb2aa91825f50eb14d7b5` — https://github.com/mohaeri/storemesh-site-server/pull/21
 - Web: `893637a60e52b8f2ea91e563e3cffe361121c7ed` — https://github.com/mohaeri/storemesh-web/pull/9
 - Contracts: unchanged at `a227ab61a79dd25ec4c3fab0a3f00b37a5b3bb24` — https://github.com/mohaeri/storemesh-contracts/pull/8
-- Platform baseline before this completion-report commit: `67dac89624f1ad982976f45c6ca24c2f2279af40`; no pull request exists for this branch.
+- Platform completion-report commit: `57d18a21f954088ae2923d2248dda392af688945`; no pull request exists for this branch.
 
 ## Working-tree confirmation
 
