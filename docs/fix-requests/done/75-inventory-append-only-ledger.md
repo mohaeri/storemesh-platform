@@ -33,10 +33,10 @@ All backend tests used real PostgreSQL 17 at `postgresql://postgres:postgres@127
 
 ## Commits and pull requests
 
-- Backend: `c29a926` — https://github.com/mohaeri/storemesh-site-server/pull/21
-- Web: `d054b59` — https://github.com/mohaeri/storemesh-web/pull/9
-- Contracts: `f0ee520` — https://github.com/mohaeri/storemesh-contracts/pull/8
-- Platform report: committed on `feat/addendum-01-fix-request-07`; this branch has no pull request.
+- Backend: `c29a9263bdfba789661888ace291aebad033d927` — https://github.com/mohaeri/storemesh-site-server/pull/21
+- Web: `d054b5960a096b03f2d0947fd43c4287a1a7fa07` — https://github.com/mohaeri/storemesh-web/pull/9
+- Contracts: `f0ee5202a56c723c431d8682af6525773ec89a1a` — https://github.com/mohaeri/storemesh-contracts/pull/8
+- Platform report: `287e4107fae9c3ddd40857ec8aead90b61ed55fe`; this branch has no pull request.
 
 ## Working-tree confirmation
 
