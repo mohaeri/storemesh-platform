@@ -29,7 +29,7 @@ All tests used real PostgreSQL 17 at `postgresql://postgres:postgres@127.0.0.1:5
 
 - Backend: `55d7455b008fe474f3520a225eb59fbd27a59ce5` — https://github.com/mohaeri/storemesh-site-server/pull/21
 - Web and contracts: not affected; no commits required.
-- Platform report: recorded by the commit containing this file; this branch has no pull request.
+- Platform report: `e49ba3b50ad409327dec2dae7f95d68a3c0a3bc5`; this branch has no pull request.
 
 ## Working-tree confirmation
 
