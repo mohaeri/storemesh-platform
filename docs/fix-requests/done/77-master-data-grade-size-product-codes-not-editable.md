@@ -28,7 +28,7 @@ All backend tests used real PostgreSQL 17 at `postgresql://postgres:postgres@127
 - Backend regression: `cf903972c700dea8848acfdede188e010b8e1982` — https://github.com/mohaeri/storemesh-site-server/pull/21
 - Web: `e1c316e976305c9146bd67c794cec8a47425bc06` — https://github.com/mohaeri/storemesh-web/pull/9
 - Contracts: not affected; no contract commit required.
-- Platform report: recorded by the commit containing this file; this branch has no pull request.
+- Platform report: `9abb45ccc032e83d0fc5cad7d72590bd804f0db8`; this branch has no pull request.
 
 ## Working-tree confirmation
 
