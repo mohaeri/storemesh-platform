@@ -20,7 +20,6 @@ Status: COMPLETED
 ## Commits and pull requests
 
 - `storemesh-web`: `3a93ce79244694e70c56db5ed25e5e540ae3da1b` — https://github.com/mohaeri/storemesh-web/pull/9
-- `storemesh-platform` completion report: `PLATFORM_REPORT_COMMIT_PENDING`
+- `storemesh-platform` completion report: `0a2ccf444a6824c81439343c1f6be4a3a9758f80`
 - `storemesh-site-server`: unaffected, current `459dda9cfb8c3cdffdde90c62bf649bdb027ee2f` — https://github.com/mohaeri/storemesh-site-server/pull/21
 - `storemesh-contracts`: unaffected, current `5fd4bcbfa5467152600c414b6ab8f83ef6d90548` — https://github.com/mohaeri/storemesh-contracts/pull/8
-
