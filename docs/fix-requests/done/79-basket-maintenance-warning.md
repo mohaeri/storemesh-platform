@@ -33,4 +33,4 @@ No implementation was started because choosing among these options changes the d
 ## Pull requests
 
 - No FR79 pull request exists because no implementation was authorized past the unresolved model decision.
-- Platform blocker report: recorded by the commit containing this file; this branch has no pull request.
+- Platform blocker report: `be0b16eefdb50fed81a3b63d948ba09b39157d58`; this branch has no pull request.
