@@ -1,31 +1,53 @@
-# Fix Request 73 — Blocker Report
+# Fix Request 73 — Completion Report
 
-Status: BLOCKED
+Status: COMPLETE
 
-## Blocking contradiction
+## Part 1 results — database-enforced append-only history
 
-The requested database behavior cannot be implemented exactly as written without an unresolved design decision:
+- Added migration `068_audit_history_immutability.sql` with a shared row-level trigger function for `audit_events` and `event_history_archive`.
+- UPDATE is always rejected with PostgreSQL error code `55000`.
+- DELETE is rejected unless the current transaction has `app.archiving=on`.
+- Migration 068 was applied successfully after migrations 001–067 on the real PostgreSQL database.
 
-- Requirement 1 mandates a `BEFORE UPDATE OR DELETE` trigger on `audit_events` that raises an exception for DELETE.
-- The existing `archiveHistory()` implementation legitimately moves audit rows with `DELETE FROM audit_events ... RETURNING *` inside a data-modifying CTE.
-- Requirement 4 and the required regression test simultaneously require that existing archive-move flow to continue succeeding normally.
+## Part 2 results — transaction-local archival guard
 
-PostgreSQL fires the row-level `BEFORE DELETE` trigger for the DELETE inside that archive CTE. A blanket exception-raising trigger therefore necessarily blocks the mandated archive operation.
+- `archiveHistory()` now issues `SET LOCAL app.archiving = 'on'` immediately after `BEGIN`, using the same checked-out client and transaction as the existing archive move.
+- The existing DELETE/RETURNING-to-archive mechanism was otherwise unchanged.
+- COMMIT and ROLLBACK automatically clear the guard; the regression test confirms a later unguarded DELETE is rejected.
 
-## Decision required
+## Part 3 results — protected archive and outbox exclusion
 
-One exception mechanism must be explicitly authorized before implementation, for example:
+- `event_history_archive` rejects unguarded UPDATE and DELETE while continuing to accept the existing INSERT-based archive flow.
+- `outbox_events` received no trigger or immutability change. Its legitimate status, attempt-count, delivery-time updates and retention deletes remain supported exactly as required.
+- No route, request, or response shape changed; contracts and web required no code changes.
 
-1. Allow `archiveHistory()` to set a transaction-local guard that the trigger validates before permitting DELETE; or
-2. Move archival into a controlled `SECURITY DEFINER` database function and permit DELETE only through that function; or
-3. Revise the requirement so `audit_events` rejects UPDATE but permits DELETE used by archival.
+## Part 4 results — real PostgreSQL verification
 
-These choices have materially different security and operational consequences. No option was selected by assumption.
+- A normal repository audit INSERT succeeded.
+- Direct unguarded UPDATE and DELETE attempts against `audit_events` failed and the stored row remained unchanged.
+- The normal archive move succeeded, after which direct unguarded UPDATE and DELETE attempts against the archived audit row failed and its payload remained unchanged.
+- A guarded bare DELETE succeeded inside its transaction; a fresh unguarded DELETE after COMMIT failed, proving the setting did not leak.
+- PostgreSQL test teardown paths that intentionally remove test history now use the same transaction-local guard.
 
-## Scope and repository state
+## Final verification
 
-- No backend, contracts, or web code was changed for Fix Request 73.
-- `outbox_events` was not changed, as explicitly required.
-- No tests were claimed or run for an unimplemented solution.
-- The original open request remains present and unchanged.
-- Backend, web, contracts, and platform tracked working trees were clean before this blocker report was added.
+Backend tests used real PostgreSQL 17 at `postgresql://postgres:postgres@127.0.0.1:55439/storemesh`, with `DATABASE_URL` set and migrations 001–068 applied.
+
+- Targeted backend PostgreSQL and archive regressions: **8 passed, 0 failed, 0 skipped**.
+- Backend full: **501 passed, 0 failed, 0 skipped**.
+- Web full: **85 passed, 0 failed, 0 skipped**.
+- Contracts full: **60 passed, 0 failed, 0 skipped**.
+- OpenAPI/server route parity: **155 passed, 0 failed, 0 skipped**.
+
+## Commits and pull requests
+
+- Backend: `7a06f54a77345b4b9a8eac796299a68ea7357f3d` — https://github.com/mohaeri/storemesh-site-server/pull/21
+- Web (verified unchanged): `5b3009ec0a24c6389bd10d909c8e8e6d9f39f165` — https://github.com/mohaeri/storemesh-web/pull/9
+- Contracts (verified unchanged): `6a42bc865b131d97acf327f7a30dcc41f788fd65` — https://github.com/mohaeri/storemesh-contracts/pull/8
+- Platform baseline before this updated report: `531866466b8002d650847602a6e59a0fa7be67e6`; no pull request exists for this branch.
+
+## Working-tree confirmation
+
+- Backend, web, and contracts tracked working trees are clean after commit and push, with local HEAD matching their tracked remote branch.
+- Platform retains only pre-existing untracked coordination/review files outside this tracked report; none were included in the commit.
+- The original open request remains present with the locally coordinated transaction-guard decision and was not committed, edited by Codex, or removed.
