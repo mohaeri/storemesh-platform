@@ -1,0 +1,143 @@
+گزارش بررسی بخش تولید AnbarSYS / StoreMesh
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ بدون تغییر کد، تنظیمات، تست یا داده عملیاتی
+
+مبنای نسخه GitHub
+=================
+پیش از بررسی، تمام repositoryهای مرتبط با git fetch --prune تازه‌سازی شدند. این گزارش مستقیماً براساس فایل‌های موجود در refهای زیر در GitHub تهیه شده است:
+
+- storemesh-platform: origin/feat/addendum-01-fix-request-07 @ 8681403
+- storemesh-site-server: origin/audit-fr7-v3 @ 34e209e
+- storemesh-web: origin/audit-fr7-web-v2 @ 1603cc6
+- storemesh-pda: origin/feat/operations-completion-round-3 @ 52a459f
+- storemesh-terminal: origin/feat/operations-completion-round-3 @ abbe707
+- storemesh-contracts: origin/feat/addendum-01-fix-request-07 @ 2b48758
+
+شاخه‌های بالا جدیدتر از origin/main هستند؛ بنابراین ارزیابی مربوط به آخرین کد منتشرشده روی GitHub است، نه main قدیمی. ورک‌تری‌های محلی با refهای ریموت متناظر یکسان بودند و مبنای نتیجه، محتوای خود refهای origin بوده است.
+
+دامنه بررسی
+===========
+بخش‌های Sorting، Washing، Slicing، Freezing، Freeze Drying و Conventional Drying در سند مرجع با مدل دامنه، API، مجوزها، PostgreSQL، پنل وب، PDA/Terminal و تست‌های موجود مقایسه شدند. Fresh Export و Packaging فقط در مرز تحویل از تولید بررسی شدند و موضوع اصلی این گزارش نیستند.
+
+جمع‌بندی مدیریتی
+================
+نظر نهایی من این است که بخش تولید یک هسته فنی جدی و قابل‌آزمایش دارد و زنجیره کامل تا بسته‌بندی واقعاً از طریق API و PostgreSQL اجرا می‌شود؛ اما در وضعیت فعلی با مدل کسب‌وکار سند انطباق کامل ندارد و برای بهره‌برداری واقعی تولید، بدون تصمیم یا اصلاح در موارد بحرانی زیر توصیه نمی‌شود.
+
+قوی‌ترین قسمت، چرخه‌های FREEZE/FREEZE_DRY/DRY است: موجودیت Cycle واقعی، state machine، قفل انحصاری ظرف، ثبت ماشین/اپراتور/دستگاه/نشست، ترتیب بارگیری، final weight، yield، task بعدی و persistence وجود دارد. ضعیف‌ترین قسمت، مدل WASH و SLICE است که برخلاف صریح سند مانند یک transformation شجره‌ای رفتار می‌کند و Batch جدید می‌سازد. Sorting نیز خروجی‌ها را بدون ظرف فیزیکی ایجاد می‌کند. اینها اختلاف UI کوچک نیستند؛ اختلاف در مدل دامنه و هویت فیزیکی محصول‌اند.
+
+نقاط مثبت تأییدشده
+===================
+1. برای SORT، WASH، SLICE، FREEZE، FREEZE_DRY و DRY کنترل وجود، نوع، زون، وضعیت، قفل، نشست فعال و تعلق Batch به ظرف پیاده شده است.
+2. عملیات بدون containerId/trayId معتبر در backend رد می‌شوند؛ کنترل فقط نمایشی یا سمت UI نیست.
+3. Batch قرنطینه‌شده از ورود به تولید منع می‌شود.
+4. Sorting چند خروجی، وزن خروجی‌ها، loss، product/grade/size سازگار، شجره والد/فرزند، Measurement و task تصمیم مقصد را ثبت می‌کند.
+5. وزن خروجی Sorting نمی‌تواند از موجودی ورودی بیشتر باشد و rollback خطای میانی تست شده است.
+6. Merge چند Batch را مصرف کرده و لینک تمام parentIds را حفظ می‌کند.
+7. برای FREEZE/FREEZE_DRY/DRY استفاده از transform قدیمی مسدود شده و Batch identity در cycle حفظ می‌شود.
+8. Cycle دارای ماشین، اپراتور، device، session، container/tray list، batch list، config version، زمان‌ها و stateHistory است.
+9. تکرار یک سینی در Cycle و تخصیص یک ظرف به دو Cycle فعال مسدود می‌شود؛ PostgreSQL نیز unique active-cycle constraint دارد.
+10. state machine چرخه‌ها مسیرهای شروع، مکث، ادامه، تکمیل، پایان، خرابی و لغو را کنترل می‌کند و پرش نامعتبر را رد می‌کند.
+11. FREEZE وزن رسمی را تغییر نمی‌دهد، وضعیت سینی و Batch را Frozen می‌کند و کار Freeze Drying می‌سازد.
+12. FREEZE_DRY و DRY برای هر Batch وزن نهایی مثبت می‌خواهند، وزن بیشتر از ورودی را رد می‌کنند، yield را محاسبه و task بسته‌بندی ایجاد می‌کنند.
+13. خرابی Cycle یک Exception پایدار با شدت Critical ایجاد می‌کند.
+14. ساختار processing_cycles و processing_cycle_containers، ترتیب بارگیری و وضعیت فعال را در PostgreSQL نگه می‌دارد.
+15. یک تست PostgreSQL انتها‌به‌انتها از Receive تا Sort، Wash، Slice، Freeze، Freeze Dry، UNIT، CARTON و Shipment وجود دارد و پس از reload نیز نتیجه را کنترل می‌کند.
+16. UI برای اسکن سخت‌افزاری ظرف/سینی، تنظیم شناسه ثابت ماشین، مشاهده Cycleها و اجرای transitionهای چرخه مسیر عملیاتی واقعی دارد.
+17. QC قابل تنظیم، پاسخ آیتم‌به‌آیتم، attestation صریح، قرنطینه، Exception و corrective task در سامانه وجود دارد و می‌تواند کنار تولید استفاده شود.
+
+مغایرت‌ها و ریسک‌های اصلی
+=========================
+
+[بحرانی] 1. Washing برخلاف سند Batch جدید می‌سازد
+سند فصل 5 صریحاً می‌گوید Washing نباید Batch جدید بسازد، split/merge انجام دهد یا genealogy و هویت Batch را تغییر دهد. پیاده‌سازی transform(WASH) ورودی را کم/مصرف می‌کند، یک child Batch با relationshipType=PROCESS می‌سازد، برای آن لیبل جدید در صف می‌گذارد و parent را در صورت مصرف کامل CONSUMED می‌کند. این رفتار ماهیت Washing را از «تغییر وضعیت همان Batch» به «تبدیل مواد» تغییر داده است.
+
+[بحرانی] 2. Washing وزن رسمی موجودی را برخلاف سند تغییر می‌دهد
+سند می‌گوید وزن بعد از شست‌وشو اجباری نیست؛ وزن اختیاری فقط informational است و نباید موجودی را تغییر دهد. API فعلی outputWeightKg اجباری می‌گیرد، Measurement رسمی ایجاد می‌کند و وزن موجودی child را برابر خروجی قرار می‌دهد. حتی افزایش وزن ناشی از رطوبت را وارد مانده می‌کند و فقط Exception هشدار می‌سازد. این دقیقاً خلاف قواعد 5.9 و 5.17 است.
+
+[بحرانی] 3. Slicing برخلاف سند Batch جدید و وزن رسمی جدید می‌سازد
+سند فصل 6 می‌گوید Slicing فقط شکل فیزیکی را عوض می‌کند، Batch identity/genealogy را ثابت نگه می‌دارد و وزن اختیاری نباید جای وزن رسمی را بگیرد. transform(SLICE) parent را مصرف می‌کند، child Batch جدید می‌سازد، خروجی اجباری و Measurement رسمی ثبت می‌کند و لیبل Batch تازه می‌سازد.
+
+[بحرانی] 4. مدل «یک Batch روی چند Tray» قابل نمایش نیست
+سند اجازه می‌دهد یک Production Batch هم‌زمان روی چند سینی قرار گیرد و هر تخصیص سینی با ترتیب/مقدار قابل رهگیری باشد. مدل Batch فعلی فقط یک containerId دارد. assignBatchToContainer هنگام تخصیص به سینی جدید، Batch را از ظرف قبلی حذف می‌کند. بنابراین یک Batch واحد نمی‌تواند هم‌زمان Tray-01، Tray-02 و Tray-03 داشته باشد؛ جدول مستقل Tray Allocation با quantity/sequence نیز وجود ندارد.
+
+[بحرانی] 5. خروجی‌های Sorting بدون Basket فیزیکی ساخته می‌شوند
+سند می‌گوید هر Production Batch خروجی پس از توزین در یک Basket مستقل با یک محصول/گرید/اندازه قرار می‌گیرد. sortBatch چند child ایجاد می‌کند اما containerId آنها null است؛ ظرف ورودی خالی می‌شود و هیچ اسکن/تخصیص سبد خروجی در همان گردش وجود ندارد. UI نیز فقط سبد ورودی و وزن خروجی‌ها را می‌گیرد. بنابراین عملیات می‌تواند «تکمیل» شود در حالی که خروجی‌های دیجیتال حامل فیزیکی ندارند.
+
+[بالا] 6. نقش مستقل Freeze Dryer Operator وجود ندارد
+سند نقش Freeze Dryer Operator را جدا تعریف می‌کند. در auth فقط FREEZING_OPERATOR و DRYING_OPERATOR وجود دارند؛ FREEZE_DRY با drying:write کنترل می‌شود و task آن نیز به DRYING_OPERATOR داده می‌شود. تفکیک وظایف Freeze Drying و Conventional Drying در دسترسی‌ها اعمال نشده است.
+
+[بالا] 7. نشست‌های مرحله‌ای واقعاً تخصصی نیستند
+عملیات production یک session فعال می‌خواهد، اما selectedRole/station همان مرحله را برای Sorting/Washing/Slicing/Freezing/Drying الزام نمی‌کند. سرور مجوز JWT را کنترل می‌کند، ولی یک session عمومی یا متعلق به station دیگر می‌تواند همراه درخواست استفاده شود. اطلاعات نشست نیز شمارنده‌های کامل مرحله، end semantics و تعلق رسمی عملیات را برای همه مراحل یکسان مدل نمی‌کند.
+
+[بالا] 8. Merge بیش از حد مجاز است و با مجوز عمومی اجرا می‌شود
+endpoint MERGE به operations:write نیاز دارد؛ تقریباً همه نقش‌های عملیاتی این مجوز را دارند، نه فقط Sorting Operator/Manager. همچنین Merge هیچ اسکن ظرف فیزیکی نمی‌خواهد. child حاصل supplier و harvestPeriod مستقیم ندارد و مجموعه دوره‌های برداشت/سهم تأمین‌کنندگان به‌عنوان snapshot روی خروجی ذخیره نمی‌شود؛ فقط از parentIds قابل استنتاج است.
+
+[بالا] 9. مقصد Sorting دقیقاً یک مقصد معتبر تولیدی را enforce نمی‌کند
+Backend هر zone فعال را می‌پذیرد و برای مقصد ناشناخته fallback task می‌سازد. UI نیز گزینه‌های FREEZING و FREEZE_DRYING سند را ارائه نمی‌کند و در عوض COLD_ROOM/PACKAGING را دارد. مقصد فقط یک‌بار قابل ثبت است و مسیر override رسمی مدیر برای تغییر بعدی مقصد وجود ندارد.
+
+[بالا] 10. Cycle در UI فقط یک ظرف/سینی را می‌گیرد
+Backend چند tray/container را پشتیبانی و ترتیب array را ذخیره می‌کند، اما فرم وب تنها یک QR دارد و یک آرایه تک‌عضوی ارسال می‌کند. گردش واقعی «هر سینی را اسکن کن، لیست بارگیری را ببین، سپس Start» در UI تولید موجود نیست. بنابراین قابلیت چندBatch/چندسینی Cycle عملاً از پنل اصلی دسترس‌پذیر نیست.
+
+[بالا] 11. اسکن تخلیه Freeze Dryer/Dryer وجود ندارد
+سند در مرحله Unload اسکن مجدد هر سینی/ظرف و تطبیق با Cycle را می‌خواهد. FINISH فعلی فقط finalWeights را از prompt می‌گیرد و بدون اسکن فیزیکی تخلیه، همه ظرف‌های Cycle را آزاد می‌کند. سینی مفقود در تخلیه تشخیص داده یا به Exception تبدیل نمی‌شود.
+
+[بالا] 12. وزن نهایی از ترازوی معتبر گرفته نمی‌شود
+پنل وب وزن نهایی هر Batch را با prompt دستی می‌گیرد. Backend نیز صرفاً عدد client را قبول می‌کند و device/scale measurement evidence یا stable-reading proof ندارد. برای وزن رسمی Finished Weight، این مسیر قابل دورزدن است.
+
+[بالا] 13. Yield warningهای قابل تنظیم پیاده نشده‌اند
+Yield محاسبه و ذخیره می‌شود، اما محدوده حداقل/حداکثر فعال از configuration خوانده نمی‌شود و Yield خارج از محدوده Exception/management flag ایجاد نمی‌کند. سند صریحاً هشدار غیرمسدودکننده می‌خواهد.
+
+[متوسط رو به بالا] 14. وضعیت پایان Drying با سند یکسان نیست
+پس از FINISH، Batch به DRIED یا FREEZE_DRIED و zone=PACKAGING می‌رود. سند وضعیت Ready for Packaging را انتظار دارد. endpoint بسته‌بندی این وضعیت‌ها را قبول می‌کند و بعداً READY_FOR_PACKAGING می‌گذارد، اما از نظر state machine تولید، پایان خشک‌کردن هنوز معادل وضعیت مستندشده نیست.
+
+[متوسط رو به بالا] 15. اطلاعات Cycle برای حسابرسی تولید کامل نیست
+Cycle ماشین، زمان، اپراتور، device، session و ظرف‌ها را دارد؛ اما input weight snapshot، finished weight per cycle، yield per cycle، shelf position، recipe اختیاری، exception/override links و unload-scan list روی خود Cycle ذخیره نمی‌شوند. بخشی از اطلاعات از Batch measurements و Audit قابل جمع‌کردن است، ولی رکورد Cycle به‌تنهایی خودبسنده نیست.
+
+[متوسط] 16. مدیریت خرابی و لغو کامل نیست
+FAIL یک Exception ایجاد می‌کند و قفل ظرف را آزاد می‌کند، اما گردش تصمیم مدیر برای Resume/Restart/Scrap، ثبت disposition و انتقال کنترل‌شده ظرف‌ها وجود ندارد. از حالت FAILED امکان transition بعدی نیست و باید خارج از Cycle تصمیم دستی گرفته شود. افزودن/حذف سینی قبل از Start و reassign کردن آنها نیز endpoint رسمی ندارد.
+
+[متوسط] 17. هشدارهای زمان و کیفیت مرحله‌ای ناقص‌اند
+Washing delayed، tray/container missing، empty basket، damaged tray/basket و ظرفیت ماشین/سینی در همان گردش تولید به Exceptionهای تخصصی متصل نیستند. QC عمومی وجود دارد، اما فرم WASH/SLICE امکان ثبت observation هم‌زمان با عملیات را ندارد.
+
+[متوسط] 18. Task و عملیات به هم الزاماً متصل نیستند
+Taskهای خودکار ساخته می‌شوند و lifecycle کامل دارند، اما شروع یک عملیات تولید نیازمند claim/completion همان task نیست. کاربر واجد permission می‌تواند با اسکن مستقیم عملیات را اجرا کند و task مرتبط باز بماند. سند اسکن مستقیم را مجاز می‌داند، ولی انتظار دارد وضعیت کار و عملیات همگام بمانند.
+
+[متوسط] 19. Manager priority در نمای تولید کامل نیست
+task priority وجود دارد، اما UI تولید مسیر ساده و مستقیم برای تغییر اولویت Batch/Tray/Cycle و مرتب‌سازی صف Freezer/Freeze Dryer ندارد. اولویت مدیر در ترتیب بارگیری Cycle اعمال یا نمایش داده نمی‌شود.
+
+[متوسط] 20. گزارش تولید محدود است
+reports() نرخ کلی yield و runtime ماشین‌ها را محاسبه می‌کند، ولی تحلیل yield به تفکیک process/product/batch/cycle، throughput هر مرحله، loss تفکیک، زمان انتظار، delay و utilization مبتنی بر ظرفیت/تقویم ارائه نمی‌شود. پنل تولید نیز نمودار یا گزارش عملیاتی این شاخص‌ها را نشان نمی‌دهد.
+
+ارزیابی مرحله‌ای
+===============
+
+Sorting: از نظر split، وزن، loss و genealogy خوب؛ از نظر سبد خروجی، مقصد معتبر، anomaly warning، merge permission و audit کامل ناقص.
+
+Washing: کنترل ظرف و وضعیت خوب؛ مدل هویت و وزن با سند ناسازگار و نیازمند بازطراحی دامنه.
+
+Slicing: کنترل ورودی و task بعدی وجود دارد؛ حفظ Batch identity، تخصیص چندسینی و آزادسازی تأییدشده سبد مطابق سند نیست.
+
+Freezing: هسته Cycle، قفل و حفظ وزن/هویت خوب؛ UI چندسینی، priority، exceptionهای فیزیکی و مدیریت بار قبل از Start ناقص.
+
+Freeze Drying: final weight/yield/task/persistence خوب؛ نقش مستقل، unload scan، scale evidence، yield warning و cycle evidence ناقص.
+
+Conventional Drying: مشابه Freeze Drying و از نظر Cycle قابل قبول؛ همان شکاف‌های وزن فیزیکی، هشدار yield، unload scan و disposition خرابی را دارد.
+
+نظر نهایی و اولویت پیشنهادی
+==========================
+این بخش از نظر زیرساخت فنی از یک نمونه نمایشی ساده جلوتر است و تست واقعی PostgreSQL آن ارزشمند است؛ بااین‌حال تست انتها‌به‌انتها فقط ثابت می‌کند «کدی که نوشته شده اجرا و persist می‌شود»، نه اینکه مدل اجراشده با سند برابر است. مهم‌ترین اختلاف‌ها دقیقاً در مسیرهایی هستند که تست فعلی موفق تلقی می‌کند: ساخت child در WASH/SLICE و نبود تخصیص چندسینی.
+
+ترتیب منطقی اصلاح در آینده:
+1. تبدیل WASH و SLICE به transition روی همان Batch، با Measurement اختیاری غیرموجودی.
+2. طراحی Tray Allocation مستقل برای یک Batch روی چند Tray و اسکن/وزن/sequence هر تخصیص.
+3. تکمیل Sorting با اسکن سبد خروجی و جلوگیری از خروجی بدون حامل فیزیکی.
+4. افزودن نقش و permission مستقل Freeze Dryer Operator و الزام station/role نشست.
+5. ساخت UI بارگیری چندسینی و اسکن تخلیه، همراه با اتصال واقعی ترازوی وزن نهایی.
+6. افزودن Yield thresholds، exceptionها، disposition خرابی و Cycle snapshot کامل.
+7. محدودکردن Merge و Destination به قواعد و نقش‌های مستند و همگام‌کردن Task با عملیات.
+
+حکم نهایی: هسته چرخه‌های ماشینی «قوی و قابل اتکا برای پایلوت فنی» است، اما کل ماژول تولید به‌دلیل مغایرت ساختاری Washing/Slicing/Tray Allocation/Sorting Container هنوز برای ادعای انطباق کامل یا شروع بهره‌برداری واقعی تولید آماده نیست.
+
+یادداشت روش بررسی
+=================
+در این نوبت هیچ فایل پروژه، migration، تست، تنظیم یا داده عملیاتی تغییر نکرد. تست جدیدی نیز نوشته یا اجرا نشد. تنها فایل ایجادشده همین گزارش متنی است و تمام قضاوت‌ها از بررسی مستقیم فایل‌های commitشده روی refهای GitHub بالا و مقایسه آنها با سند مرجع به دست آمده‌اند.

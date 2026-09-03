@@ -1,0 +1,159 @@
+گزارش بررسی بخش اقلام مصرفی AnbarSYS / StoreMesh
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ بدون تغییر کد، تنظیمات، تست یا داده عملیاتی
+
+مبنای نسخه GitHub
+=================
+پیش از بررسی، repositoryهای مرتبط با git fetch --prune تازه‌سازی شدند. گزارش مستقیماً براساس فایل‌های commitشده در refهای زیر در GitHub تهیه شده است:
+
+- storemesh-platform: origin/feat/addendum-01-fix-request-07 @ 8681403
+- storemesh-site-server: origin/audit-fr7-v3 @ 34e209e
+- storemesh-web: origin/audit-fr7-web-v2 @ 1603cc6
+- storemesh-pda: origin/feat/operations-completion-round-3 @ 52a459f
+- storemesh-terminal: origin/feat/operations-completion-round-3 @ abbe707
+- storemesh-contracts: origin/feat/addendum-01-fix-request-07 @ 2b48758
+
+این شاخه‌ها جدیدتر از origin/main هستند؛ بنابراین ارزیابی مربوط به آخرین کد منتشرشده روی GitHub است، نه main قدیمی. مبنای قضاوت محتوای خود refهای ریموت است.
+
+دامنه بررسی
+===========
+بخش normative «Consumables and packaging supplies» در Addendum 01، تعریف قلم، واحد و وضعیت، موجودی جاری، حد سفارش، رسید خرید، تراکنش مصرف، مصرف خودکار CARTON/EPS_BOX/GEL_PACK، Exception سفارش مجدد، دسترسی‌ها، Audit، rollback/idempotency، PostgreSQL، قرارداد API، پنل وب، PDA/Terminal و تست‌ها بررسی شدند.
+
+الزامات مستقیم سند
+=================
+Addendum 01 چهار الزام اصلی دارد:
+
+1. اقلام مصرفی Master Recordهایی جدا از محصول قابل فروش باشند و unit، current quantity، reorder threshold و status را نگه دارند.
+2. رسید ورودی quantity، source و date را ثبت کند.
+3. مصرف transactional باشد و هنگام ساخت Carton یا Fresh Shipping Box موجودی مرتبط را خودکار کم کند.
+4. رسیدن یا عبور موجودی از reorder threshold یک Operational Exception پایدار ایجاد کند.
+
+جمع‌بندی مدیریتی
+================
+مدل پایه این بخش درست طراحی شده است: اقلام مصرفی از Product/Batch جدا هستند، موجودی منفی نمی‌شود، receipt و transaction جداول مستقل دارند، مصرف EPS و ژل در ساخت جعبه صادرات تازه خودکار است، reorder exception پایدار ایجاد می‌شود و همه این داده‌ها پس از reload از PostgreSQL باقی می‌مانند. این قسمت از نظر اندازه کد کوچک ولی از نظر معماری از یک فیلد ساده موجودی بهتر است.
+
+بااین‌حال، اجرای الزام «مصرف خودکار اقلام مرتبط» قطعی نیست. ساخت Carton فقط وقتی قلم فعال با کد دقیق CARTON از قبل وجود داشته باشد یک واحد کم می‌کند؛ اگر قلم تعریف نشده یا غیرفعال باشد، Carton بدون هیچ خطایی ساخته می‌شود و مصرف ثبت نمی‌گردد. در Fresh Export نیز client می‌تواند کد قلم جعبه و ژل را در request عوض کند و هر قلم فعال دلخواه را مصرف کند. تاریخچه receipt/transaction در state و DB هست، اما هیچ endpoint یا UI برای مشاهده، اصلاح کنترل‌شده یا reconciliation آن وجود ندارد.
+
+نظر نهایی: برای پایلوت و کنترل موجودی ساده مناسب است؛ برای موجودی واقعی اقلام بسته‌بندی، حسابرسی انبار و جلوگیری از تولید بدون مواد ثبت‌شده هنوز آماده نیست.
+
+نقاط مثبت تأییدشده
+===================
+1. Consumable entity از Products، Batches و saleable Packages جداست.
+2. رکورد قلم code، name، unit، quantity، reorderThreshold، status و createdAt دارد.
+3. PostgreSQL برای quantity و reorderThreshold مقدار غیرمنفی enforce می‌کند.
+4. code در هر site دارای unique constraint است.
+5. قلم جدید با quantity صفر و status=ACTIVE ساخته می‌شود.
+6. Receipt مقدار مثبت و source غیرخالی می‌خواهد و balance قلم را افزایش می‌دهد.
+7. Receipt و Transaction هر دو مستقل و append-style در PostgreSQL ذخیره می‌شوند.
+8. هر Receipt یک transaction با type=RECEIPT و balance پس از عملیات ایجاد می‌کند.
+9. Consumption یک transaction منفی با reason، entityId، balance و occurredAt ایجاد می‌کند.
+10. مصرف بیشتر از موجودی رد می‌شود و quantity منفی نمی‌گردد.
+11. ساخت Fresh Shipping Box یک EPS_BOX و تعداد درخواست‌شده GEL_PACK را خودکار مصرف می‌کند.
+12. ساخت Carton در صورت وجود قلم فعال CARTON یک واحد مصرف ثبت می‌کند.
+13. رسیدن balance به threshold یا پایین‌تر پس از consumption، Exception پایدار CONSUMABLE_REORDER می‌سازد.
+14. Exception موجودی صفر با severity=HIGH و موجودی کم با WARNING ساخته می‌شود.
+15. تا وقتی Exception قبلی OPEN/ASSIGNED است، برای همان قلم duplicate فعال ساخته نمی‌شود.
+16. consume و ساخت entity بالادستی در همان domain transaction هستند؛ شکست موجودی از طریق snapshot rollback تغییر نیمه‌کاره Lot/Package را باقی نمی‌گذارد.
+17. عملیات create/receive HTTP idempotent و همراه audit عمومی request/user/IP/result/before/after است.
+18. داده‌های Consumable، Receipt، Transaction و Exception پس از flush/load از PostgreSQL بازیابی می‌شوند.
+19. تست واقعی PostgreSQL مصرف EPS_BOX و GEL_PACK و balance پس از reload را پوشش می‌دهد.
+20. پنل وب تعریف قلم، ثبت ورود خرید و مشاهده balance/threshold را ارائه می‌کند.
+
+مغایرت‌ها و ریسک‌های اصلی
+=========================
+
+[بحرانی] 1. Carton می‌تواند بدون قلم مصرفی CARTON ساخته شود
+createPackage فقط اگر یک Consumable فعال با code='CARTON' پیدا کند consumeConsumableDirect را اجرا می‌کند. اگر قلم وجود نداشته یا غیرفعال باشد، ساخت Carton بدون خطا ادامه می‌یابد، childها parent می‌گیرند و هیچ consumption ثبت نمی‌شود. این مستقیماً الزام Addendum 01 درباره کاهش خودکار موجودی هنگام ساخت Carton را نقض می‌کند و باعث اختلاف خاموش موجودی فیزیکی و سیستم می‌شود.
+
+[بحرانی] 2. نوع قلم مصرفی از client قابل جایگزینی است
+createShippingBox مقادیر boxConsumableCode و gelPackConsumableCode را از body می‌پذیرد و هیچ category/usage mapping پیکربندی‌شده‌ای ندارد. یک client می‌تواند به‌جای EPS_BOX یا GEL_PACK کد هر قلم فعال دیگری را بفرستد؛ سیستم همان قلم نامرتبط را کم می‌کند و جعبه را معتبر می‌سازد. UI این فیلدها را ارسال نمی‌کند، اما API قابل دورزدن است و backend باید منبع حقیقت باشد.
+
+[بالا] 3. Master Record از نظر چرخه عمر قابل مدیریت نیست
+status ذخیره می‌شود، اما endpoint و domain method برای edit نام/unit/threshold، activate/deactivate یا retire وجود ندارد. در عمل همه اقلام ساخته‌شده برای همیشه ACTIVE می‌مانند مگر با تغییر مستقیم DB. الزام status از نظر داده وجود دارد ولی قابلیت مدیریتی آن ناقص است.
+
+[بالا] 4. تاریخچه Receipt و Consumption از API و UI قابل مشاهده نیست
+GET /api/consumables فقط balance جاری Master Recordها را برمی‌گرداند. endpoint برای consumable_receipts یا consumable_transactions، فیلتر قلم/تاریخ/entity و drill-down وجود ندارد. پنل نیز فقط جدول موجودی جاری دارد. بنابراین transactional بودن در DB پیاده شده ولی برای مدیر انبار و حسابرس عملاً غیرقابل استفاده است.
+
+[بالا] 5. Reorder Exception پس از تأمین موجودی خودکار بسته نمی‌شود
+دریافت خرید balance را بالا می‌برد، اما Exception باز CONSUMABLE_REORDER را resolve یا به قلم/receipt جدید link نمی‌کند. در نتیجه موجودی ممکن است کاملاً تأمین شده باشد ولی هشدار مدیریتی همچنان OPEN بماند. برعکس، حل دستی Exception بدون replenishment نیز ممکن است و وضعیت دوباره فقط در consumption بعدی بررسی می‌شود.
+
+[بالا] 6. Threshold فقط پس از Consumption ارزیابی می‌شود
+قلم تازه با quantity=0 و threshold مثبت Exception نمی‌سازد. Receiptی که موجودی را همچنان زیر threshold نگه می‌دارد نیز Exception ایجاد نمی‌کند. اگر قلم با stock صفر هیچ‌گاه مصرف نشود، سیستم کمبود را گزارش نمی‌کند. عبارت «reaching or crossing the reorder threshold» نیازمند ارزیابی در هر تغییر balance و ترجیحاً هنگام ایجاد/فعال‌سازی است.
+
+[بالا] 7. کمبود موجودی فقط request را رد می‌کند و Exception نمی‌سازد
+CONSUMABLE_STOCK_INSUFFICIENT به‌درستی عملیات را block می‌کند، اما برای این توقف تولید یک Operational Exception پایدار ساخته نمی‌شود. به‌دلیل rollback عمومی، اگر Exception داخل همان transaction ساخته شود باید با سازوکار preserve/quarantine مناسب نگه داشته شود. اکنون مدیر فقط یک خطای لحظه‌ای می‌بیند و صف کمبود قابل پیگیری ندارد.
+
+[بالا] 8. Recipe/BOM اقلام بسته‌بندی وجود ندارد
+رابطه‌ای میان Package Type/Shipping Box configuration و اقلام/مقادیر لازم وجود ندارد. CARTON همیشه دقیقاً 1 واحد، EPS_BOX همیشه 1 و GEL_PACK برابر عدد ارسالی client است. نوع محصول، سایز Carton، مقصد، فصل، ظرفیت یا نسخه تنظیمات هیچ نقشی ندارد. بنابراین «relevant stock» hardcoded و ناقص است، نه یک BOM قابل مدیریت.
+
+[متوسط رو به بالا] 9. واحد و precision اعتبارسنجی معنایی ندارند
+unit هر رشته‌ای می‌تواند باشد و quantity همیشه تا سه رقم اعشار پذیرفته می‌شود. برای EA می‌توان 0.001 کارتن یا 0.5 ژل مصرف/دریافت کرد. createShippingBox فقط gelPackCount>0 را بررسی می‌کند و integer بودن آن را enforce نمی‌کند. تبدیل واحد، بسته خرید، minimum increment و unit compatibility وجود ندارد.
+
+[متوسط رو به بالا] 10. Receipt source به Supplier Master Data متصل نیست
+source یک رشته آزاد است؛ supplierId، purchase order، invoice/reference number، receivedBy، device، lot و attachment ندارد. سند فقط source و date را الزام کرده و حداقل را پاس می‌کند، اما traceability خرید و جلوگیری از نام‌های تکراری/غلط ضعیف است.
+
+[متوسط رو به بالا] 11. تاریخ Receipt به client اعتماد می‌کند
+receiveConsumable مقدار receivedAt را در صورت ارسال بدون validation می‌پذیرد. تاریخ نامعتبر در نهایت ممکن است در DB شکست بخورد و تاریخ آینده/بسیار قدیمی نیز پذیرفته می‌شود. HTTP UI آن را ارسال نمی‌کند، ولی API می‌تواند سابقه زمانی نادرست بسازد.
+
+[متوسط] 12. اصلاح موجودی، ضایعات و شمارش دوره‌ای وجود ندارد
+هیچ workflow برای stocktake، variance، damage، expiry، write-off، return-to-vendor، manual adjustment با approval یا reversal transaction وجود ندارد. برای استفاده واقعی، اختلاف موجودی فقط با تغییر مستقیم DB قابل اصلاح است که audit عملیاتی را از بین می‌برد.
+
+[متوسط] 13. cancellation جریان بالادستی consumption را برنمی‌گرداند
+لغو Carton فرزندان را آزاد می‌کند، اما transaction مصرف CARTON را reverse نمی‌کند. Fresh Shipping Box نیز cancel/damage lifecycle ندارد تا EPS/GEL مصرف‌شده تعیین تکلیف شود. اینکه قلم واقعاً مصرف/آسیب‌دیده یا قابل برگشت است باید با reason و transaction معکوس ثبت شود.
+
+[متوسط] 14. Transaction actor/session/device مستقل ندارد
+consumable_transactions فقط consumable، type، quantity، balance، reason، entityId و time را ذخیره می‌کند. Receipt نیز فقط quantity/source/date دارد. Audit request برای create/receive اطلاعات actor را دارد و مصرف در audit entity بالادستی دیده می‌شود، اما خود ledger مصرفی به‌تنهایی user/session/device/config version ندارد و برای گزارش انبار self-contained نیست.
+
+[متوسط] 15. Event اختصاصی Consumption در Audit وجود ندارد
+consumeConsumableDirect داخل PACKAGE_CREATED یا FRESH_SHIPPING_BOX_CREATED اجرا می‌شود و transaction DB می‌سازد، اما رویداد مستقلی مثل CONSUMABLE_CONSUMED با before/after و balance ایجاد نمی‌کند. برای trace با entityId قابل اتصال است، ولی جست‌وجو و همگام‌سازی Cloud بر اساس رخداد مصرف دشوارتر می‌شود.
+
+[متوسط] 16. وضعیت نمایشی UI با status واقعی قلم متفاوت است
+ستون «وضعیت» پنل فقط از مقایسه quantity<=threshold مقدار REORDER/AVAILABLE می‌سازد و status واقعی ACTIVE/INACTIVE را نمایش نمی‌دهد. در نتیجه اگر قابلیت غیرفعال‌سازی بعداً اضافه شود، UI معنای master status و stock health را با هم مخلوط می‌کند.
+
+[متوسط] 17. مجوزها بیش از حد کلی‌اند
+تعریف قلم و ثبت خرید هر دو master-data:write می‌خواهند. مجوز جدا برای consumables:manage، consumables:receive، stock:adjust یا stock:read وجود ندارد. PACKAGING/FRESH operators موجودی را با inventory:read می‌بینند ولی مسئول خرید/انبار و separation of duties مستقل مدل نشده است.
+
+[متوسط] 18. فرم‌های مدیریتی بدون gate مناسب نقش نمایش داده می‌شوند
+صفحه Consumables فرم تعریف و Receipt را بدون can('master-data:write') نمایش می‌دهد. کاربر غیرمدیر فرم را پر می‌کند و تازه هنگام submit با 403 مواجه می‌شود. امنیت backend حفظ است، ولی UX نقش‌محور دقیق نیست.
+
+[متوسط] 19. PDA و Terminal هیچ گردش اقلام مصرفی ندارند
+نه دریافت خرید، نه شمارش، نه مصرف/برگشت، نه مشاهده low-stock و نه اقدام روی Exception در ابزار handheld/kiosk وجود ندارد. پنل مدیریتی وب تنها رابط است؛ برای انبارگردانی کنار قفسه و تحویل مواد به خط مناسب نیست.
+
+[متوسط] 20. قرارداد OpenAPI بسیار سطحی است
+سه route اصلی در OpenAPI آمده‌اند، اما schema درخواست/پاسخ، enum واحد/وضعیت، validation quantity/date، permission، error codes، Receipt/Transaction resource و Exception linkage مستند نشده‌اند. کلاینت مستقل نمی‌تواند قرارداد دقیق این ماژول را از spec API استخراج کند.
+
+[متوسط] 21. پوشش تست برای happy path محدود و برای failure path ناکافی است
+یک تست domain مصرف EPS/GEL و reorder exception را بررسی می‌کند و یک تست PostgreSQL balanceها را پس از reload تأیید می‌کند. اما تست واقعی HTTP+JWT برای مجوزها، Carton بدون CARTON، shortage rollback، client code substitution، fractional EA، threshold در create/receipt، auto-resolution، cancellation reversal، restart history و receipt date وجود ندارد. مصرف CARTON نیز در PostgreSQL end-to-end به‌طور صریح assert نشده است.
+
+[پایین] 22. code normalization وجود ندارد
+code فقط trim می‌شود و duplicate check case-sensitive است؛ CARTON، carton و Carton سه قلم متفاوت‌اند، درحالی‌که مصرف خودکار فقط کد دقیق CARTON را پیدا می‌کند. این می‌تواند به ایجاد قلم ظاهراً صحیح ولی عدم کسر موجودی منجر شود.
+
+ارزیابی انطباق چهار الزام مستقیم
+===============================
+
+1. Master Record مستقل با unit/quantity/threshold/status: از نظر schema و persistence «پیاده شده»، از نظر edit/status lifecycle «ناقص».
+
+2. Receipt با quantity/source/date: «پیاده شده»، ولی source آزاد، تاریخ قابل اعتماد به client و تاریخچه غیرقابل مشاهده است.
+
+3. Transactional automatic consumption برای Carton/Fresh Box: برای Fresh Box «عمدتاً پیاده شده»، برای Carton به‌علت optional بودن قلم «ناقص و قابل دورزدن».
+
+4. Durable reorder Exception: persistence و dedup فعال «پیاده شده»، اما trigger coverage و resolve-on-replenishment «ناقص».
+
+نظر نهایی و اولویت پیشنهادی
+==========================
+ترتیب منطقی رسیدگی در آینده:
+
+1. اجباری‌کردن BOM/recipe معتبر برای هر Carton/Fresh Box و شکست پاک در نبود قلم لازم.
+2. حذف boxConsumableCode/gelPackConsumableCode دلخواه از client و استخراج اقلام از Configuration فعال.
+3. افزودن ledger API/UI برای Receipts و Transactions با actor/session/device و entity drill-down.
+4. ارزیابی threshold روی تمام تغییرات balance، ایجاد Exception برای shortage و auto-resolve کنترل‌شده پس از replenishment.
+5. افزودن edit/status lifecycle، unit rules و integer enforcement برای EA.
+6. ساخت stock adjustment/stocktake/waste/return/reversal workflow با approval و audit.
+7. تعیین سیاست reversal برای Carton/Fresh Box cancellation و حفظ transaction history.
+8. تکمیل OpenAPI و تست adversarial HTTP+PostgreSQL، به‌خصوص Carton بدون supply و code substitution.
+
+حکم نهایی: چهارچوب داده و persistence اقلام مصرفی «قابل قبول برای پایلوت کنترل‌شده» است، اما به علت امکان ساخت Carton بدون کسر موجودی، قابل‌تعویض‌بودن کد قلم از API و نبود ledger عملیاتی قابل مشاهده/اصلاح، برای حسابداری واقعی موجودی اقلام و کنترل توقف خط آماده نیست.
+
+یادداشت روش بررسی
+=================
+در این نوبت هیچ فایل کد، migration، تست، تنظیم یا داده عملیاتی تغییر نکرد. تست جدیدی نوشته یا اجرا نشد. تنها فایل ایجادشده همین گزارش است و همه نتیجه‌ها از بررسی مستقیم refهای GitHub بالا و تطبیق آنها با سند مرجع به دست آمده‌اند.

@@ -1,0 +1,286 @@
+گزارش بررسی بخش «مرکز چندسایتی / Cloud Control» StoreMesh / AnbarSYS
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ تطبیق سند با کد و تست‌های موجود روی GitHub
+
+منابع بررسی
+============
+
+این بررسی مستقیماً از refهای GitHub انجام شده است:
+
+- سند مرجع: storemesh-platform، origin/feat/addendum-01-fix-request-07، commit 8681403
+  فایل docs/anbarsys-spec.md، به‌ویژه Multi-Site Operations، معماری هر سایت، Multi-Site Data Ownership، BR-SITE-001 تا BR-SITE-003، سناریوهای SC-SITE، Site-to-Cloud errors، monitoring و الزامات Cross-Site Reports
+- Site Server: storemesh-site-server، origin/audit-fr7-v3، commit 34e209e
+- Web Console: storemesh-web، origin/audit-fr7-web-v2، commit 1603cc6
+- Cloud Aggregator: storemesh-cloud، origin/main، commit 07668b8
+- Contracts: storemesh-contracts، origin/feat/addendum-01-fix-request-07، commit 2b48758
+
+هیچ کد، migration، داده، تنظیمات یا تستی تغییر داده یا اجرا نشد. فقط همین فایل گزارش ایجاد شد. نتیجه، ارزیابی ایستای کد و تست‌های commitشده روی GitHub است و ادعای تست زنده چندسایت/PostgreSQL/قطعی شبکه نیست.
+
+نظر نهایی
+==========
+
+تصمیم معماری اصلی درست است: هر سایت Site Server و PostgreSQL مستقل دارد، عملیات محلی به Cloud وابسته نیست، Eventها در Outbox محلی صف می‌شوند و Cloud با دریافت asynchronous و idempotent فقط داده commitشده سایت‌ها را می‌پذیرد. این قسمت با فلسفه سند همسو و برای ایران در زمان قطعی اینترنت مناسب است.
+
+اما «مرکز چندسایتی» فعلی هنوز یک مرکز گزارش‌گیری نیست. Cloud فقط Eventها را ذخیره می‌کند و یک summary شامل تعداد Event و آخرین زمان Event هر سایت می‌دهد. هیچ projection عملیاتی، موجودی تجمیعی، تولید، کیفیت، Exception، Shipment، Traceability یا گزارش مقایسه‌ای سایت‌ها وجود ندارد. بنابراین عبارت «read-only replica synchronized from each site for cross-site reporting» هنوز محقق نشده است.
+
+UI نیز فقط سه کارت IRAN/DUBAI/ROME با تعداد رویداد نشان می‌دهد. این endpoint بدون authentication عمومی است، وضعیت CONNECTED فقط با داشتن هر lastSync—even بسیار قدیمی—نمایش داده می‌شود، و Cloud server CORS ندارد؛ در اجرای پیش‌فرض Web روی پورت/Origin جدا، مرورگر درخواست را مسدود می‌کند. در Netlify/HTTPS نیز آدرس پیش‌فرض HTTP مشکل mixed-content دارد.
+
+نتیجه اجرایی: زیرساخت انتقال Event حدود 65٪ تا 75٪ قابل قبول است، ولی محصول «Cloud Control / Cross-Site Reporting» حدود 15٪ تا 25٪ ساخته شده است. انطباق کلی مرکز چندسایتی حدود 35٪ تا 45٪ ارزیابی می‌شود.
+
+نقاط قوت تأییدشده در GitHub
+============================
+
+1. هر Site Server با SITE_CODE و PostgreSQL محلی خودش اجرا می‌شود. ساختار repository همیشه siteId محلی را روی رکوردها اعمال می‌کند.
+
+2. JWT دارای site claim است و AuthService توکن سایت دیگر را رد می‌کند. این حفاظت قبلاً نیز با تست cross-site تأیید شده و با BR-SITE-001 همسو است.
+
+3. هیچ workflow محلی برای success به Cloud call منتظر نمی‌ماند. record هم‌زمان Audit و Outbox PENDING می‌سازد و persistence محلی آن‌ها را ذخیره می‌کند.
+
+4. Publisher در timer پس‌زمینه اجرا می‌شود؛ failure آن log می‌شود و عملیات محلی را block نمی‌کند. server حتی بدون CLOUD_URL/SITE_SYNC_KEY شروع می‌شود.
+
+5. Outbox پس از restart PostgreSQL قابل بازیابی است و publisher فقط PENDINGها را می‌فرستد.
+
+6. Eventها بر اساس occurredAt مرتب و در batchهای محدود ارسال می‌شوند. accepted و duplicate هر دو DELIVERED تلقی می‌شوند.
+
+7. Cloud ingest با site-specific shared key و timingSafeEqual احراز هویت می‌شود و header site باید با envelope.site تطابق داشته باشد.
+
+8. production startup کلیدهای پیش‌فرض شناخته‌شده را در Site Server و Cloud رد می‌کند.
+
+9. keyId و current/previous در Cloud برای بخشی از سناریوی rotation پیش‌بینی شده‌اند.
+
+10. schemaVersion=2، id، type، entityId، site و occurredAt در ingest بررسی می‌شوند؛ item نامعتبر از item معتبر همان batch جدا می‌شود.
+
+11. Event ID در Cloud و PostgreSQL primary key است؛ retry همان Event duplicate می‌شود و دوباره شمرده نمی‌شود.
+
+12. Cloud قبل از موفقیت repository، Event را وارد duplicate-detection memory نمی‌کند. تست failure → retry این رفتار را بررسی می‌کند.
+
+13. در production، Cloud بدون DATABASE_URL بالا نمی‌آید؛ eventها و access log در PostgreSQL پایدارند و تست restart دارند.
+
+14. health و ready endpoint برای Site و Cloud وجود دارد؛ Site metrics نیز outbox pending را گزارش می‌کند.
+
+15. Outbox failure counter و DEAD_LETTER وجود دارد و soak runner رشد Audit/Outbox و dead-letter را می‌سنجد.
+
+16. Internal Transfer مسیر جدا دارد: Shipment در سایت منبع، manifest و Receiving در سایت مقصد؛ write مستقیم دیتابیس سایت دیگر وجود ندارد.
+
+17. destination site رکورد محلی جدید می‌سازد و sourceSite/source shipment/external parent را حفظ می‌کند؛ مالکیت فیزیکی مقصد به DB مقصد منتقل می‌شود.
+
+یافته‌های بحرانی
+===============
+
+C1 — Cloud Aggregation عملاً Replica یا Reporting Layer نیست
+
+سند Cloud را read-only replica داده‌های هر سایت برای گزارش‌های cross-site می‌داند. پیاده‌سازی فقط cloud_events و site_access_log دارد. هیچ projection از Inventory، Batch، Production، Package، Shipment، QC، Exception، Device یا Task ساخته نمی‌شود و تنها GET /api/summary تعداد Event و lastSync را برمی‌گرداند.
+
+اثر: مدیر نمی‌تواند موجودی ایران/دبی/رم، تولید، yield، exception rate، shipment یا traceability را مقایسه کند. Cross-Site Reports که در navigation سند آمده عملاً وجود ندارد.
+
+C2 — Eventهای فعلی برای بازسازی Replica کامل و مطمئن کافی نیستند
+
+بسیاری از Eventها payload حداقلی دارند و state snapshot در beforeState/afterState top-level است. Cloud PostgreSQL فقط payload داخلی را ذخیره و سایر envelope مانند before/after، user/session/device/result را حذف می‌کند. پس حتی اگر projector آینده اضافه شود، پس از restart Cloud بخشی از state change لازم را ندارد.
+
+اثر: Event store موجود منبع مطمئن برای بازسازی read model کامل نیست و فقدان داده بعداً با UI حل نمی‌شود.
+
+C3 — Internal Transfer manifest قابل جعل است
+
+destination endpoint /api/internal-transfers/receive فقط authenticated local user با operations:write، destinationSite، status و duplicate را بررسی می‌کند. Manifest امضای سایت منبع، site key، immutable shipment ID یا server-to-server verification ندارد. کاربر/کلاینت مقصد می‌تواند JSON با sourceSite=IRAN و status=DISPATCHED بسازد و موجودی جدید در مقصد ایجاد کند.
+
+این مسیر از نظر شکل «Shipment + Receiving» است، اما اثبات نمی‌کند Shipment واقعاً در source site وجود داشته است. در نتیجه BR-SITE-002 از نظر authenticity کامل enforce نشده است.
+
+پیشنهاد آینده: manifest امضاشده با key سایت منبع یا transfer token یک‌بارمصرف، global shipment ID، hash محتوا و verification در Cloud/source API.
+
+C4 — Cloud summary بدون Authentication عمومی است
+
+GET /api/summary هیچ user auth، manager/auditor permission یا site scope ندارد. هر کسی که به endpoint دسترسی شبکه داشته باشد تعداد Event و last activity هر سه سایت را می‌بیند. اکنون داده کم‌جزئیات است، ولی با اضافه‌شدن گزارش واقعی این الگو به افشای مستقیم اطلاعات عملیاتی تبدیل می‌شود.
+
+C5 — Web Cloud Control در توپولوژی واقعی مرورگر قابل اتکا نیست
+
+Web از Origin خودش مستقیم CLOUD=http://127.0.0.1:4000 را fetch می‌کند. Cloud server هیچ Access-Control-Allow-Origin ندارد؛ درخواست cross-origin از localhost:8080 به localhost:4000 در مرورگر block می‌شود. در استقرار Netlify/HTTPS نیز fetch به HTTP mixed-content است و 127.0.0.1 به دستگاه کاربر اشاره می‌کند، نه Cloud deployment.
+
+اثر: صفحه ممکن است در بعضی proxyهای توسعه کار کند، اما deployment عادی آن را «Cloud فعال نیست» نشان می‌دهد. این یک شکاف واقعی محصول است، نه صرفاً زیبایی UI.
+
+یافته‌های مهم
+==============
+
+H1 — وضعیت CONNECTED غلط و گمراه‌کننده است
+
+UI اگر lastSync فقط non-null باشد CONNECTED نشان می‌دهد. age/staleness threshold وجود ندارد. سایتی که هفته‌ها قطع بوده همچنان Connected است. سند صریحاً last synced indicator در زمان قطعی می‌خواهد.
+
+H2 — lastSync در واقع زمان Event است، نه زمان دریافت/آخرین ارتباط
+
+Aggregator checkpoint را از بیشترین occurredAt Event می‌سازد. received_at و زمان آخرین ingest موفق در summary استفاده نمی‌شوند. اگر سایت Event جدید نداشته باشد ولی اتصال سالم باشد، stale به نظر می‌رسد؛ اگر Event با timestamp آینده ارسال شود، lastSync آینده می‌شود.
+
+H3 — timestamp و schema validation سطحی است
+
+occurredAt فقط truthy بودن بررسی می‌شود؛ parse/date range/future skew validation ندارد. type/entityId length/format و payload size نیز محدود نشده‌اند. یک سایت دارای key می‌تواند summary/checkpoint را خراب یا حافظه/DB را با payload بزرگ پر کند.
+
+H4 — Cross-Site user/site switching وجود ندارد
+
+سند برای Admin/Auditor چندسایتی Select Site و home_site/access scope را تعریف می‌کند. Web یک JWT همان Site Server دارد و هیچ central identity، allowedSites، site selector یا session مستقل Cloud ندارد. همه صفحات به همان API محلی وصل‌اند و Cloud صفحه جدا صرفاً public summary است.
+
+H5 — تفکیک نقش مدیریت Cloud وجود ندارد
+
+Manager/Auditor/Admin در Cloud تعریف نشده‌اند. endpoint report auth ندارد و Web route نیز permission مخصوص cross-site:read ندارد. تفکیک site-level manager با corporate auditor ممکن نیست.
+
+H6 — Contract Cloud منتشر نشده است
+
+OpenAPI اصلی Site API را پوشش می‌دهد، اما /api/events و /api/summary Cloud، envelope schema، authentication header، duplicate/rejected response و reports API در contract مرکزی دیده نمی‌شوند.
+
+H7 — Cloud فقط Event count دارد، نه گزارش‌های عملیاتی
+
+هیچ endpoint برای inventory by site، production/yield، equipment utilization، exception rate، shipments، pending labels، devices offline، task SLA یا quality trend وجود ندارد. الزام response زیر 3 ثانیه نیز قابل سنجش نیست.
+
+H8 — Traceability بین سایت‌ها متوقف می‌شود
+
+Destination فقط externalParents={site,batchCode} نگه می‌دارد. Cloud graph یا endpoint دنبال‌کردن Batch به source genealogy ندارد. شکایت مشتری در Dubai/Italy نمی‌تواند از مرکز تا عملیات Iran پیمایش شود.
+
+H9 — انتقال منبع و مقصد به‌صورت خودکار pair نمی‌شوند
+
+Source manifest باید دستی export و در UI مقصد به شکل JSON paste شود. Cloud correlation یا transfer inbox/outbox، expected arrival، acknowledgment برگشتی و reconciliation وجود ندارد. source و destination records global transfer ID مشترک قابل اعتماد ندارند.
+
+H10 — Audit هر دو سایت برای انتقال کامل نیست
+
+هر سایت action محلی خود را Audit می‌کند، اما سند «Audit record at both sites» و traceable pair را می‌خواهد. شناسه مشترک signed و status acknowledgment وجود ندارد، بنابراین تطبیق دو Event دشوار است.
+
+H11 — Cloud ingest فقط shared secret ساده دارد
+
+HTTPS/mTLS، nonce، request timestamp، body signature و replay window در خود service enforce نمی‌شوند. Event ID dedupe از تکرار business event جلوگیری می‌کند، ولی credential leak امکان ارسال Eventهای جعلی جدید را می‌دهد. TLS احتمالاً باید در reverse proxy باشد اما repository deployment آن را اثبات نمی‌کند.
+
+H12 — Key rotation در Publisher ناقص است
+
+Cloud current/previous keyId را می‌پذیرد، ولی Publisher X-Site-Key-Id نمی‌فرستد و همیشه default current است. rollout مرحله‌ای/rollback کلید از تنظیمات Site Server قابل کنترل نیست.
+
+H13 — کلیدهای سه سایت hardcoded در Cloud startup هستند
+
+productionSiteKeys فقط IRAN/DUBAI/ROME را می‌سازد که برای V1 قابل قبول است، اما registry، status، onboarding/offboarding و metadata سایت DB-backed نیستند. افزودن سایت deploy کد/ENV می‌خواهد.
+
+H14 — Outbox retry backoff واقعی ندارد
+
+در هر interval ثابت دوباره ارسال می‌شود و بعد از maxAttempts به DEAD_LETTER می‌رود. یک قطعی کوتاه طولانی‌تر از پنج interval می‌تواند Eventها را dead-letter کند و بازگشت اتصال آن‌ها را خودکار drain نکند؛ برخلاف انتظار SC-SITE-002.
+
+H15 — DEAD_LETTER replay وجود ندارد
+
+endpoint/command/UI برای replay پس از بازگشت Cloud یا اصلاح schema/key نیست. بنابراین عبارت «once connectivity returns, queued events transmit» برای Eventهای dead-letterشده تضمین نمی‌شود.
+
+H16 — ترتیب chronological مطلق تضمین نشده است
+
+Publisher occurredAt را sort می‌کند، ولی sequence number ندارد؛ timestamp برابر/clock skew و per-item rejection می‌تواند gap ایجاد کند و Event بعدی قبل از Event مردود به Cloud برسد. Cloud نیز فقط max occurredAt را checkpoint می‌کند.
+
+H17 — Queue طولانی می‌تواند حافظه سایت را رشد دهد
+
+Outbox در state process نگه‌داری می‌شود و GET /api/outbox کل آن را برمی‌گرداند. delta persistence مشکل rewrite را کم کرده، ولی outage طولانی با Eventهای زیاد memory/UI payload را افزایش می‌دهد. pagination/streaming نداریم.
+
+H18 — Summary read model در memory کامل بار می‌شود
+
+Cloud هنگام startup همه cloud_events را load و در Map نگه می‌دارد، فقط برای count/lastSync. در حجم چندسال چند سایت، startup time و memory خطی رشد می‌کند. SQL aggregation یا incremental site checkpoints table بهتر است.
+
+H19 — backup/retention/DR برای Cloud مشخص نیست
+
+PostgreSQL production الزامی است، اما migration versioning، backup schedule، retention، restore drill و high availability در Cloud repository دیده نمی‌شود. سند local backups را مطرح می‌کند و مرکز نیز برای گزارش تاریخی نیازمند سیاست روشن است.
+
+H20 — site status فقط از Event است، نه health/sync telemetry
+
+Cloud heartbeat مستقل Site Server، queue depth، oldest pending، publisher last success/failure، dead-letter count و local health ندارد. پس مرکز نمی‌تواند فرق «سایت سالم ولی بدون رویداد» و «سایت قطع» را تشخیص دهد.
+
+یافته‌های متوسط و UI
+====================
+
+M1 — صفحه فقط سه سایت hardcoded با flagهای متنی و Event count دارد؛ inventory/production/QC/shipment comparison وجود ندارد.
+
+M2 — Site card clickable نیست و drill-down، date range، trend، alerts یا report export ندارد.
+
+M3 — status health کلی Cloud فقط از /health است و readiness PostgreSQL (/ready) در UI مصرف نمی‌شود.
+
+M4 — response fetch بررسی r.ok ندارد؛ خطای 401/500 JSON ممکن است به‌عنوان summary خالی پردازش شود و پیام دقیق به کاربر نرسد.
+
+M5 — CORS، authentication header و Cloud base URL از deployment config واقعی inject نمی‌شوند؛ localStorage تنها mechanism است.
+
+M6 — «Connected»/«Pending» با وضعیت‌های سند مثل Online/Stale/Offline/Syncing/Error/Dead Letter تفکیک نشده است.
+
+M7 — timezone سایت‌ها در summary/config نیست و نمایش dt با timezone مرورگر انجام می‌شود؛ مدیر تهران زمان Dubai/Rome را مطابق locale دستگاه می‌بیند، نه site timezone یا UTC مشخص.
+
+M8 — Cross-Site Reports در navigation مستقل از Cloud status نیست؛ همین صفحه وضعیت sync را جای report جا زده است.
+
+M9 — Site Server metrics endpoint auth ندارد و اطلاعات عملیاتی شمارشی را عمومی می‌کند؛ برای monitoring بهتر است network-restricted یا authenticated باشد.
+
+M10 — هیچ UI برای transfer reconciliation، arrivals expected، unmatched manifests یا duplicate/failed destination receipt وجود ندارد.
+
+مقایسه با قواعد BR-SITE
+=======================
+
+- BR-SITE-001، مالکیت انحصاری Inventory محلی: معماری DB مستقل و site-scoped JWT خوب است؛ در عملیات عادی رعایت می‌شود.
+- BR-SITE-002، انتقال فقط Shipment + Receiving: مسیر رسمی وجود دارد و انتقال مستقیم DB نیست، اما manifest بدون امضا قابل جعل و pairing دستی/تأییدنشده است؛ ناقص و امنیتی.
+- BR-SITE-003، Cloud read-only: Cloud هیچ endpoint تغییر Inventory سایت ندارد و فقط Event ingest می‌پذیرد؛ از نظر business write رعایت شده. با این حال reports واقعی وجود ندارند.
+
+ارزیابی تست‌های موجود روی GitHub
+================================
+
+تست‌های مثبت:
+
+- Outbox Publisher accepted/duplicate/rejected/failure/dead-letter را بررسی می‌کند.
+- Aggregator idempotency، checkpoint، site credentials، key IDs و SITE_MISMATCH را تست می‌کند.
+- repository failure → retry بدون poison شدن duplicate cache تست شده است.
+- production keys پیش‌فرض رد می‌شوند.
+- Cloud Event و access log در PostgreSQL پس از restart تست شده‌اند.
+- Site Server تست site-scoped JWT و انتقال داخلی domain/HTTP/PostgreSQL دارد.
+- soak runner رشد Outbox و dead-letter را پایش می‌کند.
+
+شکاف‌های تست:
+
+- هیچ تست Cross-Site Report واقعی وجود ندارد چون endpoint/projector وجود ندارد.
+- تست Web Browser برای CORS/mixed-content/production Cloud URL وجود ندارد.
+- تست unauthorized GET /api/summary وجود ندارد؛ endpoint عمداً public مانده است.
+- تست stale status و receivedAt در برابر occurredAt وجود ندارد.
+- تست signed manifest و جلوگیری از جعل transfer وجود ندارد.
+- تست end-to-end دو Site Server واقعی + دو PostgreSQL + Cloud PostgreSQL + outage + reconnect + report projection وجود ندارد.
+- تست outage طولانی‌تر از maxAttempts و replay dead-letter وجود ندارد.
+- تست ordering با timestamp برابر/clock skew/per-item rejection وجود ندارد.
+- تست projection rebuild پس از Cloud restart وجود ندارد.
+- تست persistence کامل envelope Event در Cloud وجود ندارد؛ تست فعلی فقط payload ساده را می‌سنجد.
+- تست access control manager/auditor/site scope برای Cloud reports وجود ندارد.
+- تست performance زیر 3 ثانیه و حجم چندسال Event وجود ندارد.
+
+ارزیابی انطباق تقریبی
+=====================
+
+- استقلال Site Server و DB: خوب
+- عدم وابستگی تولید محلی به Cloud: خوب
+- Outbox محلی و ingest idempotent: متوسط رو به خوب
+- Site credential/schema validation: متوسط
+- مالکیت محلی Inventory: خوب
+- انتقال معتبر و قابل اثبات بین سایت: متوسط رو به ضعیف
+- Read-only Cloud replica: فاقد پیاده‌سازی واقعی
+- Cross-Site Reports: تقریباً فاقد پیاده‌سازی
+- Cross-site traceability: بسیار ضعیف
+- Sync status/monitoring: حداقلی و گمراه‌کننده
+- Cloud authentication/authorization کاربران: فاقد پیاده‌سازی
+- UI Cloud Control: نمونه نمایشی
+- تست outage کامل چندسایتی: ناکافی
+- انطباق زیرساخت انتقال Event: حدود 65٪ تا 75٪
+- انطباق محصول Cloud Control/Reports: حدود 15٪ تا 25٪
+- انطباق کلی مرکز چندسایتی: حدود 35٪ تا 45٪
+
+اولویت پیشنهادی اصلاحات آینده (هیچ اصلاحی در این بررسی اعمال نشده است)
+====================================================================
+
+P0:
+1. تعریف و ساخت read model/projectorهای Cloud برای Inventory، Production، QC، Exceptions، Shipments و Sync Health.
+2. ذخیره کامل Event envelope در Cloud و قابلیت rebuild قطعی projection.
+3. امضای cryptographic manifest انتقال و global transfer/shipment ID مشترک.
+4. احراز هویت و authorization کاربران Cloud؛ بسته‌شدن summary عمومی.
+5. اصلاح اتصال Web به Cloud با HTTPS، deployment config/proxy و CORS محدود و امن.
+
+P1:
+6. sync telemetry واقعی: lastReceivedAt، queue depth، oldest pending، last success/error، dead letters و staleness status.
+7. exponential backoff، عدم dead-letter در قطعی صرف و replay console.
+8. Site registry و user allowedSites/site selector برای Admin/Auditor.
+9. Cross-site trace و transfer reconciliation/acknowledgment.
+10. OpenAPI مستقل Cloud با Event schema و Reports contracts.
+
+P2:
+11. UI گزارش‌های مقایسه‌ای، drill-down، trend، export و alerts.
+12. SQL materialized/read models به‌جای load همه Eventها در memory.
+13. performance/load/outage/DR tests با سه سایت و PostgreSQL واقعی.
+
+جمع‌بندی اجرایی
+===============
+
+این بخش از نظر جهت معماری صحیح است: Site-first و Cloud-optional. نکته مثبت مهم این است که قطع اینترنت بین‌المللی تولید ایران را متوقف نمی‌کند. اما نام «مرکز چندسایتی» از قابلیت واقعی جلوتر است؛ امروز این سرویس بیشتر Event Collector و نمایش شمارنده است، نه Cloud Aggregation/Reporting. قبل از اتکا مدیریتی، باید projectionهای گزارش، امنیت کاربر، وضعیت Sync واقعی و اصالت انتقال بین سایت ساخته شوند. توسعه ظاهری کارت‌های UI بدون این چهار پایه، مشکل اصلی را حل نمی‌کند.

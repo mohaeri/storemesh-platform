@@ -1,0 +1,255 @@
+گزارش بررسی بخش «رهگیری و شجره» StoreMesh / AnbarSYS
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ تطبیق سند با کد و تست‌های موجود روی GitHub
+
+منابع بررسی
+============
+
+این بررسی مستقیماً از refهای GitHub انجام شده است:
+
+- سند مرجع: storemesh-platform، origin/feat/addendum-01-fix-request-07، commit 8681403
+  فایل docs/anbarsys-spec.md، به‌ویژه فصل‌های 13 و 16، قواعد BR-TR-001 تا BR-TR-005، سناریوهای SC-TRC و بخش‌های API، امنیت، Audit و PostgreSQL
+- Backend: storemesh-site-server، origin/audit-fr7-v3، commit 34e209e
+- پنل وب: storemesh-web، origin/audit-fr7-web-v2، commit 1603cc6
+- ترمینال: storemesh-terminal، origin/feat/operations-completion-round-3، commit abbe707
+- PDA: storemesh-pda، origin/feat/operations-completion-round-3، commit 52a459f
+- Contracts: storemesh-contracts، origin/feat/addendum-01-fix-request-07، commit 2b48758
+
+هیچ کد، migration، داده، تنظیمات یا تستی تغییر داده یا اجرا نشد. فقط همین فایل گزارش ایجاد شد. نتیجه، ارزیابی ایستای کد و تست‌های commitشده روی GitHub است و ادعای آزمون زنده PostgreSQL یا UI نیست.
+
+نظر نهایی
+==========
+
+داده‌های عملیاتی لازم برای ساخت یک سامانه رهگیری خوب تا حد قابل‌توجهی در مدل ذخیره می‌شوند: Batch genealogy، روابط چندوالدی، allocationهای بسته‌بندی، nesting بسته‌ها، Shipment، Customer، Movement، Measurement، Session/Device، Cycle، QC و Audit وجود دارند و بخش مهمی از آن‌ها در PostgreSQL پایدار است.
+
+اما «ماژول رهگیری» فعلی تقریباً از این ظرفیت استفاده نمی‌کند. endpoint موجود فقط یک Batch را با والدهای Batch آن، Measurementهای خود همان Batch و Movementهای خود همان Batch برمی‌گرداند. هیچ forward trace، رهگیری از Package/Carton/Shipment/Customer/Supplier/Container/Cycle، timeline کامل یا recall analysis وجود ندارد. بنابراین UI با عنوان «رهگیری کامل محصول» در واقع فقط یک backward genealogy محدود برای Batch است.
+
+نتیجه اجرایی: زیرساخت داده متوسط رو به خوب است، ولی محصول قابل استفاده رهگیری مطابق سند هنوز ساخته نشده است. انطباق کلی بخش Traceability حدود 25٪ تا 35٪ ارزیابی می‌شود. برای تحقیق کامل شکایت مشتری یا فراخوان محصول، خروجی فعلی کافی نیست.
+
+نقاط قوت تأییدشده در GitHub
+============================
+
+1. جدول batch_genealogy رابطه parent_batch_id/child_batch_id، نوع رابطه و input_weight_kg را دارد و self-link را رد می‌کند.
+
+2. uniqueness زوج parent/child از ثبت تکراری همان edge جلوگیری می‌کند.
+
+3. migration نوع‌های PROCESS، SORT، GRADE_SPLIT، MERGE، TRANSFER و DELIVERY_AGGREGATE را مجاز کرده و تست genealogy-contract هماهنگی literalهای domain با constraint دیتابیس را کنترل می‌کند.
+
+4. transform والدهای متعدد را در parentIds حفظ می‌کند. تست‌های merge و system-100-scenarios نیز ناپدید نشدن والد را بررسی می‌کنند.
+
+5. Delivery چندسبدی یک Batch تجمیعی با parentهای سبدی و relationshipType=DELIVERY_AGGREGATE می‌سازد و تست PostgreSQL واقعی flush/reload آن وجود دارد.
+
+6. تفکیک و transform برای Batchهای خروجی رابطه با ورودی را می‌سازند و وضعیت/وزن Batch اصلی را به‌روز می‌کنند.
+
+7. packaging allocation به Batch، ساختار UNIT → CARTON → EPS → PALLET و per-item scan events در PostgreSQL وجود دارد. این داده‌ها برای رهگیری Package/Carton بالقوه مفیدند.
+
+8. Customer Shipment، Sales Order، carton scan، package nesting و customerId ذخیره می‌شوند و در ارسال نهایی وضعیت کل درخت Package به SHIPPED می‌رود.
+
+9. انتقال بین سایت، sourceSite، shipmentCode، manifest و externalParents را در سایت مقصد نگه می‌دارد؛ بنابراین منشأ خارجی کاملاً گم نمی‌شود.
+
+10. Cycle رکورد machineId، operatorId، sessionId، deviceId، زمان شروع/پایان و batchIds را ذخیره می‌کند و پس از reload قابل بازیابی است.
+
+11. Measurement، Movement، QC، Exception و Audit همگی رکوردهای جدا دارند و زمینه user/session/device در بخش مهمی از عملیات ذخیره می‌شود.
+
+12. endpoint رهگیری read-only است و تابع trace داده عملیاتی را تغییر نمی‌دهد؛ با اصل read-only بودن Traceability همسو است.
+
+یافته‌های بحرانی
+===============
+
+C1 — Forward Traceability وجود ندارد
+
+تابع trace فقط parentIds را به سمت بالا پیمایش می‌کند. هیچ descendant، Package، Carton، Shipment یا Customer را از Batch ورودی پیدا نمی‌کند. endpointهای قراردادی forward trace سند نیز وجود ندارند.
+
+اثر: BR-TR-001 محقق نشده و مهم‌ترین کاربرد recall ناممکن است. از یک Receiving Batch نمی‌توان فهمید چه Batchهای خروجی، Packageها، Cartonها، Shipmentها و مشتریانی تحت تأثیرند.
+
+C2 — Backward Trace فقط از Batch شروع می‌شود و زنجیره کامل را نمی‌سازد
+
+trace(id) بلافاصله this.batch(id) را فراخوانی می‌کند. پس Package، Carton، Shipment، Customer، Supplier، Basket/Container، Tray و Cycle به‌عنوان entry point رد می‌شوند. حتی برای Batch نیز فقط ancestors برگردانده می‌شوند؛ Supplier، Delivery، Container، عملیات، Package و Shipment به پاسخ وصل نیستند.
+
+اثر: BR-TR-002 و الزام «شروع رهگیری از هر Business Object» برآورده نشده است. سناریوی شکایت مشتری با اسکن Package یا Carton قابل اجرا نیست.
+
+C3 — مقدار مصرف هر والد در تبدیل چندوالدی اشتباه ذخیره می‌شود
+
+transform برای child فقط یک inputWeightKg برابر مجموع کل ورودی‌ها ذخیره می‌کند. repository هنگام ساخت batch_genealogy همین مقدار کل را برای تک‌تک parentها می‌نویسد. مثال: اگر از A مقدار 3kg و از B مقدار 2kg مصرف شود، هر دو edge می‌توانند input_weight_kg=5 ثبت شوند؛ جمع ظاهری 10kg خواهد شد.
+
+در sort و Delivery aggregate نیز مقدار دقیق contribution هر parent عموماً null است. این نقض مستقیم BR-TR-004 است و در merge واقعی می‌تواند گزارش سهم تأمین‌کننده و recall quantity را نادرست کند.
+
+پیشنهاد آینده: genealogy باید آرایه edgeهای مستقل {parentId, childId, inputWeightKg, relationshipType} داشته باشد و quantity هر input از همان requestedInputs ثبت شود.
+
+C4 — داده‌های زیادی وجود دارد ولی Trace Engine آن‌ها را join نمی‌کند
+
+پاسخ trace شامل Cycle/Machine، Package nesting، carton scans، Shipment/Customer، Delivery/Supplier، Container history، QC، Exception، Audit و operator/session/device نیست. بنابراین پاسخ فعلی نمی‌تواند پرسش‌های اصلی فصل 16 مانند «کدام ماشین، اپراتور، کارتن، محموله و مشتری؟» را جواب دهد.
+
+C5 — انتقال بین سایت زنجیره قابل پیمایش نمی‌سازد
+
+manifest مقصد فقط packageCode/type و itemهای batchCode/product/grade/size/weight را منتقل می‌کند. Supplier، parent genealogy، operation/cycle history و شناسه پایدار جهانی در manifest نیست. مقصد externalParents را به شکل JSON با site+batchCode نگه می‌دارد، ولی Trace API امکان دنبال‌کردن آن به سایت منبع یا Cloud ندارد.
+
+اثر: زنجیره end-to-end پس از انتقال سایت در مرز sourceSite متوقف می‌شود. برای رهگیری سراسری IRAN → DUBAI/ROME هنوز راه عملی وجود ندارد.
+
+یافته‌های مهم
+==============
+
+H1 — Timeline واقعی وجود ندارد
+
+سند timeline واحد از Receiving تا Shipping با eventهای قابل کلیک می‌خواهد. پاسخ فعلی فقط Measurement و Movement مربوط به root Batch را جداگانه برمی‌گرداند؛ رویدادهای ancestors/descendants، production، QC، packaging، cycles و shipping ترکیب و مرتب نمی‌شوند.
+
+H2 — تاریخچه عملیات مدل/پاسخ یکپارچه ندارد
+
+عملیات عمدتاً از Audit و وضعیت Batch قابل استنباط‌اند، ولی trace آن‌ها را استخراج نمی‌کند. تاریخ، اپراتور، workstation و machine برای هر مرحله در یک ساختار Processing History بازگردانده نمی‌شود.
+
+H3 — تاریخچه Movement والدها و فرزندان حذف می‌شود
+
+trace فقط movementهایی را برمی‌گرداند که batchId دقیقاً برابر root است. اگر Batch از والد ساخته شده باشد، حرکت‌های Receiving و Cold Storage والد در نتیجه نیستند. همین محدودیت برای Measurementها وجود دارد و timeline ناقص می‌شود.
+
+H4 — Container/Basket/Tray trace وجود ندارد
+
+مدل فعلی فقط وضعیت جاری containerId روی Batch و batchIds روی Container را دارد. تاریخ membership مستقل «Batch از چه زمانی تا چه زمانی در کدام Container بود» کامل نیست؛ Movementهای container cascade نیز همیشه containerId را در projection پاسخ trace نشان نمی‌دهند. جست‌وجو با QR دائمی Basket/Tray و تاریخچه استفاده مجدد پیاده نشده است.
+
+H5 — Package/Carton genealogy در Trace API وجود ندارد
+
+package_items، childPackageIds، parentPackageId و carton_scan_events داده لازم را دارند، اما endpoint آن‌ها را traversе نمی‌کند. از Carton نمی‌توان UNITها، Batchها، Receiving Batchها و Supplierها را دید و از Batch نیز Packageهای مصرف‌کننده پیدا نمی‌شوند.
+
+H6 — Customer/Supplier search وجود ندارد
+
+جست‌وجوی Supplier Name و Customer و نمایش همه سهم‌ها/Shipmentها طبق فصل 16.13 و 16.14 وجود ندارد. UI فقط exact Batch code را در inventory از قبل بارشده پیدا می‌کند.
+
+H7 — Recall Analysis وجود ندارد
+
+هیچ endpoint/report برای تعیین affected inventory، Package، Carton، Shipment و Customer از Receiving/Production Batch وجود ندارد. خروجی export، quarantine/hold پیشنهادی یا recall case هم وجود ندارد.
+
+H8 — جست‌وجوی رهگیری Audit نمی‌شود
+
+GET /api/trace مستقیماً app.trace را برمی‌گرداند و رخداد TRACE_SEARCHED با user، زمان، search object و search type ثبت نمی‌کند. این مغایر فصل 16.19 است.
+
+H9 — Missing Parent هشدار بحرانی ایجاد نمی‌کند
+
+visit در صورت نبود parent از this.batch استفاده می‌کند و صرفاً BATCH_NOT_FOUND می‌دهد. Exception بحرانی integrity ساخته نمی‌شود. cycle detection و visited set نیز ندارد؛ اگر داده خراب یا cycle وارد دیتابیس شود، recursion می‌تواند تکراری یا بی‌نهایت شود.
+
+H10 — immutability رابطه در دیتابیس تضمین نشده است
+
+repository برای batch_genealogy از ON CONFLICT ... DO UPDATE استفاده می‌کند و input_weight_kg/relationship_type را بازنویسی می‌کند. Domain endpoint ویرایش مستقیم ندارد، اما constraint/trigger append-only هم وجود ندارد. اصل «parent-child relationships are never modified/deleted» در سطح دیتابیس enforce نشده است.
+
+H11 — حذف تاریخچه در schema به‌طور صریح ممنوع نشده است
+
+FKها بدون ON DELETE CASCADE خوب‌اند و حذف Batch دارای genealogy معمولاً blocked می‌شود، اما سیاست archive/retention، trigger منع DELETE روی genealogy/movement/measurement و API مشاهده داده archived صریح وجود ندارد.
+
+H12 — نقش و هویت تاریخی در خروجی نیست
+
+Audit snapshot نقش/station را نگه می‌دارد، ولی trace آن را بازنمی‌گرداند. operatorId در برخی رکوردها رشته یا UUID است و نام تاریخی snapshotشده کاربر در Timeline ارائه نمی‌شود. حذف/تغییر کاربر می‌تواند نمایش قابل فهم اپراتور تاریخی را دشوار کند.
+
+H13 — کیفیت و Exception بخشی از genealogy نیستند
+
+QC result/checklist/attestation، quarantine/release و operational exceptions به Batch وصل‌اند، اما trace پاسخ نمی‌دهد. برای شکایت مشتری یا recall، نبود این داده‌ها نقص جدی است.
+
+H14 — OpenAPI بسیار کمتر از سند است
+
+Contracts فقط GET /api/trace/{batchId} با توضیح «Read batch genealogy» دارد. endpointهای forward، backward، genealogy و timeline که خود سند فهرست کرده، در قرارداد نیستند.
+
+H15 — permission اختصاصی Traceability وجود ندارد
+
+سند traceability.view و traceability.export را تعریف می‌کند. نقش‌ها چنین permissionهایی ندارند و route trace هیچ needs(...) اختصاصی ندارد. درخواست همچنان پس از authentication اجرا می‌شود، اما هر کاربر authenticated حتی custom role بدون inventory:read می‌تواند آن را بخواند. تفکیک view/export و کنترل داده حساس مشتری وجود ندارد.
+
+یافته‌های متوسط و UI
+====================
+
+M1 — عنوان UI بیش از قابلیت واقعی ادعا می‌کند
+
+صفحه «رهگیری کامل محصول» نام دارد، ولی فقط Batch code را می‌پذیرد و ancestry محدود را نمایش می‌دهد. این می‌تواند مدیر را به کامل‌بودن نتیجه اشتباه مطمئن کند.
+
+M2 — جست‌وجو فقط در inventory بارگذاری‌شده client انجام می‌شود
+
+UI ابتدا code را در state.data.inventory پیدا می‌کند و سپس UUID را به API می‌فرستد. QR، Barcode، Package/Carton/Shipment number، Supplier Name و Customer پشتیبانی نمی‌شوند. object resolver سمت server وجود ندارد.
+
+M3 — UI فقط فهرست تخت ancestors دارد، نه tree
+
+در merge چندوالدی branchها، relationshipType، contribution weight و سطح‌ها نمایش داده نمی‌شوند. ancestor مشترک ممکن است چند بار تکرار شود و کاربر مسیر هر branch را تشخیص نمی‌دهد.
+
+M4 — UI فقط وزن فعلی ancestor را نشان می‌دهد
+
+والد مصرف‌شده معمولاً weightKg=0 دارد؛ UI به‌جای وزن زمان تبدیل یا contribution edge، وزن فعلی صفر را نمایش می‌دهد. این برای تحلیل تولید گمراه‌کننده است.
+
+M5 — Movement UI operator/device/session را نمایش نمی‌دهد و Measurement نیز device/operator ندارد؛ با جزئیات موردنیاز سند فاصله دارد.
+
+M6 — هیچ فیلتر زمانی، نوع رویداد، export، print recall report یا لینک به جزئیات شیء وجود ندارد.
+
+M7 — Terminal و PDA ماژول رهگیری ندارند. اسکن‌های آن‌ها workflow عملیاتی را اجرا می‌کنند ولی status/current history و next actions کامل شیء را نمایش نمی‌دهند.
+
+M8 — Cloud فقط شمارش event و lastSync را نشان می‌دهد و Trace Federation بین سایت‌ها ارائه نمی‌کند.
+
+مقایسه با قواعد BR-TR
+=====================
+
+- BR-TR-001، مسیر Forward از Supplier تا Customer: پیاده نشده.
+- BR-TR-002، مسیر Backward از Customer تا Supplier: فقط ancestry Batch به Batch و آن هم از Batch؛ عمدتاً پیاده نشده.
+- BR-TR-003، ثبت هر transformation: برای transform/sort/delivery aggregate پایه خوبی دارد، اما Cycleهایی که identity Batch را حفظ می‌کنند فقط در cycle table هستند و Trace Engine آن‌ها را نشان نمی‌دهد؛ enforcement جامع/alert شکست genealogy نیز ناقص است.
+- BR-TR-004، مقدار انتقال parent→child: در merge چندوالدی نادرست و در چند workflow null است؛ نقض بحرانی صحت داده.
+- BR-TR-005، حفظ همه والدها در Mixing: در parentIds و batch_genealogy رعایت می‌شود و تست دارد.
+
+ارزیابی تست‌های موجود روی GitHub
+================================
+
+تست‌های مثبت:
+
+- domain.test.js یک ancestry ساده transform را بررسی می‌کند.
+- system-100-scenarios.test.js چند variant merge را برای حفظ parentIds و عدم تولید وزن اضافی بررسی می‌کند.
+- operational-findings-07.test.js مصرف جزئی و حفظ parent را کنترل می‌کند.
+- genealogy-contract.test.js نوع رابطه‌های کد را با constraint migration تطبیق می‌دهد.
+- postgres-integration.test.js رابطه DELIVERY_AGGREGATE را پس از flush/reload واقعی PostgreSQL بررسی می‌کند.
+- internal-transfers.test.js حفظ externalParents و manifest مقصد را بررسی می‌کند.
+- تست‌های Package nesting، shipment cascade، carton scan provenance و Cycle persistence داده‌های بالقوه لازم برای رهگیری را پوشش می‌دهند.
+
+شکاف‌های تست:
+
+- هیچ تست Forward Trace تا Package/Carton/Shipment/Customer وجود ندارد.
+- هیچ تست Backward Trace از Carton/Package/Shipment/Customer تا Supplier وجود ندارد.
+- هیچ تست HTTP/UI برای جست‌وجوی غیر Batch وجود ندارد.
+- تست merge چندوالدی input_weight_kg هر edge را بررسی نمی‌کند و خطای C3 را نمی‌گیرد.
+- تست Timeline کامل شامل operator/device/machine/QC/exception/shipping وجود ندارد.
+- تست recall analysis و affected inventory/customer وجود ندارد.
+- تست trace بین دو سایت پس از انتقال و دنبال‌کردن source genealogy وجود ندارد.
+- تست Missing Parent → critical exception و cycle/corrupt genealogy وجود ندارد.
+- تست ثبت Audit برای جست‌وجوی trace وجود ندارد.
+- تست authorization با traceability.view/export وجود ندارد.
+- تست performance برای genealogy بزرگ و الزام «within seconds» وجود ندارد.
+
+ارزیابی انطباق تقریبی
+=====================
+
+- ذخیره Batch genealogy پایه: خوب
+- merge چندوالدی از نظر حفظ parent: خوب
+- quantity contribution هر edge: ضعیف و در merge نادرست
+- persistence PostgreSQL روابط: متوسط رو به خوب
+- Backward Trace کامل: بسیار ضعیف
+- Forward Trace و Recall: فاقد پیاده‌سازی
+- Package/Carton/Shipment/Customer/Supplier trace: فاقد پیاده‌سازی مؤثر
+- Cycle/Machine/Operator/QC/Exception timeline: فاقد پیاده‌سازی در Trace API
+- جست‌وجوی چندنوعی و QR: فاقد پیاده‌سازی
+- UI tree/timeline: بسیار محدود
+- Cross-site trace: بسیار محدود
+- Audit و permission اختصاصی: ناقص
+- انطباق کلی با بخش رهگیری سند: حدود 25٪ تا 35٪
+
+اولویت پیشنهادی اصلاحات آینده (هیچ اصلاحی در این بررسی اعمال نشده است)
+====================================================================
+
+P0:
+1. اصلاح مدل genealogy به edgeهای مستقل با inputWeightKg واقعی هر والد و تست PostgreSQL چندوالدی.
+2. ساخت Trace Engine واقعی با traversal رو‌به‌جلو و عقب از Batch، Package، Carton، Shipment، Customer و Supplier.
+3. endpoint Recall که affected inventory/packages/cartons/shipments/customers را از Receiving/Production Batch برگرداند.
+4. افزودن integrity detection برای missing parent/cycle و Exception بحرانی.
+
+P1:
+5. object resolver واحد برای QR/code/serial و همه entry pointهای سند.
+6. timeline یکپارچه از Delivery، Movement، Transform، Cycle، QC، Packaging، Print و Shipping با snapshot اپراتور/device/machine.
+7. اتصال cross-site trace با شناسه پایدار global و manifest genealogy یا query فدره Cloud.
+8. permissionهای traceability.view/export و Audit هر جست‌وجو.
+
+P2:
+9. UI tree واقعی با branchهای merge، forward/backward toggle، contribution weight و لینک جزئیات.
+10. Supplier/Customer investigations، export recall report و فیلترهای زمانی.
+11. ایندکس‌ها/recursive CTEهای PostgreSQL، pagination/depth guard و تست performance روی genealogy بزرگ.
+
+جمع‌بندی اجرایی
+===============
+
+این پروژه «داده‌های رهگیری» زیادی جمع می‌کند، اما هنوز «سامانه رهگیری» کامل ارائه نمی‌دهد. تابع فعلی برای دیدن والدهای یک Batch مفید است، ولی برای پاسخ به شکایت مشتری، فراخوان محصول، شناسایی همه مشتریان متاثر یا بررسی کامل ماشین/اپراتور/کیفیت کافی نیست. مهم‌تر از توسعه UI، ابتدا باید صحت quantity edgeها اصلاح و موتور traversal چندموجودیتی ساخته شود؛ سپس UI بر همان graph معتبر سوار شود.

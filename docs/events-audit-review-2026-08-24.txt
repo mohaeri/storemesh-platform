@@ -1,0 +1,299 @@
+گزارش بررسی بخش «رویدادها، Audit و Outbox» StoreMesh / AnbarSYS
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ تطبیق سند با کد و تست‌های موجود روی GitHub
+
+منابع بررسی
+============
+
+این گزارش مستقیماً از refهای GitHub تهیه شده است:
+
+- سند مرجع: storemesh-platform، origin/feat/addendum-01-fix-request-07، commit 8681403
+  فایل docs/anbarsys-spec.md، به‌ویژه فصل 21، قواعد BR-AU-001 تا BR-AU-005، ساختار Audit، سناریوهای SC-AUD، هم‌زمانی، retention و الزامات Cloud/Event
+- Backend سایت: storemesh-site-server، origin/audit-fr7-v3، commit 34e209e
+- پنل وب: storemesh-web، origin/audit-fr7-web-v2، commit 1603cc6
+- Cloud: storemesh-cloud، origin/main، commit 07668b8
+- Contracts: storemesh-contracts، origin/feat/addendum-01-fix-request-07، commit 2b48758
+
+منظور از «رویدادها» در این بررسی سه لایه مرتبط است:
+
+1. Audit Event محلی سایت
+2. Outbox Event برای تحویل قابل‌اعتماد به Cloud
+3. Cloud Event پس از ingest و persistence
+
+هیچ کد، migration، داده، تنظیمات یا تستی تغییر داده یا اجرا نشد. فقط همین فایل گزارش ایجاد شد. نتیجه، ارزیابی ایستای کد و تست‌های commitشده روی GitHub است و ادعای آزمون زنده PostgreSQL/Cloud نیست.
+
+نظر نهایی
+==========
+
+زیرساخت رویدادها یکی از بخش‌های نسبتاً پخته پروژه است. هر record هم‌زمان وارد Audit و Outbox می‌شود؛ شناسه یکتا، زمان سمت سرور، user/session/device، requestId، IP، result، before/after و snapshot نقش/ایستگاه وجود دارند؛ PostgreSQL فقط رکوردهای تغییرکرده را append می‌کند؛ Cloud ingest تکراری را با event ID تشخیص می‌دهد؛ publisher retry/dead-letter و archive نیز وجود دارند.
+
+با این حال، هنوز نمی‌توان آن را «دفتر ممیزی کامل و قطعی» مطابق فصل 21 دانست. سه مشکل اصلی عبارت‌اند از:
+
+1. تعدادی از Eventها به Business Object درست متصل نمی‌شوند، مخصوصاً عملیات دارای خروجی wrapper و failureها.
+2. Cloud فقط payload داخلی را در PostgreSQL ذخیره می‌کند و context مهم Audit مثل user/session/device/request/result/before/after را پس از restart از دست می‌دهد.
+3. تغییرات Auth/Role/Skill و Audit در دو persistence جدا هستند؛ تغییر امنیتی می‌تواند commit شود ولی نوشتن Audit آن شکست بخورد.
+
+همچنین صفحه «رویدادها» صرفاً یک جدول چهارستونی بدون جست‌وجو، جزئیات، category، result و before/after است. انطباق کلی لایه ثبت محلی حدود 65٪ تا 75٪، ولی انطباق تجربه کامل Audit/Search/Cloud حدود 45٪ تا 55٪ ارزیابی می‌شود.
+
+نقاط قوت تأییدشده در GitHub
+============================
+
+1. record برای هر Event یک UUID و timestamp سمت server تولید می‌کند و schemaVersion=2 می‌گذارد.
+
+2. ساختار Event شامل site، type، entityId، sessionId، deviceId، userId، requestId، ipAddress، result، payload، beforeState، afterState، actorRoles، actorStation و occurredAt است.
+
+3. server برای هر HTTP request یک requestId را از X-Request-Id یا UUID سمت server می‌سازد و همان مقدار را در response header برمی‌گرداند.
+
+4. Audit context با AsyncLocalStorage در طول request حفظ می‌شود؛ بنابراین عملیات domain می‌توانند user/role/request/IP صحیح همان request را بدون پارامترگذاری دستی دریافت کنند.
+
+5. run قبل از mutation snapshot می‌گیرد، در موفقیت Event SUCCESS و در خطا Event FAILURE ثبت می‌کند. شکست domain نیز state عملیاتی را rollback می‌کند.
+
+6. before/after و snapshot actor roles/station در migration و repository پایدار شده‌اند. تست round12-architecture این رفتار را برای Task claim بررسی می‌کند.
+
+7. Audit و Outbox از operational snapshot جدا شده‌اند تا rollback عملیات، تاریخچه قبلی را حذف نکند.
+
+8. Audit و Outbox در همان transaction PostgreSQL مربوط به snapshot ذخیره می‌شوند. اگر save شکست بخورد، transaction rollback و state حافظه به آخرین durable state برمی‌گردد؛ API نیز پس از flush خطا دریافت می‌کند.
+
+9. persistence rejection دیگر process را crash نمی‌کند و داده نامعتبر نیز پس از failure در state باقی نمی‌ماند. تست‌های امنیتی و PostgreSQL برای این کلاس خطا وجود دارند.
+
+10. audit_events در repository با ON CONFLICT(id) DO NOTHING نوشته می‌شود و normal application هیچ endpoint ویرایش/حذف Audit ندارد.
+
+11. Outbox Publisher رویدادهای PENDING را بر اساس occurredAt مرتب، batch و به Cloud ارسال می‌کند؛ accepted و duplicate هر دو DELIVERED می‌شوند.
+
+12. Cloud site code و site key را با timingSafeEqual اعتبارسنجی می‌کند و در production کلیدهای پیش‌فرض را رد می‌کند.
+
+13. Cloud ingest site mismatch، schema نامعتبر و duplicate event ID را تشخیص می‌دهد. append PostgreSQL نیز ON CONFLICT(id) DO NOTHING دارد.
+
+14. Cloud eventها و site access log پس از restart PostgreSQL باقی می‌مانند و تست integration برای آن وجود دارد.
+
+15. Outbox بعد از تعداد مشخص failure به DEAD_LETTER می‌رود و metrics مربوط به pending/failure/dead-letter و soak checks وجود دارند.
+
+16. migration و repository برای archive تاریخچه قدیمی وجود دارد؛ انتقال Audit/Outbox به event_history_archive در یک transaction انجام می‌شود و تست PostgreSQL واقعی دارد.
+
+17. Login success/failure، badge login، session lifecycle، task، production، inventory، print، exceptions، override، configuration، role/skill و device در بخش بزرگی از مسیرها Event تولید می‌کنند.
+
+یافته‌های بحرانی
+===============
+
+C1 — Event بعضی عملیات به Business Object اشتباه متصل می‌شود
+
+run در موفقیت از result.id به‌عنوان entityId استفاده می‌کند. تعداد زیادی عملیات object اصلی را مستقیماً برنمی‌گردانند و wrapper برمی‌گردانند؛ مانند completeDelivery، sortBatch، assignSortingDestination و بعضی workflowهای چندخروجی. اگر result.id وجود نداشته باشد، record به‌جای entity واقعی UUID خود Event را به entityId می‌گذارد.
+
+در failure نیز run با entityId=null record می‌کند و record دوباره UUID خود Event را جایگزین می‌کند؛ با آنکه request.batchId/entityId یا beforeState ممکن است شیء واقعی را مشخص کرده باشد.
+
+اثر: ظاهر Event معتبر است، ولی جست‌وجوی Object History یا اتصال Audit به Batch/Delivery/Package شکست می‌خورد. اصل «Every audit event references the related business object» و BR-AU-001 نقض می‌شود.
+
+پیشنهاد آینده: هر action یک audit descriptor صریح {entityType, entityId, category} برگرداند؛ failure از request target استفاده کند؛ record برای entityId ناموجود مقدار null نگه دارد، نه UUID Audit.
+
+C2 — Cloud پس از persistence/restart context کامل Event را از دست می‌دهد
+
+Outbox رویداد کامل را به Cloud می‌فرستد و Aggregator در memory همان object کامل را نگه می‌دارد. اما PostgresEventRepository فقط این ستون‌ها را ذخیره می‌کند:
+
+id, site, event_type, entity_id, payload, schema_version, occurred_at
+
+فیلدهای top-level مانند userId، sessionId، deviceId، requestId، ipAddress، result، beforeState، afterState، actorRoles و actorStation ذخیره نمی‌شوند. پس قبل از restart Cloud ممکن است Event کامل در memory باشد، اما بعد از restart load فقط نسخه ناقص را برمی‌گرداند.
+
+اثر: Cloud که باید مرکز چندسایتی و تاریخچه بلندمدت باشد، شواهد اصلی مسئولیت‌پذیری را از دست می‌دهد. تست persistence فعلی فقط payload.value را بررسی می‌کند و این فقدان را نمی‌بیند.
+
+C3 — تغییرات امنیتی و Audit تراکنش واحد ندارند
+
+Role/Skill assignment، revoke، login session و برخی credential changes ابتدا در Auth Store ذخیره می‌شوند و سپس app.record/app.persist در repository سایت انجام می‌شود. این دو دیتابیس/transaction مستقل‌اند. اگر Auth commit موفق و Audit save ناموفق شود، permission یا session امنیتی واقعاً تغییر کرده ولی Event الزامی ثبت نشده است.
+
+این خلاف Critical Audit Failure و الزام یک transaction واحد «where practical» است؛ برای Role/Permission/Session Revocation از مهم‌ترین مسیرهای ممیزی محسوب می‌شود.
+
+پیشنهاد آینده: transactional outbox در همان Auth database transaction، یا یک unit-of-work مشترک/compensating rollback قطعی برای تغییرات امنیتی.
+
+C4 — ترتیب قطعی Eventهای هم‌زمان قابل بازسازی نیست
+
+Event فقط occurredAt دارد. transactionId و sequence number وجود ندارند. Publisher بر اساس string timestamp مرتب می‌کند و Eventهای دارای timestamp یکسان ترتیب قطعی ندارند. Clock پیش‌فرض server است، اما چند process و چند سایت clock مستقل دارند.
+
+اثر: در رقابت‌های هم‌زمان یا پاسخ‌های شبکه جابه‌جا، ترتیب execution دقیق قابل اثبات نیست؛ مغایر بخش 11.59. requestId کمک می‌کند ولی جای transaction/sequence را نمی‌گیرد.
+
+یافته‌های مهم
+==============
+
+H1 — Event Category وجود ندارد
+
+سند categoryهای Authentication، Inventory، Production، Packaging، Shipping، Labeling، Exceptions، Configuration، Administration و Security را می‌خواهد و آن‌ها را configurable می‌داند. مدل فقط type دارد؛ category در DB، API و UI نیست.
+
+H2 — entityType در Audit وجود ندارد
+
+ساختار سند Business Object Type و ID را الزام می‌کند. Audit فقط entityId دارد و نوع شیء معمولاً باید از event type یا payload حدس زده شود. این برای UUIDهایی که در چند جدول محتمل‌اند و Object History نامناسب است.
+
+H3 — reason فیلد استاندارد نیست
+
+بعضی actionها reason را داخل payload می‌گذارند و برخی اصلاً نمی‌گذارند. ستون reason و قرارداد یکنواخت وجود ندارد. Override audit نیز همیشه requestedBy/approvedBy/reason/original/new را در یک Event واحد و قابل جست‌وجو تضمین نمی‌کند.
+
+H4 — failureها بیش از حد generic ثبت می‌شوند
+
+run Event FAILURE با همان action می‌سازد، ولی خطاهای route/authorization به REQUEST_FAILED تبدیل می‌شوند. PERMISSION_DENIED، validation category، HTTP status و subject target استاندارد جدا ندارند. سند Security Eventهای مشخص می‌خواهد.
+
+H5 — Permission Denied رویداد امنیتی مشخص ندارد
+
+needs در 403 خطا می‌دهد و catch یک REQUEST_FAILED با errorCode=FORBIDDEN می‌سازد. رویداد PERMISSION_DENIED با user، requested permission، target و path وجود ندارد. فیلتر Security نیز چون category نیست ممکن نیست.
+
+H6 — Logout و Password Change کامل نیستند
+
+login و session revoke وجود دارند، اما endpoint/رویداد واضح logout و password change در مسیر اصلی دیده نمی‌شود. فهرست BR-AU-001 و 10.41 به‌طور کامل پوشش داده نشده است.
+
+H7 — هر Event الزاماً business object واقعی ندارد
+
+record برای null از ID خود Event استفاده می‌کند. برای system/security events داشتن entityId null قابل قبول‌تر از شناسه جعلی است. وضعیت فعلی رابطه‌ای را القا می‌کند که وجود خارجی ندارد.
+
+H8 — user identity به شکل text و بدون snapshot نام ذخیره می‌شود
+
+این انتخاب بقای شناسه پس از حذف user را آسان می‌کند، اما username/display name تاریخی snapshot نمی‌شود. UI نیز user را نشان نمی‌دهد. برای auditor انسانی، UUID به‌تنهایی کافی نیست.
+
+H9 — IP می‌تواند از X-Forwarded-For جعلی شود
+
+server بدون trusted proxy configuration نخستین X-Forwarded-For را می‌پذیرد. Client مستقیم می‌تواند آن را جعل کند. برای Audit امنیتی باید فقط پشت proxy مورد اعتماد این header مصرف شود، وگرنه remoteAddress مرجع باشد.
+
+H10 — requestId ورودی validate نمی‌شود
+
+X-Request-Id هر رشته‌ای را می‌پذیرد؛ طول، format و uniqueness کنترل نمی‌شود. این می‌تواند جست‌وجو و correlation را مخدوش کند. requestId unique constraint نیز ندارد.
+
+H11 — immutability در سطح DB سخت‌گیرانه enforce نشده است
+
+normal API endpoint update/delete ندارد و repository append-only رفتار می‌کند، اما trigger یا revoke permission برای جلوگیری از UPDATE/DELETE مستقیم audit_events دیده نمی‌شود. همان DB role برنامه اختیار archive/delete دارد. امنیت «در برابر normal application» خوب است، ولی defense-in-depth سند کامل نیست.
+
+H12 — Audit archive در API قابل جست‌وجو نیست
+
+archiveHistory رکوردها را از audit_events به event_history_archive منتقل می‌کند، اما GET /api/audit فقط app.state.audit فعال را برمی‌گرداند و archive table را query نمی‌کند. بعد از restart، archived history از پنل ناپدید می‌شود. سند می‌گوید archived data پس از restore/search قابل دسترسی باشد.
+
+H13 — retention با پیش‌فرض سند متفاوت است
+
+سند Version 1 را permanent logical retention با archival اختیاری می‌داند. repository به‌صورت پیش‌فرض Audit را بعد از 365 روز و Outbox را بعد از 30 روز archive می‌کند، اگر job فراخوانی شود. این حذف نیست، اما configuration UI/versioned policy و مستندات دسترسی archive وجود ندارد.
+
+H14 — Audit failure Exception بحرانی مستقل نمی‌سازد
+
+در persistence failure، API 500 و rollback رخ می‌دهد که رفتار خوبی است. اما operational exception از نوع AUDIT_STORAGE_FAILURE یا alert مدیریتی پایدار در سیستم دیگری ساخته نمی‌شود. اگر همان storage خراب باشد، ثبت در همان DB ممکن نیست و نیاز به log/metric/alert مستقل دارد.
+
+H15 — برخی Eventهای مستقیم snapshot before/after ندارند
+
+عملیاتی که خارج از run مستقیماً record می‌کنند—بخش‌هایی از session، heartbeat، print و auth/admin—اغلب beforeState/afterState کامل ندارند. بنابراین ساختار Audit یکنواخت نیست.
+
+H16 — Audit و business history کاملاً تفکیک نشده‌اند
+
+بعضی stateHistoryها در entity وجود دارند و برخی اطلاعات فقط در Audit. Object History API که این دو را به timeline واحد تبدیل کند وجود ندارد؛ auditor باید raw Event و raw entity را دستی کنار هم بگذارد.
+
+H17 — schemaVersion فقط در Cloud validate می‌شود
+
+سایت schemaVersion=2 می‌سازد، ولی migration audit_events ستون schema_version ندارد و repository آن را load/save نمی‌کند. پس بعد از restart سایت، Eventهای Audit بازسازی‌شده ممکن است schemaVersion نداشته باشند؛ Outbox مستقل payload کامل خود را دارد، اما contract versioning محلی ناقص است.
+
+H18 — Cloud Event API فقط summary دارد
+
+Cloud eventها ingest می‌شوند، اما endpoint جست‌وجو/فهرست Event، Object History، فیلتر سایت/user/type/result یا export وجود ندارد. فقط تعداد و lastSync نمایش داده می‌شود؛ ارزش ممیزی مرکزی هنوز در دسترس کاربر نیست.
+
+H19 — Dead Letter recovery ناقص است
+
+رویداد پس از maxAttempts به DEAD_LETTER می‌رود، اما endpoint/UI برای بررسی reason، retry مجدد، acknowledge یا replay پس از اصلاح schema/key وجود ندارد. Publisher نیز backoff زمانی واقعی ندارد و در هر interval دوباره تلاش می‌کند تا dead-letter شود.
+
+H20 — failure دسته‌ای می‌تواند Event سالم را هم dead-letter کند
+
+اگر پاسخ HTTP کل batch ناموفق باشد، attempts همه itemها افزایش می‌یابد. خطای موقت Cloud پس از پنج interval همه را DEAD_LETTER می‌کند. nextAttemptAt، exponential backoff و jitter وجود ندارد.
+
+یافته‌های متوسط و UI
+====================
+
+M1 — صفحه «رویدادها» فقط Type، Entity ID، Site و Time را نشان می‌دهد. User، role، device، station، requestId، IP، result، category، reason و before/after پنهان‌اند.
+
+M2 — هیچ search/filter برای date range، user، role، object، batch، shipment، session، device، event type، category یا result وجود ندارد؛ فصل 21.10 تقریباً اجرا نشده است.
+
+M3 — Event clickable نیست و صفحه جزئیات یا diff before/after وجود ندارد.
+
+M4 — UI کل audit و outbox را یکجا بارگیری می‌کند؛ pagination، cursor، server-side filter و limit وجود ندارد. بعد از هفته‌ها/ماه‌ها حجم پاسخ و DOM مشکل‌ساز می‌شود.
+
+M5 — شمارنده Outbox فقط PENDING را نشان می‌دهد؛ DEAD_LETTER، failure rate، oldest pending age و retry status نمایش داده نمی‌شوند.
+
+M6 — پنل سیستم Cloud Sync را hardcoded «Connected» نشان می‌دهد و از status واقعی publisher/dead-letter/last success استفاده نمی‌کند.
+
+M7 — OpenAPI فقط GET /api/audit و GET /api/outbox را با توضیح کلی دارد؛ query parameters، pagination، schema Event و archive/search API تعریف نشده‌اند.
+
+M8 — سطح دسترسی Audit فقط audit:read است. مدل own/department/all و traceability/export مستقل که سند پیشنهاد می‌کند وجود ندارد.
+
+M9 — UI export Audit، report امضاشده یا chain-of-custody ندارد.
+
+M10 — Event type registry یا naming contract مرکزی دیده نمی‌شود؛ نام‌ها string literalهای پراکنده‌اند و category/required metadata هر type قابل اعتبارسنجی نیست.
+
+مقایسه مستقیم با BR-AU
+======================
+
+- BR-AU-001، همه اقدامات مهم Audit شوند: بخش زیادی پوشش دارد، اما Logout/Password Change، برخی security failures و اتصال صحیح object ناقص است.
+- BR-AU-002، Audit از normal application ویرایش نشود: در API رعایت شده؛ DB trigger/role protection سخت‌گیرانه ندارد.
+- BR-AU-003، User Identity: در HTTP authenticated path رعایت خوب؛ برخی system/direct paths و Cloud persistence ناقص.
+- BR-AU-004، timestamp سمت server: رعایت شده.
+- BR-AU-005، terminal/device: برای Session-based عملیات خوب؛ بعضی admin/background/direct events SYSTEM یا token device دارند و Cloud پس از restart آن را از دست می‌دهد.
+
+ارزیابی تست‌های موجود روی GitHub
+================================
+
+تست‌های مثبت:
+
+- round12-architecture.test.js نقش/station و before/after را بررسی می‌کند.
+- postgres-repository.test.js append-only delta write و عدم rewrite کامل Audit/Outbox را کنترل می‌کند.
+- archive unit و PostgreSQL integration انتقال تاریخچه به archive را بررسی می‌کنند.
+- bootstrap PostgreSQL test ماندگاری login audit با UUID واقعی را بررسی می‌کند.
+- security-persistence.test.js rollback state پس از write failure را کنترل می‌کند.
+- outbox publisher tests accepted/duplicate/rejected/failure/dead-letter را پوشش می‌دهند.
+- Cloud ingestion tests schema/site mismatch/duplicate و عدم commit حافظه قبل از persistence موفق را بررسی می‌کنند.
+- Cloud PostgreSQL test persistence event/access log پس از restart را کنترل می‌کند.
+- soak-runner رشد Audit/Outbox و dead-letter را پایش می‌کند.
+
+شکاف‌های تست:
+
+- تستی برای wrapper result و اتصال Event به entity واقعی وجود ندارد.
+- تست failure event برای حفظ target entityId وجود ندارد.
+- تست Cloud restart همه فیلدهای user/session/device/request/result/before/after را بررسی نمی‌کند؛ فقط payload ساده را می‌سنجد.
+- تست atomicity بین Auth Store change و Audit repository failure وجود ندارد.
+- تست PERMISSION_DENIED security event با requested permission/target وجود ندارد.
+- تست immutability در DB با UPDATE/DELETE توسط application role وجود ندارد.
+- تست جست‌وجوی archive از API/UI وجود ندارد.
+- تست sequence/transaction ordering برای رویدادهای هم‌زمان وجود ندارد.
+- تست X-Forwarded-For spoofing یا trusted proxy وجود ندارد.
+- تست search/filter/pagination/object history وجود ندارد چون قابلیت‌ها پیاده نشده‌اند.
+- تست replay دستی dead-letter و exponential backoff وجود ندارد.
+
+ارزیابی انطباق تقریبی
+=====================
+
+- ثبت خودکار Event محلی: خوب
+- user/request/IP/result/device/role snapshot: خوب در سایت
+- before/after: متوسط رو به خوب، ولی غیر یکنواخت
+- اتصال Event به Business Object: متوسط رو به ضعیف
+- immutability API: خوب؛ DB defense-in-depth متوسط
+- Audit failure rollback برای domain: خوب
+- atomicity تغییرات Auth با Audit: ضعیف
+- Outbox delivery و deduplication: متوسط رو به خوب
+- Cloud persistence کامل Event: ضعیف و دارای فقدان داده
+- ordering/concurrency evidence: ضعیف
+- retention/archive storage: خوب؛ search archive ضعیف
+- Audit Search/Object History/UI: بسیار ضعیف
+- security event categorization: ضعیف
+- انطباق لایه ثبت محلی: حدود 65٪ تا 75٪
+- انطباق کل تجربه Events/Audit/Cloud: حدود 45٪ تا 55٪
+
+اولویت پیشنهادی اصلاحات آینده (هیچ اصلاحی در این بررسی اعمال نشده است)
+====================================================================
+
+P0:
+1. descriptor اجباری entityType/entityId/category برای هر action و اصلاح wrapper/failure events.
+2. ذخیره کامل envelope Event در Cloud PostgreSQL و تست restart همه فیلدها.
+3. transactional outbox برای Auth/Role/Permission/Session Security changes.
+4. transactionId و sequence monotonic برای بازسازی ترتیب هم‌زمان.
+
+P1:
+5. Event Type registry با metadata اجباری، category و reason schema.
+6. Security events صریح مانند PERMISSION_DENIED، LOGOUT، PASSWORD_CHANGED و ACCOUNT_LOCKED.
+7. Audit DB role/trigger append-only و تست UPDATE/DELETE ممنوع.
+8. archive-aware Audit Search و Object History API با pagination/filter.
+9. dead-letter console، replay و exponential backoff/jitter.
+
+P2:
+10. UI جزئیات Event و diff before/after، فیلترهای سند و export.
+11. permission scope برای own/department/all و ثبت Audit دسترسی‌های حساس.
+12. alert مستقل برای Audit storage failure و metrics کامل oldest pending/dead-letter.
+
+جمع‌بندی اجرایی
+===============
+
+معماری کلی «Audit + Transactional-style Outbox + Cloud Deduplication» جهت درستی دارد و نسبت به یک log ساده بسیار جلوتر است. مشکل فعلی بیشتر کیفیت و تمامیت evidence است تا نبود کامل زیرساخت. تا وقتی Eventها همیشه به شیء واقعی وصل نشوند، Cloud envelope کامل را نگه ندارد و تغییر امنیتی بدون Audit ممکن باشد، این بخش برای ممیزی قانونی قطعی کافی نیست. پس از رفع چهار مورد P0، توسعه Search/UI ارزش واقعی داده‌های ثبت‌شده را برای مدیر و auditor قابل استفاده می‌کند.

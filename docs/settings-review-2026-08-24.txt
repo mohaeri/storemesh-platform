@@ -1,0 +1,184 @@
+گزارش بررسی دو بخش تنظیمات AnbarSYS / StoreMesh
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ بدون تغییر کد، تنظیمات، تست یا داده عملیاتی
+
+مبنای نسخه GitHub
+=================
+پیش از بررسی، repositoryهای مرتبط با git fetch --prune تازه‌سازی شدند. گزارش مستقیماً براساس فایل‌های commitشده در refهای زیر در GitHub تهیه شده است:
+
+- storemesh-platform: origin/feat/addendum-01-fix-request-07 @ 8681403
+- storemesh-site-server: origin/audit-fr7-v3 @ 34e209e
+- storemesh-web: origin/audit-fr7-web-v2 @ 1603cc6
+- storemesh-pda: origin/feat/operations-completion-round-3 @ 52a459f
+- storemesh-terminal: origin/feat/operations-completion-round-3 @ abbe707
+- storemesh-contracts: origin/feat/addendum-01-fix-request-07 @ 2b48758
+
+این شاخه‌ها جدیدتر از origin/main هستند؛ بنابراین ارزیابی مربوط به آخرین کد منتشرشده روی GitHub است، نه main قدیمی. مبنای قضاوت محتوای خود refهای ریموت است.
+
+دو بخش موجود در UI
+==================
+1. «داده‌های پایه» با route=master-data: محصولات، تأمین‌کنندگان، گریدها، اندازه‌ها، زون‌ها و انواع بسته؛ ایجاد، تغییر نام و فعال/غیرفعال‌سازی.
+2. «تنظیمات» با route=config: ساخت یک Configuration Version با scope آزاد و values به‌شکل JSON، سپس چرخه DRAFT→APPROVED→ACTIVE و RETIREDشدن نسخه فعال قبلی.
+
+این تفکیک از نظر معماری ذاتاً اشتباه نیست. سند نیز Master Data و versioned operational parameters را دو نوع متفاوت از Configuration می‌داند: رکوردهای مرجع معمولاً مستقیم فعال/غیرفعال می‌شوند، درحالی‌که قواعد حساس می‌توانند نسخه و approval داشته باشند. مشکل اصلی تعدد دو صفحه نیست؛ مشکل این است که این صفحات یک مرکز تنظیمات منسجم با category، schema، dependency، preview و اثر عملیاتی روشن تشکیل نمی‌دهند.
+
+دامنه بررسی
+===========
+فصل 22 Configuration Workflow، بخش‌های Master Data و Configuration Module، قواعد BR-MD-* و BR-CF-001..006، permissions، validation، activation/deactivation، versioning، historical references، dependencies، effective dates، audit، PostgreSQL، UI، قرارداد API، اثر واقعی تنظیمات بر عملیات و تست‌ها بررسی شدند. کاربران/نقش‌ها، دستگاه‌ها، QC checklist، consumables و سایر داده‌های تنظیمی نیز از جهت پراکندگی مدیریت در UI لحاظ شدند.
+
+جمع‌بندی مدیریتی
+================
+هسته فنی قابل دفاع است: Master Data کد یکتا و immutable، نام قابل ویرایش، وضعیت ACTIVE/INACTIVE، FKهای واقعی و ارجاع تاریخی دارد. Configuration Version نیز sequence، status، JSON value، creator/updater، چرخه approval مستقل، تنها یک نسخه ACTIVE در هر scope، retirement نسخه قبلی، audit و persistence دارد. سازنده نمی‌تواند نسخه خودش را approve کند و DB نیز race فعال‌سازی دو نسخه را با unique partial index مهار می‌کند.
+
+اما صفحه تنظیمات نسخه‌ای در وضعیت فعلی بیشتر یک «ویرایشگر JSON بدون قرارداد» است تا Configuration Module. Backend هیچ فهرست scope مجاز، schema، required field، dependency یا semantic validation ندارد. مهم‌تر اینکه approver در UI اصلاً values یا diff نسخه را نمی‌بیند و فقط scope/version/creator را می‌بیند؛ بنابراین four-eyes روی محتوای واقعی انجام نمی‌شود. بسیاری از پارامترهای سند همچنان hardcoded یا environment-based هستند و بعضی تنظیمات فقط در UI مصرف می‌شوند، نه backend.
+
+نظر نهایی: Master Data برای پایلوت نسبتاً قابل استفاده است؛ Configuration Versioning از نظر persistence و state machine پایه خوبی دارد، اما برای مدیریت امن و واقعی رفتار کارخانه هنوز آماده نیست. تأیید کور، JSON بدون schema و غیرauthoritative بودن تنظیمات سه مانع اصلی‌اند.
+
+نقاط مثبت تأییدشده
+===================
+1. Master Data از داده عملیاتی جدا و در جداول normalized سایت نگه‌داری می‌شود.
+2. شش catalog اصلی Products، Suppliers، Grades، Sizes، Zones و Package Types API و UI دارند.
+3. code در هر type/site یکتا و پس از ایجاد immutable است.
+4. حذف فیزیکی endpoint ندارد و الگوی ACTIVE/INACTIVE رعایت شده است.
+5. reference() فقط رکورد ACTIVE را برای عملیات جدید می‌پذیرد.
+6. Batch و Container و Package شناسه FK مرجع را در PostgreSQL نگه می‌دارند و DB trigger مرجع فعال را کنترل می‌کند.
+7. Grades و Sizes می‌توانند به productCodes معتبر محدود شوند و backend این ارجاع را هنگام create/update بررسی می‌کند.
+8. تغییر نام/status Master Data و ایجاد رکورد جدید idempotent و auditشده است.
+9. UI برای کاربر فاقد master-data:write صفحه داده‌های پایه را read-only می‌کند.
+10. Configuration Version دارای scope، sequence، status، values، createdBy/updatedBy و timestamp است.
+11. sequence درون هر scope افزایشی است و overwrite values نسخه تاریخی endpoint ندارد.
+12. چرخه DRAFT→APPROVED→ACTIVE صریح است و نسخه ACTIVE قبلی همان scope به RETIRED می‌رود.
+13. SELF_APPROVAL_FORBIDDEN مانع approve توسط creator می‌شود.
+14. هویت creator/approver در HTTP از JWT گرفته می‌شود و فیلد spoofشده client نادیده گرفته می‌شود.
+15. DB با unique index جزئی فقط یک ACTIVE configuration در هر site/scope را اجازه می‌دهد.
+16. optimistic site version تعارض هم‌زمان persistence را تشخیص می‌دهد.
+17. Configuration و Master Data در PostgreSQL ذخیره و پس از load بازسازی می‌شوند.
+18. رویدادهای MASTER_DATA_CREATED/UPDATED و CONFIGURATION_DRAFTED/APPROVED/ACTIVE audit عمومی با user/request/IP/result/before/after دارند.
+19. برخی تراکنش‌ها configVersionId نسخه فعال زمان ایجاد را snapshot می‌کنند: Receiving/Production/Sorting batches، Cycles و Packages.
+20. PACKAGING configuration در checkpoint variance و به‌عنوان fallback weight tolerance استفاده می‌شود.
+21. STATION_MACHINES فعال در UI برای انتخاب ماشین ثابت cycle خوانده می‌شود و ورود دستی ماشین در فرم حذف شده است.
+22. تست واحد four-eyes، retirement و sequence و تست Master Data برای duplicate/inactive/immutable code وجود دارد.
+
+مغایرت‌ها و ریسک‌های اصلی
+=========================
+
+[بحرانی] 1. تأیید نسخه در UI کورکورانه است
+جدول Configuration فقط scope، version، status، creator و دکمه عملیات را نشان می‌دهد. values JSON، diff با نسخه فعال، dependencyها، اثرات و حتی خلاصه مقادیر به approver نمایش داده نمی‌شوند. approver می‌تواند نسخه‌ای را APPROVE و سپس ACTIVE کند بدون اینکه بداند چه چیزی تغییر کرده است. این four-eyes واقعی نیست و برای پارامترهای تولید/وزن/ماشین ریسک مستقیم عملیاتی دارد.
+
+[بحرانی] 2. Backend هیچ schema validation برای Configuration ندارد
+createConfiguration تقریباً هر scope و هر values را می‌پذیرد؛ scope خالی/دلخواه، JSON primitive، array، کلید ناشناخته، عدد منفی، type غلط و dependency نامعتبر در domain رد نمی‌شوند. UI فقط JSON.parse می‌کند که syntax را می‌سنجد، نه معنا را. بعضی ورودی‌های خراب تازه در PostgreSQL شکست می‌خورند و بقیه به‌عنوان نسخه ACTIVE بی‌اثر یا خطرناک ذخیره می‌شوند. این برخلاف 22.8 و اصل «Invalid configurations cannot be saved» است.
+
+[بحرانی] 3. تنظیمات منبع حقیقت قطعی عملیات نیستند
+بخش بزرگی از رفتار هنوز hardcoded، env-based یا client-controlled است. SESSION_IDLE_TIMEOUT_MS و DEVICE_OFFLINE_AFTER_MS از env می‌آیند؛ task priorityها و statusها در کدند؛ zone gates، process definitions، numbering و label behavior hardcoded هستند؛ Receiving variance می‌تواند از request بیاید؛ Packaging target/tolerance را client می‌تواند بفرستد؛ Fresh Export weights hardcoded/default client-side هستند. بنابراین فعال‌سازی Configuration الزاماً رفتار سیستم را کنترل نمی‌کند.
+
+[بحرانی] 4. STATION_MACHINES فقط در UI enforce می‌شود
+پنل وب machineId را از Configuration فعال می‌گیرد، اما backend createCycle هنوز machineId دلخواه request را می‌پذیرد و آن را با STATION_MACHINES یا Device Registry تطبیق نمی‌دهد. هر client مستقیم می‌تواند ماشین دیگری ثبت کند. Configuration امنیت/صحت backend را تعیین نمی‌کند و دورزدنی است.
+
+[بالا] 5. scopeها آزاد، نامنسجم و فاقد catalog هستند
+Backend از scopeهای RECEIVING، PRODUCTION، SORTING، FREEZE، FREEZE_DRY، DRY و PACKAGING برای configVersionId استفاده می‌کند؛ UI از STATION_MACHINES نمونه دارد و کاربر هر متن دیگری می‌تواند وارد کند. hierarchy/category، نام نمایشی، owner، schemaVersion و scope registry وجود ندارد. typo مثل PACKGAING یک خط تنظیمات مستقل و کاملاً بی‌اثر می‌سازد که حتی می‌تواند approve/active شود.
+
+[بالا] 6. MANAGER به‌طور پیش‌فرض دسترسی کامل create و approve تنظیمات دارد
+نقش built-in MANAGER هم config:write و هم config:approve و master-data:write دارد. سند تصریح می‌کند Manager نباید خودکار unrestricted system configuration access داشته باشد و permissionها باید قابل تفکیک باشند. self-approval یک فرد را محدود می‌کند، اما دو Manager عادی می‌توانند هر System setting را بدون نقش تخصصی Configuration Administrator فعال کنند.
+
+[بالا] 7. صفحه Config permission-aware نیست
+route=config برای همه کاربران دارای inventory:read بارگیری می‌شود؛ GET /api/configurations نیز فقط inventory:read می‌خواهد. فرم Draft و دکمه‌های approve/activate بدون can(config:write/config:approve) نمایش داده می‌شوند و کاربر تازه پس از کلیک 403 می‌گیرد. علاوه بر UX غلط، تمام values تنظیمات برای هر Operator قابل خواندن‌اند؛ اگر بعداً endpointها شامل network/printer/integration details شوند، این دسترسی بیش از حد خواهد بود.
+
+[بالا] 8. Deactivation وابستگی‌های جاری را کنترل نمی‌کند
+updateReference اجازه می‌دهد Product، Zone، Package Type، Supplier، Grade یا Size فعال بدون بررسی استفاده جاری غیرفعال شود. برای نمونه غیرفعال‌کردن RECEIVING یا PACKAGING می‌تواند عملیات سایت را فوراً متوقف کند؛ غیرفعال‌کردن Product دارای Grade/Size فعال dependency ناسازگار می‌سازد. تاریخچه حذف نمی‌شود که خوب است، اما impact analysis، warning، replacement و «in-use» validation فصل 22 وجود ندارد.
+
+[بالا] 9. Association گرید/اندازه در UI قابل ویرایش نیست
+Backend updateReference تغییر productCodes را پشتیبانی می‌کند، اما فرم inline UI فقط name را ارسال می‌کند. productCodes فقط هنگام ایجاد از یک رشته comma-separated گرفته می‌شود و بعداً نه نمایش داده می‌شود و نه قابل اصلاح است. بنابراین یکی از dependencyهای مهم Master Data در UI عملاً یک‌بارمصرف است.
+
+[بالا] 10. تنظیمات حساس business-friendly نیستند
+کاربر باید scope و JSON خام بنویسد. هیچ form اختصاصی برای machine assignment، tolerance، timeout، numbering، label template یا thresholds، type-safe control، واحد، توضیح، default، min/max و help text وجود ندارد. این با هدف اصلی سند یعنی کاهش وابستگی به برنامه‌نویس ناسازگار است؛ مدیر برای استفاده درست باید نام کلیدهای داخلی کد را بداند.
+
+[بالا] 11. چرخه نسخه ناقص است
+Draft قابل edit، reject، withdraw، clone، compare، schedule، rollback یا deactivate نیست. APPROVED فقط می‌تواند ACTIVE شود و ACTIVE فقط هنگام فعال‌شدن نسخه بعدی RETIRED می‌شود. اگر نسخه اشتباه فعال شود، راه امن «activate previous as new version» در UI وجود ندارد و کاربر باید JSON را دستی دوباره بسازد.
+
+[بالا] 12. همه عملیات config context تاریخی ندارند
+برخی Batch/Cycle/Packageها configVersionId دارند، اما Session، Task، QC، Print/Label، Shipment، Consumable، Device و بسیاری movementها نسخه/مقادیر مؤثر را snapshot نمی‌کنند. حتی Batch فقط یک configVersionId عمومی دارد و اگر چند scope هم‌زمان مؤثر باشند معلوم نیست کدام مجموعه قواعد به آن اعمال شده است. BR-CF-003 فقط بخشی پوشش داده شده است.
+
+[بالا] 13. Machine configuration به entity معتبر وابسته نیست
+STATION_MACHINES values صرفاً map رشته‌ای است؛ machine/device باید موجود، ACTIVE، از type مناسب و assignedStation مرتبط باشد، اما هنگام Draft/Approve/Activate dependency validation ندارد. بازنشسته‌کردن Device نیز configهای فعال اشاره‌کننده را بررسی نمی‌کند.
+
+[متوسط رو به بالا] 14. Master Data update نام خالی را می‌پذیرد
+createReference نام خالی را رد می‌کند، ولی updateReference اگر name ارسال شود فقط trim می‌کند و نتیجه خالی را validate نمی‌کند. UI required مانع معمول است، اما API مستقیم می‌تواند نام نمایشی خالی ذخیره کند. Naming convention نیز فقط pattern سمت UI برای create code است و backend هر code غیرخالی را می‌پذیرد.
+
+[متوسط رو به بالا] 15. catalogهای سند پراکنده یا غایب‌اند
+صفحه Master Data فقط شش نوع دارد. Devices در System، Roles/Skills در Users، QC checklists در Quality و Consumables در صفحه جدا هستند؛ Machines، Scales به‌عنوان entity تخصصی، Warehouses/Locations/Cold Rooms، Package Sizes، Label Templates، Printer Assignments، Shipping Methods، Exception Categories، Session Types، Units، Localization و Numbering Rules UI/مدل کامل ندارند. دو صفحه تنظیمات تصویری ناقص از کل configuration surface ارائه می‌کنند.
+
+[متوسط رو به بالا] 16. Package Type فقط code/name/status است
+Package size، ظرفیت carton، target weight، tolerance، allowed product/grade، label template و BOM مصرفی dependency ندارد. این همان نمونه اصلی فصل 22 است، اما در عمل operator target/tolerance را وارد می‌کند و Package Type نقش رفتاری ندارد.
+
+[متوسط] 17. Effective date وجود ندارد
+Configuration Version فیلد effectiveFrom/effectiveTo ندارد و activation فوراً اثر می‌کند. سند این قابلیت را برای Version 1 اختیاری دانسته، پس نقص الزام قطعی نیست؛ بااین‌حال برای tolerance، شیفت، فصل خرید و تغییر ماشین کاربرد عملی بالایی دارد و نبود آن باید آگاهانه اعلام شود.
+
+[متوسط] 18. Reason و metadata تغییر ذخیره نمی‌شود
+Draft reason/business justification، category، description، ticket/reference، approver note و activation reason ندارد. Audit before/after و user/time را ثبت می‌کند، اما «چرا»ی تغییر که سند optional دانسته و برای four-eyes مهم است موجود نیست.
+
+[متوسط] 19. Search/filter/history UX وجود ندارد
+Configها و Master Data بدون فیلتر category/name/status/date/creator نمایش داده می‌شوند. inactiveها دیده می‌شوند اما در catalogهای بزرگ جست‌وجو، pagination، sort، compare و history per item وجود ندارد. values نسخه نیز در UI قابل مشاهده نیست.
+
+[متوسط] 20. Import/Export و backup تنظیمات وجود ندارد
+CSV/XLSX import/export در سند Version 1 اختیاری است، بنابراین blocker محسوب نمی‌شود؛ ولی برای راه‌اندازی سایت‌های Dubai/Rome، انتقال catalog و disaster recovery configuration ابزار رسمی وجود ندارد.
+
+[متوسط] 21. تغییرات Master Data نسخه ندارند
+Audit تغییر را نگه می‌دارد و رکورد تاریخی با همان ID باقی می‌ماند، اما revision/version مستقل برای نام/status/productCodes وجود ندارد. عملیات تاریخی معمولاً code/ID را snapshot می‌کنند، ولی نمایش سابقه اگر نام فعلی join شود می‌تواند معنای قدیمی را عوض کند. سند برای همه Master Data الزام version row صریح ندارد، اما «previous/new immutable history» بهتر است قابل query باشد.
+
+[متوسط] 22. activation validation مجدد ندارد
+نسخه در زمان approve/activate دوباره validate نمی‌شود، dependencyهای تغییرکرده میان Draft و Activation بررسی نمی‌شوند و readiness check وجود ندارد. چون اصل create نیز schema ندارد، ACTIVE شدن صرفاً یک transition status است.
+
+[متوسط] 23. داده‌های پایه بلافاصله ACTIVE می‌شوند
+این رفتار با مثال «new grade immediately available» در سند قابل قبول است، اما برای Zone/Package Type حساس هیچ approval اختیاری، effective date یا impact preview نیست. یک permission واحد master-data:write همه catalogها را پوشش می‌دهد و scoped stewardship (مثلاً QC grades در برابر warehouse zones) وجود ندارد.
+
+[متوسط] 24. قرارداد OpenAPI برای Configuration/Master Data کامل نیست
+routeها عمدتاً فهرست شده‌اند، اما schema per scope، lifecycle transitions، allowed values، dependency errors، permissionها، BR-CF mapping و concurrency contract مستند نشده است. یک admin client مستقل نمی‌تواند فرم معتبر را از قرارداد بسازد.
+
+[متوسط] 25. پوشش تست واقعی محدود است
+تست configuration-overrides چرخه مستقل approval/retirement را در حافظه می‌سنجد؛ master-data tests duplicate/inactive/immutable code را domain-level می‌سنجند؛ privilege test هویت JWT را روی HTTP بررسی می‌کند. اما تست PostgreSQL واقعی create→approve توسط کاربر دوم→activate→restart/reload→عملیات با config فعال وجود ندارد. schema rejection، blank name، dependency deactivation، active race، UI diff/values، machine bypass و historical config context چندscope‌ای نیز تست نشده‌اند.
+
+ارزیابی هر صفحه
+================
+
+صفحه «داده‌های پایه»
+--------------------
+برای ایجاد و نگهداری ساده شش catalog اصلی قابل استفاده است. read-only role gating، عدم حذف و active/inactive مناسب‌اند. اما dependency management، ویرایش product mappings، catalogهای کامل، search/import و impact analysis ناقص است. حکم: «قابل قبول برای پایلوت با مدیر آموزش‌دیده».
+
+صفحه «تنظیمات»
+----------------
+state machine و persistence خوب‌اند، اما UI مقادیر را به approver نشان نمی‌دهد، JSON schema ندارد و اثر backend بسیاری از scopeها واقعی نیست. حکم: «زیرساخت نسخه‌بندی اولیه، نه یک Configuration Module آماده بهره‌برداری».
+
+آیا دو بخش باید یکی شوند؟
+=========================
+از نظر داده و backend بهتر است جدا بمانند: Master Data lifecycle با Configuration Version lifecycle یکسان نیست. در UI بهتر است زیر یک ورودی والد «تنظیمات و داده‌های پایه» با دسته‌بندی روشن قرار گیرند:
+
+- داده‌های پایه
+- قواعد و پارامترهای نسخه‌دار
+- تجهیزات و ایستگاه‌ها
+- کاربران، نقش‌ها و مهارت‌ها
+- قالب‌های چاپ
+- گردش‌های QC/Exception/Task
+- تاریخچه و انتشار تغییرات
+
+بنابراین پیشنهاد مفهومی «ادغام دیتابیس/مدل» نیست؛ «یکپارچه‌کردن تجربه مدیریت، ناوبری و ownership» است.
+
+نظر نهایی و اولویت پیشنهادی
+==========================
+ترتیب منطقی رسیدگی در آینده:
+
+1. تعریف Scope Registry و JSON Schema/semantic validator برای هر scope؛ رد scope و کلید ناشناخته.
+2. نمایش کامل values، diff، validation result، dependency و اثر نسخه به approver پیش از approve/activate.
+3. enforce کردن تنظیم فعال در backend و حذف مقادیر hardcoded/client-controlled برای ماشین، وزن، timeout و قواعد اصلی.
+4. جداسازی config permissions و حذف دسترسی unrestricted پیش‌فرض MANAGER؛ gate صحیح GET/forms/actions.
+5. dependency/impact validation برای Master Data deactivation و Configuration activation.
+6. فرم‌های typed و business-friendly به‌جای JSON خام، با package/label/machine/timeout/numbering models واقعی.
+7. تکمیل Draft edit/reject/clone/rollback و ثبت reason/notes؛ effective date برای scopeهای ارزشمند.
+8. یکپارچه‌کردن navigation همه تنظیمات زیر یک Admin Configuration Hub، بدون یکی‌کردن مدل داده آنها.
+9. افزودن search/history/import-export و historical context چندscope‌ای.
+10. تست کامل دوکاربره HTTP+PostgreSQL با restart و اثبات اثر config فعال در domain، نه فقط تغییر status.
+
+حکم نهایی: صفحه داده‌های پایه پایه مناسبی دارد، اما صفحه نسخه‌های تنظیمات هنوز برای تصمیم مدیریتی امن نیست. تا زمانی که approver مقادیر و diff را نبیند، schema validation وجود نداشته باشد و backend تنظیم فعال را منبع حقیقت نداند، این دو بخش با هدف فصل 22—تغییر امن رفتار کسب‌وکار بدون توسعه نرم‌افزار—انطباق کامل ندارند.
+
+یادداشت روش بررسی
+=================
+در این نوبت هیچ فایل کد، migration، تست، تنظیم یا داده عملیاتی تغییر نکرد. تست جدیدی نوشته یا اجرا نشد. تنها فایل ایجادشده همین گزارش است و همه نتیجه‌ها از بررسی مستقیم refهای GitHub بالا و تطبیق آنها با سند مرجع به دست آمده‌اند.

@@ -1,0 +1,146 @@
+گزارش بررسی بخش صادرات تازه AnbarSYS / StoreMesh
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ بدون تغییر کد، تنظیمات، تست یا داده عملیاتی
+
+مبنای نسخه GitHub
+=================
+پیش از بررسی، repositoryهای مرتبط با git fetch --prune تازه‌سازی شدند. این گزارش مستقیماً براساس فایل‌های commitشده در refهای زیر در GitHub تهیه شده است:
+
+- storemesh-platform: origin/feat/addendum-01-fix-request-07 @ 8681403
+- storemesh-site-server: origin/audit-fr7-v3 @ 34e209e
+- storemesh-web: origin/audit-fr7-web-v2 @ 1603cc6
+- storemesh-pda: origin/feat/operations-completion-round-3 @ 52a459f
+- storemesh-terminal: origin/feat/operations-completion-round-3 @ abbe707
+- storemesh-contracts: origin/feat/addendum-01-fix-request-07 @ 2b48758
+
+این شاخه‌ها جدیدتر از origin/main هستند؛ بنابراین مبنای بررسی آخرین کد منتشرشده روی GitHub است، نه main قدیمی. ورک‌تری‌های محلی با refهای متناظر ریموت یکسان بودند و نتیجه از روی محتوای origin استخراج شده است.
+
+دامنه بررسی
+===========
+فصل 7 Fresh Export و Addendum 01 با مدل دامنه، API، PostgreSQL، مجوزها، پنل وب، PDA/Terminal، چاپ، اقلام مصرفی، Shipment و تست‌ها تطبیق داده شدند. ارسال عمومی فقط در حد اتصال Fresh Shipping Box به Shipment بررسی شد.
+
+جمع‌بندی مدیریتی
+================
+بخش صادرات تازه در حال حاضر «یک زیرجریان بسته‌بندی اولیه قابل استفاده» دارد، نه یک گردش کامل صادرات تازه. ساخت Net Lot، کاهش صحیح باقیمانده Batch، ساخت EPS Box، مخلوط‌کردن چند Lot در backend، مصرف EPS/GEL و ماندگاری PostgreSQL واقعاً پیاده شده‌اند. اما زنجیره پس از ساخت جعبه قطع می‌شود: Fresh Shipping Box را نمی‌توان به Shipment اختصاص داد، cold holding ندارد، وضعیت چاپ به وضعیت جعبه متصل نیست و اسناد صادراتی نیز وجود ندارند.
+
+علاوه بر این، شروع عملیات از Basket Scan که سند الزام می‌کند در API و UI پیاده نشده است. یک نقص یکپارچگی نیز در تخصیص تکراری یک Net Lot داخل همان Box وجود دارد که می‌تواند remaining_count را منفی کند و اولین مانع واقعی آن CHECK پایگاه داده باشد.
+
+بر این اساس، این ماژول برای دموی Net/Box و تست موجودی اقلام مصرفی مناسب است، ولی برای عملیات واقعی Fresh Export هنوز آماده نیست.
+
+نقاط مثبت تأییدشده
+===================
+1. نقش مستقل FRESH_EXPORT_OPERATOR و permission مستقل fresh-export:write وجود دارد.
+2. UI برای عملیات Fresh Export یک session اختصاصی با station و selectedRole مناسب باز می‌کند.
+3. backend نیز selectedRole نشست را کنترل می‌کند و صرف داشتن JWT permission را کافی نمی‌داند.
+4. فقط Batch با status=SORTED و destination=FRESH_EXPORT می‌تواند وارد Net Lot شود.
+5. Netها هویت/QR مستقل ندارند و به‌صورت Lot شامل unitWeight، count و totalWeight ثبت می‌شوند؛ این با سند و Addendum منطبق است.
+6. وزن کل Lot از unitWeight × count محاسبه می‌شود و از وزن موجود Batch بیشتر نمی‌تواند باشد.
+7. بسته‌بندی جزئی فقط مقدار مصرف‌شده را از Batch کم می‌کند و remainder روی همان Batch باقی می‌ماند.
+8. Fresh Shipping Box هویت و QR مستقل دارد و items آن batchId، netLotId، count و weight را نگه می‌دارند.
+9. backend می‌تواند یک Box را از چند Net Lot و در نتیجه چند Batch/grade/size بسازد.
+10. موجودی EPS_BOX و GEL_PACK هنگام ساخت جعبه به‌صورت تراکنشی مصرف می‌شود و کمبود موجودی عملیات را رد می‌کند.
+11. عبور از reorder threshold یک Exception پایدار ایجاد می‌کند و برای یک قلم، Exception باز تکراری نمی‌سازد.
+12. Receipt و Transaction اقلام مصرفی جداگانه ثبت می‌شوند و balance پس از هر تراکنش نگه داشته می‌شود.
+13. Net Lots، Shipping Boxes، اقلام مصرفی، receipts و transactions در جداول واقعی PostgreSQL ذخیره و reload می‌شوند.
+14. Idempotency عمومی دامنه و rollback خطا برای این عملیات نیز اعمال می‌شود.
+15. یک تست PostgreSQL واقعی برای ماندگاری remainder، Net Lot، Shipping Box و موجودی EPS/GEL وجود دارد.
+16. ایجاد Box یک print job از نوع FRESH_SHIPPING_BOX می‌سازد و زیرساخت عمومی شکست چاپ، Exception، ثبت attempt و reprint اسکن‌شده را دارد.
+
+مغایرت‌ها و ریسک‌های اصلی
+=========================
+
+[بحرانی] 1. Fresh Shipping Box به Shipment متصل نمی‌شود
+سند ادامه گردش را «Cold Holding → Shipment Assignment → Dispatch» تعریف می‌کند. createShipment فقط رکوردهای packages با level/type=CARTON را می‌پذیرد و fresh_shipping_boxes در packages نیست. Shipping Box نه shipmentId دارد، نه endpoint تخصیص به Shipment و نه در scan/load/ship state machine ارسال شرکت می‌کند. بنابراین محصول تازه پس از ساخت EPS Box عملاً به ارسال مشتری یا انتقال بین سایت‌ها نمی‌رسد.
+
+[بحرانی] 2. Basket Scan و اعتبارسنجی فیزیکی قبل از Fresh Export وجود ندارد
+سند 7.5 وجود، مقصد، availability، lock و active-session basket را الزام می‌کند. createFreshNetLot فقط batchId می‌گیرد و اصلاً containerId/basketId ندارد. UI نیز Batch را از dropdown انتخاب می‌کند، نه اسکن Basket. در نتیجه عملیات روی Batch مقصد Fresh Export حتی بدون Basket فیزیکی معتبر یا با ظرف قفل‌شده/متعلق به نشست دیگر قابل اجراست.
+
+[بحرانی] 3. تخصیص تکراری یک Net Lot می‌تواند مانده Lot را منفی کند
+createShippingBox ابتدا همه allocationها را جداگانه نسبت به remainingCount اولیه اعتبارسنجی می‌کند و بعد آنها را کم می‌کند. اگر یک netLotId در همان درخواست دو بار تکرار شود، هر ردیف ممکن است جداگانه معتبر باشد ولی مجموع آنها از مانده بیشتر شود. کد duplicate lot را تجمیع یا رد نمی‌کند؛ در نتیجه remainingCount می‌تواند منفی شود و تازه CHECK پایگاه داده آن را رد کند. این خلاف اصل جلوگیری در domain و یک ریسک دسترس‌پذیری/یکپارچگی است.
+
+[بحرانی] 4. جعبه قبل از موفقیت چاپ READY_TO_SHIP می‌شود
+Shipping Box هنگام ساخت مستقیماً status=READY_TO_SHIP می‌گیرد و سپس print job ساخته می‌شود. موفقیت یا شکست چاپ وضعیت Box را تغییر نمی‌دهد. اگر چاپ fail شود، Exception عمومی ایجاد می‌شود ولی جعبه همچنان READY_TO_SHIP باقی می‌ماند؛ در حالی که سند Pending Label و ممنوعیت ادامه تا چاپ/الصاق صحیح را می‌خواهد.
+
+[بالا] 5. Cold Holding و مکان فیزیکی جعبه وجود ندارد
+fresh_shipping_boxes فیلد location/zone، movedAt، holdingAt یا movement history ندارند. endpoint انتقال به export cold room و ثبت operator/time نیز وجود ندارد. وضعیت READY_TO_SHIP همان لحظه ایجاد می‌شود، نه پس از انتقال تأییدشده به سردخانه صادرات.
+
+[بالا] 6. چاپ لیبل محتوای مستند را تولید نمی‌کند
+queuePrint برای Fresh Shipping Box فقط identity/code را در payload می‌گذارد. Shipment number، destination، total weight و number of nets که سند برای لیبل جعبه ذکر می‌کند در payload لیبل نیستند. از آنجا که Box هنوز Shipment ندارد، دو مورد اول اصولاً قابل تولید نیستند.
+
+[بالا] 7. وزن رسمی Shipping Box ثبت نمی‌شود
+سند وزن رسمی را هنگام Shipping Box preparation می‌خواهد. پیاده‌سازی وزن Box را از مجموع unitWeight×count استنتاج می‌کند و فیلد measured gross/net weight، scale reading، measurement ID یا device evidence ندارد. UI نیز هیچ توزین جعبه‌ای انجام نمی‌دهد.
+
+[بالا] 8. اندازه Net واقعاً قابل تنظیم نیست و از client قابل دورزدن است
+backend به input.allowedWeightsKg اعتماد می‌کند؛ client می‌تواند لیست دلخواه ارسال کند و هر unitWeight را مجاز جلوه دهد. در مقابل، UI پنج مقدار hardcoded دارد. نسخه فعال configuration/master data برای Net size خوانده نمی‌شود. بنابراین هم «قابل مدیریت توسط مدیر» ناقص است و هم اعتبارسنجی backend قابل دورزدن است.
+
+[بالا] 9. اختلاط remainder برای ساخت Net کامل پیاده نشده است
+سند اجازه می‌دهد باقی‌مانده سازگار یک Batch با محصول آینده ترکیب شود و genealogy همه contributors حفظ گردد. هر Fresh Net Lot فعلی دقیقاً یک batchId دارد و createFreshNetLot فقط از یک Batch کم می‌کند. Box می‌تواند Net Lotهای مختلف را کنار هم بگذارد، اما این با ساخت یک Net از چند remainder متفاوت است. مدل contributor allocation برای Net Lot وجود ندارد.
+
+[بالا] 10. UI قابلیت mixed Shipping Box موجود در backend را در دسترس نمی‌گذارد
+backend allocations متعدد می‌پذیرد، ولی فرم وب فقط یک netLotId و یک count ارسال می‌کند. اپراتور از پنل اصلی نمی‌تواند یک EPS Box با چند Batch/grade/size بسازد؛ قابلیتی که سند آن را رفتار عادی می‌داند.
+
+[بالا] 11. Box فاقد گردش Draft/Confirm/Edit/Cancel/Damage است
+جعبه در یک call ساخته و نهایی می‌شود. امکان افزودن تدریجی محتوا، مشاهده و حذف «محصول اشتباه قبل از تأیید»، تأیید نهایی، split/merge مدیریتی، لغو یا آسیب‌دیدگی و برگشت Netها/اقلام مصرفی وجود ندارد. اشتباه اپراتور پس از create راه اصلاح رسمی ندارد.
+
+[متوسط رو به بالا] 12. ظرفیت/پرشدن Shipping Box کنترل نمی‌شود
+هیچ ظرفیت وزنی/تعدادی برای EPS Box یا validation «Box Full» وجود ندارد. اپراتور می‌تواند allocation دلخواه را در یک Box ثبت کند؛ سیستم نه هشدار شروع جعبه جدید می‌دهد و نه rule پیکربندی‌شده‌ای دارد.
+
+[متوسط رو به بالا] 13. Reprint مخصوص Fresh Box با سیاست سند کامل نیست
+زیرساخت عمومی reprint اسکن مستقل را الزام می‌کند که نکته مثبتی است؛ اما permission print:write مستقیماً به FRESH_EXPORT_OPERATOR داده شده و reprint supervisor-only نیست. temporary physical identity/position برای Box بدون لیبل نیز مدل نشده است. اسکن identity لیبل مورد انتظار، زمانی که لیبل اولیه اصلاً چاپ نشده، جای اسکن موقت خود جعبه را کامل نمی‌گیرد.
+
+[متوسط] 14. وضعیت Batch و انتقال کنترل از Basket به Box کامل نیست
+Batch فقط وقتی وزنش صفر شود FRESH_PACKED می‌شود؛ Box فوراً READY_TO_SHIP است. ارتباط «inventory now tracks box rather than original basket»، آزادسازی Basket پس از مصرف کامل و نگهداری Basket فعال در حالت remainder به‌صورت state transition صریح انجام نمی‌شود. container.batchIds و container status در createFreshNetLot به‌روزرسانی نمی‌شوند.
+
+[متوسط] 15. Task صادرات تازه با عملیات همگام نمی‌شود
+Destination assignment یک task برای FRESH_EXPORT_OPERATOR می‌سازد، اما createFreshNetLot نیازمند claim/completion آن task نیست و پس از انجام عملیات نیز task خودکار complete نمی‌شود. مسیر مستقیم از dropdown ممکن است task را باز باقی بگذارد.
+
+[متوسط] 16. Audit عملیاتی Fresh Export خودبسنده نیست
+Audit عمومی event/before/after/session/device را ثبت می‌کند، اما رکورد اختصاصی عملیات شامل Basket، start/end، Shipment، reprint/override links و measured Box weight وجود ندارد. Net Lot و Box نیز operatorId مستقیم ندارند و آن را فقط از session باید بازیابی کرد.
+
+[متوسط] 17. روابط محتویات Box در JSON بدون FK نگهداری می‌شوند
+items در fresh_shipping_boxes یک JSONB است؛ netLotId و batchIdهای داخل آن foreign key و constraint رابطه‌ای ندارند. Domain در زمان ساخت آنها را کنترل می‌کند، اما پایگاه داده به‌تنهایی referential integrity محتویات Box را تضمین نمی‌کند و گزارش‌گیری/حسابرسی دشوارتر است.
+
+[متوسط] 18. PDA و Terminal گردش Fresh Export ندارند
+PDA نقش FRESH_EXPORT_OPERATOR را حتی در role picker نمایش نمی‌دهد و فقط inventory/task/movement عمومی دارد. Terminal مخصوص Receiving است. کل گردش عملیاتی Fresh Export فعلاً فقط در پنل مدیریتی وب قرار دارد، نه ابزار عملیاتی اسکن‌محور خط تولید.
+
+[متوسط] 19. اسناد صادراتی وجود ندارند
+هدف فصل 7 شامل آماده‌سازی export documentation است، ولی Fresh Shipping Box به shipment document generation یا اسناد مقصد/محموله متصل نیست. اسناد موجود Shipment برای Cartonها طراحی شده‌اند.
+
+[متوسط] 20. پوشش تست انتها‌به‌انتها ناقص است
+تست اصلی Fresh Export وضعیت batch و destination را مستقیماً در حافظه تغییر می‌دهد و سپس Lot/Box می‌سازد. تست PostgreSQL نیز همین الگو را دارد؛ مسیر واقعی HTTP از Sorting destination → Fresh session → Basket scan → multi-lot Box → print fail/retry → cold holding → Shipment → ship → reload وجود ندارد. به‌ویژه duplicate-allocation منفی، print-state linkage و shipment integration تست نشده‌اند.
+
+ارزیابی مرحله‌ای
+===============
+
+ورود از Sorting: نقش و destination check خوب؛ Basket scan/lock/session ownership و همگامی task ناقص.
+
+Net Packing: مدل count-based و remainder درست؛ پیکربندی اندازه، توزین واقعی و mixed-remainder genealogy ناقص.
+
+EPS Box Assembly: backend از mixed lots و مصرف supplies پشتیبانی می‌کند؛ UI تک-Lot است و duplicate allocation/capacity/edit/cancel محافظت کافی ندارد.
+
+Labeling: print queue و reprint verification عمومی قوی است؛ Box state و label payload با نتیجه چاپ همگام نیستند.
+
+Cold Holding: عملاً پیاده نشده است.
+
+Shipment/Dispatch: برای Fresh Shipping Box عملاً پیاده نشده و زنجیره در این نقطه قطع می‌شود.
+
+Consumables: از قوی‌ترین قسمت‌های این ماژول است؛ receipt، transaction، balance، insufficient-stock و reorder exception دارد، ولی مدیریت status/edit و reconciliation پیشرفته محدود است.
+
+نظر نهایی و اولویت پیشنهادی
+==========================
+پیاده‌سازی فعلی proof خوبی برای مدل Net Lot، remainder و مصرف اقلام است، اما عنوان «Fresh Export Workflow کامل» برای آن زود است. مهم‌ترین اولویت‌های آینده:
+
+1. یکپارچه‌کردن Fresh Shipping Box با Shipment/scan/load/ship و اسناد.
+2. الزام Basket scan و validation کامل در createFreshNetLot.
+3. جلوگیری domain-level از duplicate/over-allocation و نهایی‌سازی تراکنشی امن Box.
+4. افزودن state machine جعبه: DRAFT/CONFIRMED/LABEL_PENDING/LABELLED/COLD_HOLDING/READY/SHIPPED/CANCELLED/DAMAGED.
+5. توزین واقعی Box و اتصال نتیجه چاپ به وضعیت آن.
+6. UI چند-Lot، ظرفیت، حذف قبل از confirm و cold-room movement.
+7. مدل contributor برای mixed remainder و پیکربندی سروری Net size.
+8. اضافه‌کردن گردش Fresh Export به PDA/ترمینال و تست PostgreSQL/HTTP کامل.
+
+حکم نهایی: Net Lot و Consumables «خوب و قابل اتکا برای پایلوت محدود» هستند؛ اما کل صادرات تازه به علت نبود Basket validation، Cold Holding و به‌خصوص Shipment integration، برای عملیات واقعی آماده نیست.
+
+یادداشت روش بررسی
+=================
+در این نوبت هیچ فایل کد، migration، تست، تنظیم یا داده عملیاتی تغییر نکرد. تست جدیدی نوشته یا اجرا نشد. تنها فایل ایجادشده همین گزارش است و همه نتیجه‌ها از بررسی مستقیم refهای GitHub ذکرشده و تطبیق آنها با سند مرجع حاصل شده‌اند.

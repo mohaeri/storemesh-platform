@@ -8278,6 +8278,9 @@ PROCESS_CONFIG WORK_ORDER<br>WOID (PK)<br>Arocess 1D (PK) ——efines _____y | 
 
 ###### **Each basket receives its own receiving batch record and inventory identity.** 
 
+**Implementation note, decided with Mohamad 2026-09-02:** this independent per-basket identity holds through Receiving itself. Once a delivery completes, the shipped system (`completeDelivery`) marks each contributing basket's batch `CONSUMED` and creates one new aggregate batch (`relationshipType:'DELIVERY_AGGREGATE'`) that becomes the record moving through the rest of the pipeline — the aggregate stores `parentIds` and `parentContributions` (exact input weight per basket), so full traceability back to each original basket is preserved, but the basket's own batch record does not itself continue moving through production as an independent unit past this point. This was evaluated against the letter of this section and explicitly accepted as the intended model, not a bug — the same genealogy-over-physical-bookkeeping approach already validated for Merge (Fix Request 41). No code change was made; this note exists so a future review of this section doesn't re-flag the same apparent contradiction.
+
+
 ## **2.18 Receiving Validation Rules** 
 
 ###### **Before completing the transaction, the system validates:** 
@@ -23902,6 +23905,9 @@ Cancellation is only permitted when no irreversible downstream activity has occu
 |CONSUMED|CLOSED|Close batch|No remaining<br>operations|
 |DRAFT|CANCELLED|Cancel|Authorized user|
 |RECEIVED|CANCELLED|Cancel|No irreversible<br>usage|
+
+**Implementation note, decided with Mohamad 2026-09-02 (see `docs/fix-requests/README.md` and the removed `needs-decision/receiving-batch-lifecycle-fidelity.md`):** the shipped system does not persist DRAFT and RECEIVING as separate, independently observable states — a batch is created directly once weighing completes, already carrying what this section calls the RECEIVED state, with no separate pre-weighing persistence step or explicit RECEIVED→AVAILABLE confirmation trigger. The one concrete gap this caused (RECEIVED→CANCELLED) was closed in FR60. Retrofitting the full DRAFT/RECEIVING/AVAILABLE state machine as literally specified above was evaluated and explicitly declined as not worth the engineering cost and risk (it would require auditing every downstream consumer of batch status). Treat the state list and transition table above as the aspirational full model, not a description of current code; this note is the record of that decision, not an instruction to build toward it.
+
 
 
 

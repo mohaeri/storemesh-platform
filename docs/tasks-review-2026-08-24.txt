@@ -1,0 +1,198 @@
+گزارش بررسی بخش «کارها» StoreMesh / AnbarSYS
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ تطبیق سند با کد و تست‌های موجود روی GitHub
+
+محدوده و منبع حقیقت
+===================
+
+این بررسی از روی refهای GitHub انجام شده است، نه بر مبنای تغییرات محلی:
+
+- سند مرجع: storemesh-platform، شاخه origin/feat/addendum-01-fix-request-07، commit 8681403
+  فایل: docs/anbarsys-spec.md، به‌ویژه فصل 20 «Task Workflow» و قواعد BR-TK-001 تا BR-TK-005
+- Backend: storemesh-site-server، شاخه origin/audit-fr7-v3، commit 34e209e
+- پنل وب: storemesh-web، شاخه origin/audit-fr7-web-v2، commit 1603cc6
+- PDA: storemesh-pda، شاخه origin/feat/operations-completion-round-3، commit 52a459f
+- Contracts: storemesh-contracts، شاخه origin/feat/addendum-01-fix-request-07، commit 2b48758
+
+هیچ کد، migration، داده، تنظیمات یا تستی تغییر داده یا اجرا نشد. فقط همین فایل گزارش ایجاد شد. نتیجه، ارزیابی ایستای کد و تست‌های commitشده روی GitHub است و ادعای آزمون زنده PostgreSQL یا UI نیست.
+
+نظر نهایی
+==========
+
+بخش کارها در وضعیت فعلی «هسته عملیاتی قابل استفاده، اما ناقص و برای بهره‌برداری کنترل‌شده ناکافی» است. ایجاد خودکار و دستی کار، eligibility مبتنی بر نقش و مهارت، وابستگی ساده، claim تک‌برنده، pause/resume/fail/reopen/complete، پیشنهاد بر اساس اولویت، واگذاری مدیر و نگه‌داری تاریخچه وجود دارد. مهارت نیز از مسیر واقعی کاربر، JWT و HTTP به claim می‌رسد؛ این قسمت ارزشمند و واقعی است.
+
+با این حال، ماژول هنوز مدیر واقعی اجرای عملیات نیست و بیشتر یک صف مستقل کنار عملیات است. خطر اصلی این است که وضعیت Task و وضعیت شیء کسب‌وکار می‌توانند از هم جدا شوند. اپراتور قادر است یک Task را COMPLETED کند، بی‌آنکه عملیات متناظر روی بچ، کانتینر، چرخه، بسته یا محموله واقعاً موفق شده باشد. همچنین تکمیل عملیات اصلی عموماً Task متناظر را خودکار تکمیل نمی‌کند. بنابراین داشبورد می‌تواند هم «کار انجام شده» را به‌اشتباه نشان دهد و هم کار انجام‌شده واقعی را همچنان باز نگه دارد. این مغایرت مستقیم با BR-TK-004 و اصل محوری فصل 20 است و تا رفع آن، Task نباید منبع قطعی وضعیت تولید تلقی شود.
+
+نقاط قوت تأییدشده در کد GitHub
+================================
+
+1. Task به‌عنوان موجودیت مستقل در state و PostgreSQL نگه‌داری می‌شود و فیلدهای پایه مانند وضعیت، اولویت، مسئول، نقش/مهارت لازم، وابستگی، زمان claim و stateHistory دارد.
+
+2. eligibility واقعی برای requiredRole، requiredSkillId و تکمیل وابستگی اعمال می‌شود. مهارت‌های کاربر از دیتابیس به JWT وارد می‌شوند و تست HTTP واقعی login → claim برای کار skill-gated وجود دارد.
+
+3. claim روی Task غیر OPEN رد می‌شود؛ در یک فرایند، دو اپراتور نمی‌توانند یک Task را هم‌زمان claim کنند. لایه run/idempotency و optimistic persistence نیز از تکرار ساده جلوگیری می‌کند.
+
+4. چرخه‌های IN_PROGRESS → PAUSED/FAILED/COMPLETED، PAUSED → IN_PROGRESS و FAILED → OPEN پیاده شده‌اند و برای pause/fail دلیل الزامی است.
+
+5. واگذاری مجدد endpoint مدیریتی با permission «override:approve» دارد و eligibility اپراتور مقصد پیش از واگذاری بررسی می‌شود.
+
+6. recommendedTask فقط از میان کارهای OPEN و مجاز انتخاب می‌کند و ابتدا اولویت بیشتر و سپس زمان ایجاد قدیمی‌تر را در نظر می‌گیرد.
+
+7. چند رخداد کسب‌وکار Task خودکار می‌سازند؛ از جمله دریافت، پایان تحویل، بعضی مراحل transform/cycle، تعیین مقصد تفکیک، QC rework و picking محموله.
+
+8. stateHistory و Audit برای تغییرات Task وجود دارد و زیرساخت عمومی Audit می‌تواند before/after و snapshot نقش/station عامل را ثبت کند.
+
+9. پنل وب و PDA هر دو صف کار و عملیات پایه claim/complete/pause/fail/resume/reopen را عرضه می‌کنند. PDA نقش عملیاتی Session را نیز هنگام بازکردن Session از اپراتور می‌گیرد.
+
+یافته‌های بحرانی
+===============
+
+C1 — تکمیل Task موفقیت عملیات واقعی را اثبات نمی‌کند
+
+transitionTask با action=COMPLETE فقط وضعیت Task را COMPLETED می‌کند. هیچ precondition یا پیوند اجرایی بررسی نمی‌کند که عملیات لازم روی entityId واقعاً با موفقیت تمام شده باشد. برای نمونه، Task انتقال به سردخانه می‌تواند تکمیل شود در حالی که بچ/ظرف هنوز در RECEIVING است، یا Task بسته‌بندی کامل شود در حالی که هیچ Package آماده نشده است. این نقض مستقیم BR-TK-004 است.
+
+پیشنهاد: Taskهای عملیاتی از endpoint عمومی complete قابل تکمیل نباشند؛ completion باید پیامد موفق transaction همان workflow باشد، یا Task دارای operationType و success evidence معتبر و قابل بررسی باشد.
+
+C2 — عملیات واقعی و Task متناظر همگام نیستند
+
+کد در چند نقطه Task بعدی را می‌سازد، اما الگویی واحد برای پیدا کردن و تکمیل Task جاری ندارد. move، sortBatch، transform، cycle، packaging و shipping به‌طور عمومی Task متناظر قبلی را نمی‌بندند. زنجیره خودکار سند نیز کامل نیست. نتیجه، Taskهای بازِ یتیم و وضعیت‌های خلاف واقع است.
+
+پیشنهاد: یک orchestration واحد تعریف شود که در همان transaction عملیات، Task جاری را validate/complete و Task بعدی را به‌صورت idempotent ایجاد کند.
+
+C3 — نقش انتخاب‌شده Session در eligibility و claim اعمال نمی‌شود
+
+APIهای GET /api/tasks، recommended و claim همه roles موجود در JWT را به domain می‌دهند. selectedRole و sessionId در claim وجود ندارند. بنابراین کاربر چندنقشی می‌تواند هنگام Session ایستگاه دریافت، کاری متعلق به بسته‌بندی یا ارسال را claim کند. این با اصل «نقش جاری اپراتور» و BR-TK-003 ناسازگار است. PDA نقش انتخابی را برای Session ثبت می‌کند، اما Task API آن را مصرف نمی‌کند.
+
+پیشنهاد: claim نیازمند sessionId فعال باشد و فقط session.selectedRole، deviceId و station همان Session برای eligibility و تاریخچه استفاده شود.
+
+C4 — واگذاری مدیریتیِ Task باز قابل دورزدن است
+
+reassignTask می‌تواند assignedTo را روی Task با وضعیت OPEN تعیین کند، اما claimTask در حالت OPEN بررسی نمی‌کند که assignedTo خالی یا برابر اپراتور claimant باشد. در نتیجه مدیر Task را به A واگذار می‌کند و B واجد نقش/مهارت می‌تواند آن را claim کرده و assignedTo را بازنویسی کند.
+
+پیشنهاد: OPENِ واگذارشده فقط برای همان کاربر قابل claim باشد، یا state مجزای ASSIGNED/AVAILABLE تعریف شود.
+
+یافته‌های مهم
+==============
+
+H1 — مدل وضعیت با سند کامل نیست
+
+سند Created → Available → Claimed → In Progress → Completed/Cancelled را تعریف می‌کند و در بخش فنی PAUSED/FAILED نیز دارد. پیاده‌سازی مستقیماً OPEN → IN_PROGRESS می‌رود؛ CREATED، AVAILABLE، CLAIMED و CANCELLED وجود ندارند. migration نیز فقط OPEN/IN_PROGRESS/PAUSED/FAILED/COMPLETED را می‌پذیرد. در نتیجه زمان assignment، claim و شروع واقعی کار از هم تفکیک نمی‌شوند و BR-TK-005 قابل تحقق نیست.
+
+H2 — شماره و نوع Task وجود ندارد
+
+BR-TK-001 شماره یکتای Task می‌خواهد؛ مدل فقط UUID داخلی دارد و taskNumber/code قابل نمایش ندارد. Task Typeهای قابل پیکربندی فصل 20 نیز وجود ندارند؛ عنوان، زون و اولویت رشته/عدد آزادند و autoTaskها hardcoded هستند.
+
+H3 — ایجاد دستی می‌تواند قواعد بنیادی Task را نقض کند
+
+POST /api/tasks با permission عمومی operations:write در دسترس است. entityId، requiredRole و requiredSkillId اختیاری‌اند؛ assignedTo بدون validation در domain پذیرفته می‌شود؛ zone با Master Data تطبیق داده نمی‌شود؛ requiredRole اعتبارسنجی نمی‌شود؛ priority نیز در domain finite/range checked نیست. بنابراین اپراتور عادی می‌تواند Task بدون شیء کسب‌وکار و بدون نقش واجد شرایط بسازد؛ مغایر اصل تعلق Task به Business Object و BR-TK-002.
+
+H4 — «کارهای من» داده صحیحی برنمی‌گرداند
+
+پنل وب و PDA از /api/tasks?eligible=me استفاده می‌کنند. Backend برای این فیلتر، همه Taskهای OPEN/IN_PROGRESS/PAUSED واجد نقش/مهارت را برمی‌گرداند، بدون آنکه IN_PROGRESS/PAUSED را به assignedTo=user محدود کند. پس اپراتور ممکن است کار در حال اجرای فرد دیگری را در «وظایف من» ببیند و دکمه عملیاتی داشته باشد؛ کلیک در backend با 403 رد می‌شود. این هم UX گمراه‌کننده است و هم افشای غیرضروری صف دیگران.
+
+H5 — BLOCKED و اتصال به Exception وجود ندارد
+
+طبق سند، Exception مرتبط باید Task را BLOCKED کند و پس از حل Exception آن را خودکار به صف برگرداند. Task هیچ blockedByExceptionId یا state=BLOCKED ندارد و workflow Exception مستقل است.
+
+H6 — overdue و زمان مورد انتظار وجود ندارد
+
+dueAt، expectedDuration، overdueAt، SLA یا job زمان‌بندی‌شده برای تشخیص دیرکرد وجود ندارد. UI نیز فیلتر/نشانگر «دیرکرد» ندارد، در حالی که فصل 20 آن را بخش صریح My Tasks و Exception Management می‌داند.
+
+H7 — پیشنهاد کار فقط priority + createdAt است
+
+recommendedTask اولویت و زمان ایجاد را لحاظ می‌کند، اما FIFO/FEFO واقعی موجودی، تاریخ انقضا، برنامه تولید، فاصله/زون، ظرفیت تجهیز و دیرکرد را نمی‌سنجد. نام «recommended» درست است، ولی با الگوریتم توصیه سند فاصله دارد.
+
+H8 — اولویت و انواع Task قابل مدیریت نیستند
+
+مدیر endpoint تغییر اولویت ندارد و قواعد priority/type در Configuration یا Master Data مدل نشده‌اند. اولویت autoTask عموماً 70 و QC rework برابر 90 است؛ UI فقط هنگام ساخت عدد 1 تا 100 می‌گیرد. «قابل تنظیم بودن اولویت و نوع کار» محقق نشده است.
+
+H9 — پوشش ایجاد خودکار ناقص و در یک نقطه خلاف زنجیره سند است
+
+سند برای کل زنجیره دریافت → سردخانه → تفکیک → شست‌وشو/صادرات → اسلایس → انجماد → خشک‌کردن → بسته‌بندی → کالای نهایی و سفارش تأییدشده → picking/shipping کار خودکار می‌خواهد. پیاده‌سازی تنها بعضی گذارها را می‌سازد. به‌ویژه transform با process=WASH کار «Sorting» ایجاد می‌کند، در حالی که زنجیره فصل 20 پایان شست‌وشو را به Slicing متصل می‌کند. انتقال به سردخانه نیز Task تفکیک بعدی را به شکل عمومی ایجاد نمی‌کند و تکمیل بسته‌بندی Task انتقال کالای نهایی ندارد.
+
+H10 — ثبت زمینه عملیاتی Task ناقص است
+
+خود Task و stateHistory در claim/transition معمولاً sessionId، deviceId، station و role جاری را snapshot نمی‌کنند. Audit عمومی ممکن است بخشی از این اطلاعات را داشته باشد، اما رکورد lifecycle Task به‌تنهایی پاسخ‌گوی الزامات فصل 20 نیست. reassign نیز reason اجباری ندارد؛ در حالی که سند ثبت کاربر قبلی، کاربر جدید و دلیل را الزام می‌کند.
+
+یافته‌های متوسط و UX
+====================
+
+M1 — Web همه کاربران دارای operations:write را قادر به دیدن فرم ایجاد Task نشان می‌دهد و دکمه reassign را برای همه render می‌کند؛ backend reassign را برای فاقد مجوز رد می‌کند، اما UI permission-aware نیست.
+
+M2 — پنل وب بخش‌های «واگذارشده به من»، «قابل دریافت برای نقش من»، «اولویت بالا» و «دیرکرد» را جدا نمی‌کند و recommended endpoint را نمایش نمی‌دهد. فقط یک صف تخت و شمارنده OPEN/IN_PROGRESS دارد.
+
+M3 — PDA نیز «وظایف من» را از eligible=me می‌گیرد، recommended task، جزئیات object، deadline، dependency و blocked reason را نشان نمی‌دهد و reassign مدیریتی ندارد.
+
+M4 — scan-based discovery فصل 20 پیاده نشده است. اسکن Batch/Container در PDA برای جابه‌جایی استفاده می‌شود، اما پس از اسکن، Task جاری/بعدی و workflow صحیح شیء کشف، پیشنهاد یا claim نمی‌شود.
+
+M5 — Session close/force-close/handover سیاست مشخصی برای Taskهای claimed/in-progress ندارد. بسته‌شدن Session می‌تواند Task را همچنان به کاربر قبلی چسبیده نگه دارد.
+
+M6 — وابستگی فقط یک dependsOnTaskId است. برای workflowهای چندپیش‌نیازی، dependency graph، سیاست all/any و نمایش زنجیره وجود ندارد.
+
+M7 — QC corrective task با requiredRole=null قابل ساخته‌شدن است و برخلاف autoTask معمول، stateHistory اولیه هم ندارد. این کار برای همه نقش‌ها eligible می‌شود و با BR-TK-002 سازگار نیست.
+
+M8 — API تاریخچه/جست‌وجو/صفحه‌بندی تخصصی Task ندارد. GET /api/tasks در حالت عادی کل تاریخچه را برمی‌گرداند؛ در مقیاس واقعی، هم گزارش‌گیری و هم UI کند و مبهم می‌شوند.
+
+M9 — خطاها با TASK_* بیان شده‌اند، اما نگاشت روشن و سیستماتیک errorCode → BR-TK-* برای قواعد Task دیده نمی‌شود؛ بنابراین کنترل انطباق ماشینی دشوار است.
+
+ارزیابی تست‌های موجود روی GitHub
+================================
+
+تست‌های مثبت موجود:
+
+- task-lifecycle.test.js نقش، مهارت، وابستگی، pause/resume/complete/fail/reopen و recommendation را پوشش می‌دهد.
+- skill-http-integration.test.js مسیر واقعی HTTP login → JWT skills → claim را آزمایش می‌کند.
+- security-persistence.test.js claim تک‌برنده را در domain بررسی می‌کند.
+- system-100-scenarios.test.js claim نقش‌های ایستگاهی را در سناریوهای متعدد بررسی می‌کند.
+- round12-architecture.test.js snapshot before/after و نقش/station در Audit رویداد Task را بررسی می‌کند.
+- PDA تست قرارداد UI برای lifecycle کار دارد.
+
+شکاف‌های مهم تست:
+
+- هیچ تستی اثبات نمی‌کند COMPLETE فقط بعد از موفقیت عملیات مرتبط ممکن است.
+- هیچ تست end-to-end زنجیره «عملیات واقعی → تکمیل Task جاری → ساخت Task بعدی → flush → reload PostgreSQL» دیده نشد.
+- تستی برای جلوگیری از claim شدن Task واگذارشده به فرد دیگر وجود ندارد.
+- تستی برای محدودکردن eligibility به selectedRole در Session وجود ندارد.
+- تستی برای CANCELLED، BLOCKED/Exception، overdue، priority override یا scan-based discovery وجود ندارد، چون قابلیت‌ها موجود نیستند.
+- بخشی از تست lifecycle مستقیماً domain را بدون actor واقعی صدا می‌زند؛ چون actor در transitionTask اختیاری است، این مسیر کنترل مالکیت HTTP را دور می‌زند و ممکن است نام تست بیش از پوشش واقعی آن القا کند.
+- تست PostgreSQL واقعی برای رقابت claim چند process/server و بازیابی بعد از restart مشاهده نشد؛ حفاظت فعلی عمدتاً site-wide optimistic concurrency است، نه row lock اختصاصی Task.
+
+میزان انطباق تقریبی
+===================
+
+- موجودیت و persistence پایه Task: خوب
+- نقش/مهارت و dependency ساده: خوب
+- lifecycle پایه pause/fail/reopen: متوسط رو به خوب
+- اتصال Task به عملیات کسب‌وکار: ضعیف و دارای ریسک بحرانی
+- نقش جاری Session/device/station: ضعیف
+- My Tasks و recommendation: حداقلی
+- مدیریت مدیر (اولویت، دلیل واگذاری، cancel): ناقص
+- Exception/blocked/overdue: فاقد پیاده‌سازی
+- Task Type و شماره یکتا: فاقد پیاده‌سازی
+- UI وب/PDA: قابل نمایش و اقدام پایه، ولی پایین‌تر از نیاز عملیاتی سند
+- انطباق کلی با فصل 20: حدود 45٪ تا 55٪
+
+اولویت پیشنهادی اصلاحات آینده (این گزارش هیچ اصلاحی اعمال نکرده است)
+==================================================================
+
+P0:
+1. بستن اتمیک Task به موفقیت workflow و جلوگیری از complete دستیِ بدون evidence.
+2. مصرف sessionId/selectedRole/device/station در claim و تمام transitionها.
+3. جلوگیری از claim شدن Task واگذارشده به شخص دیگر.
+4. اصلاح endpoint «کارهای من» برای جداسازی available و assigned.
+
+P1:
+5. state machine کامل شامل AVAILABLE/ASSIGNED یا CLAIMED و CANCELLED؛ سپس BLOCKED.
+6. Task number یکتا، Task Type قابل تنظیم و پیوند اجباری به Business Object.
+7. تکمیل زنجیره auto-task و حذف drift، به‌ویژه WASH → SLICING و workflowهای سردخانه/بسته‌بندی.
+8. Exception linkage، overdue/SLA و دلیل اجباری reassign.
+
+P2:
+9. recommendation واقعی با priority، FIFO/FEFO، due date، برنامه و محل.
+10. UI مجزای My Assigned / Available for Role / High Priority / Overdue و scan-based discovery.
+11. تست PostgreSQL end-to-end از domain/API واقعی، reload پس از persist و رقابت claim چند process.
+
+جمع‌بندی اجرایی
+===============
+
+برای استفاده آزمایشی و نمایش گردش کار، بخش Task مناسب است؛ برای اینکه مدیر یا اپراتور آن را منبع قطعی «چه کاری واقعاً انجام شده» بداند، هنوز مناسب نیست. قبل از ورود داده واقعی، حداقل چهار مورد P0 باید بسته شوند. مهم‌ترین اصل طراحی در مرحله بعد این است که Task یک چک‌لیست مستقل نباشد: موفقیت عملیات باید Task را تکمیل کند و Task نتواند مستقل از عملیات، واقعیت تولید را جعل کند.

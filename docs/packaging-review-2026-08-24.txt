@@ -1,0 +1,166 @@
+گزارش بررسی بخش بسته‌بندی AnbarSYS / StoreMesh
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ بدون تغییر کد، تنظیمات، تست یا داده عملیاتی
+
+مبنای نسخه GitHub
+=================
+پیش از بررسی، repositoryهای مرتبط با git fetch --prune تازه‌سازی شدند. گزارش مستقیماً براساس فایل‌های commitشده در refهای زیر در GitHub تهیه شده است:
+
+- storemesh-platform: origin/feat/addendum-01-fix-request-07 @ 8681403
+- storemesh-site-server: origin/audit-fr7-v3 @ 34e209e
+- storemesh-web: origin/audit-fr7-web-v2 @ 1603cc6
+- storemesh-pda: origin/feat/operations-completion-round-3 @ 52a459f
+- storemesh-terminal: origin/feat/operations-completion-round-3 @ abbe707
+- storemesh-contracts: origin/feat/addendum-01-fix-request-07 @ 2b48758
+
+این شاخه‌ها جدیدتر از origin/main هستند؛ بنابراین ارزیابی مربوط به آخرین کد منتشرشده روی GitHub است، نه main قدیمی. مبنای قضاوت محتوای خود refهای ریموت است.
+
+دامنه بررسی
+===========
+Packaging Workflow فصل 11، قواعد BR-PK-001..005، BR-CT-001..008 و BR-LB-001..011، Packaging Session، توزین UNIT، مونتاژ CARTON/EPS/PALLET، اسکن فیزیکی، لیبل و reprint، لغو/آسیب، Finished Goods، مصرف اقلام، Shipment، Audit، PostgreSQL، پنل وب، PDA/Terminal، قرارداد API و تست‌ها بررسی شدند.
+
+جمع‌بندی مدیریتی
+================
+پیاده‌سازی فعلی یک اسکلت فنی نسبتاً قوی دارد: UNIT و CARTON و nesting چندسطحی، کاهش موجودی Batch، رخداد اسکن با session/device، جلوگیری از duplicate/nesting هم‌زمان، state machine بسته، صف چاپ، cancel/damage، audit و ماندگاری واقعی PostgreSQL وجود دارند. زنجیره واقعی تولید تا UNIT، CARTON، Shipment و reload نیز در تست PostgreSQL طی می‌شود و مشکل ترتیب FK والد/فرزند برطرف شده است.
+
+بااین‌حال، گردش واقعی کارخانه هنوز با فصل 11 منطبق نیست. وزن «واقعی» هر UNIT از یک input دستی می‌آید و به رکورد Scale/Measurement متصل نیست؛ target و tolerance را client تعیین می‌کند و می‌تواند قاعده تنظیم فعال را دور بزند؛ کارتن پیش از اسکن و با فهرست ازپیش‌انتخاب‌شده ساخته می‌شود؛ و وضعیت Package با نتیجه واقعی Print Job اتصال اجباری ندارد. محتوای لیبل نیز تقریباً فقط identity است. اینها شکاف‌های عملیاتی و کنترلی‌اند، نه صرفاً کمبود ظاهری UI.
+
+نظر نهایی: برای demo و پایلوت کنترل‌شده‌ای که اپراتور و چاپگر زیر نظارت‌اند مناسب است؛ برای بسته‌بندی واقعی، وزن قانونی/قابل استناد، مونتاژ اسکن‌محور و جلوگیری قطعی از ارسال بسته بی‌لیبل هنوز آماده نیست.
+
+نقاط مثبت تأییدشده
+===================
+1. UNIT فقط از یک Batch allocation ساخته می‌شود و Batch باید Packaging Checkpoint و وضعیت READY_FOR_PACKAGING داشته باشد.
+2. وزن مثبت و موجودی کافی کنترل می‌شود و وزن بسته‌شده از Batch کم می‌گردد؛ موجودی صفر Batch را PACKAGED می‌کند.
+3. هر Package شناسه UUID و code مستقل دارد و source Batch/weight در package_items نگه‌داری می‌شود.
+4. Package، وزن/هدف/تلرانس، session، device و configVersionId در PostgreSQL پایدار می‌شوند.
+5. hierarchy صریح UNIT→CARTON→EPS→PALLET وجود دارد و سطح والد/فرزند اعتبارسنجی می‌شود.
+6. یک child نمی‌تواند هم‌زمان parent دیگری داشته باشد و child باید READY_TO_SHIP باشد.
+7. CARTON فقط UNITهای دارای لیبل و آماده را به‌عنوان فرزند می‌پذیرد.
+8. اسکن UNIT برای CARTON از scanner field جداگانه و scanner-verified UI استفاده می‌کند؛ انتخاب صرف از صفحه جای اسکن را نمی‌گیرد.
+9. هر Carton scan دارای شناسه مستقل، sequence، زمان، session و device است و در PostgreSQL ذخیره می‌شود.
+10. duplicate scan و اسکن UNIT تخصیص‌نیافته رد می‌شود و Seal تا اسکن دقیق همه UNITهای مورد انتظار ممنوع است.
+11. state machine بسته شامل DRAFT، PACKING، READY_FOR_LABEL، PRINTING، LABEL_PENDING، LABEL_PRINTED، READY_TO_SHIP و SHIPPED است.
+12. Print attemptها مجزا و پایدارند و fail/retry/history پایه وجود دارد.
+13. reprint عمومی بدون scan ورودی مستقل موفق نمی‌شود و مقدار نمایشی label به‌طور خودکار echo نمی‌شود.
+14. CANCEL و DAMAGE دلیل اجباری و state eligibility دارند؛ cancellation وزن UNIT را برمی‌گرداند و CARTON فرزندان را آزاد می‌کند.
+15. DAMAGED Exception پایدار می‌سازد و بسته nested را نمی‌توان مستقیماً terminate کرد.
+16. Shipment مشتری فقط CARTON آماده، تخصیص‌نیافته و غیرقرنطینه‌ای را می‌پذیرد و SHIP به فرزندان cascade می‌شود.
+17. repository والدها را ابتدا با parent NULL می‌نویسد و سپس لینک می‌کند؛ deep nesting دیگر با FK شکست نمی‌خورد.
+18. تست PostgreSQL واقعی مسیر receive→production cycles→UNIT→CARTON→customer shipment→flush/reload را اجرا می‌کند.
+19. Audit عمومی درخواست HTTP شامل user/request/IP/result/device/session و before/after snapshot است.
+20. عملیات domain با idempotency و rollback snapshot از باقی‌ماندن mutation ناموفق جلوگیری می‌کند.
+
+مغایرت‌ها و ریسک‌های اصلی
+=========================
+
+[بحرانی] 1. وزن واقعی هر UNIT از ترازو نمی‌آید
+weighForPackaging فقط یک PACKAGING_CHECKPOINT روی وزن کل Batch ثبت می‌کند. هنگام createPackage، measuredWeightKg از items[0].weightKg در body گرفته می‌شود؛ UI نیز «وزن واقعی UNIT» را در input عددی دستی می‌گیرد. هیچ scaleId، raw reading، stable-weight evidence یا Measurement مجزای UNIT وجود ندارد. بنابراین BR-PK-003 و الزام «هر بسته فیزیکی وزن شود» از نظر قابل استناد اجرا نشده و client می‌تواند هر وزن دلخواهی ثبت کند.
+
+[بحرانی] 2. client می‌تواند تلرانس تنظیم‌شده را دور بزند
+createPackage ابتدا input.tolerancePercent را می‌پذیرد و فقط در نبود آن سراغ PACKAGING configuration می‌رود. UI نیز همین مقدار را قابل ویرایش ارسال می‌کند. اپراتور/کلاینت می‌تواند tolerance بسیار بزرگ بفرستد و بسته خارج از معیار را نهایی کند. مقدار targetWeightKg هم از client پذیرفته می‌شود و با package type/configuration تطبیق داده نمی‌شود. این خلاف بخش‌های 11.7، 11.11 و قاعده وزن پیکربندی‌شده است.
+
+[بحرانی] 3. ترتیب مونتاژ کارتن معکوس سند است
+سند صریح است: اپراتور UNITها را یکی‌یکی اسکن می‌کند، empty carton اسکن نمی‌شود و Carton فقط پس از confirmation ساخته می‌شود. سیستم ابتدا با انتخاب چند UNIT از dropdown یک CARTON واقعی می‌سازد، parentPackageId همه UNITها را همان لحظه تنظیم و قلم CARTON را مصرف می‌کند، سپس فقط اسکن همان فهرست ازپیش‌تخصیص‌یافته را می‌پذیرد. بنابراین رکورد کارتن و تخصیص موجودی پیش از شواهد فیزیکی ایجاد شده‌اند و BR-CT-002/003 و مدل عملیاتی فصل 11 رعایت نشده‌اند.
+
+[بحرانی] 4. وضعیت Package و نتیجه واقعی چاپ قابل واگرایی‌اند
+endpointهای مستقل package/print_success و package/print_fail بدون اثبات نتیجه Print Job، Package را تغییر می‌دهند. برعکس completePrint فقط attempt/job را PRINTED می‌کند و Package را از PRINTING به LABEL_PRINTED نمی‌برد. UI دکمه «تأیید چاپ» Package و دکمه «چاپ شد» Print Job را جدا نشان می‌دهد. در نتیجه می‌توان Package را بدون تکمیل job به READY_TO_SHIP رساند، یا job موفق باشد ولی Package در PRINTING بماند. Shipment فقط status بسته را می‌سنجد، نه label/attempt موفق را؛ پس کنترل «کارتن بی‌لیبل از ایستگاه خارج نشود» قطعی نیست.
+
+[بحرانی] 5. محتوای لیبل بسته و کارتن با سند فاصله اساسی دارد
+queuePrint برای PACKAGE فقط payload={identity} می‌سازد. محصول، گرید، وزن خالص، lot/batch، تاریخ تولید/انقضا، template/version، serial قابل نمایش، تعداد UNIT، وزن کل/ناخالص و destination روی payload لیبل نیست. UI نیز چاپ واقعی label/PDF مخصوص Package/Carton ارائه نمی‌کند و فقط صف job را تغییر وضعیت می‌دهد. الزامات 11.10، 11.15 و BR-LB-008/009 عملاً پوشش ندارند.
+
+[بالا] 6. Mixed product و mixed grade هیچ قاعده پیکربندی‌شده‌ای ندارد
+هنگام ساخت CARTON فقط level/status فرزندان کنترل می‌شود. محصول، گرید و اندازه UNITها مقایسه نمی‌شوند و هیچ allowMixedProducts/allowMixedGrades فعال خوانده نمی‌شود. بنابراین هر ترکیبی بدون manager override پذیرفته می‌شود؛ خلاف BR-CT-007 و BR-CT-008.
+
+[بالا] 7. Serialها جهانی نیستند
+code به‌شکل P-${site}-${index} تولید می‌شود و constraint دیتابیس UNIQUE(site_id, code) است. درون هر سایت یکتا است، اما uniqueness سراسری دیتابیس/شبکه enforce نمی‌شود و index مبتنی بر طول آرایه برای import/reset/concurrency انتخاب مقاومی نیست. این با BR-PK-001 و BR-CT-001 که global uniqueness می‌خواهند انطباق کامل ندارد.
+
+[بالا] 8. Wrong scan قابل اصلاح در همان draft نیست
+اسکن اشتباه تخصیص‌نیافته فوراً رد می‌شود، که خوب است؛ اما endpoint حذف آخرین اسکن/حذف یک UNIT پیش از confirmation وجود ندارد. تنها راه UI برای اشتباه در UNIT تخصیص‌یافته، لغو کامل Carton است. سند اجازه remove package قبل از confirmation را می‌دهد.
+
+[بالا] 9. سابقه اسکن Carton هنگام لغو حذف فیزیکی می‌شود
+transitionPackage روی CANCEL/DAMAGE رخدادهای cartonScanEvents را از state حذف می‌کند و repository نیز DELETE می‌زند تا UNIT دوباره قابل استفاده باشد. Audit کلی PACKAGE_CANCEL باقی می‌ماند، ولی فهرست دقیق اسکن‌ها، ترتیب و device آن کارتن دیگر در جدول رخدادها وجود ندارد. این با «Package List is permanent» و «All records are permanent» ناسازگار است؛ آزادسازی باید با وضعیت voided انجام شود، نه حذف شواهد.
+
+[بالا] 10. reprint پرریسک Carton قاعده BR-LB-010 را کامل اجرا نمی‌کند
+retryPrint اسکن label.identity خود Carton/Package را می‌خواهد. برای carton label شکست‌خورده ممکن است label فیزیکی موجود نباشد؛ سند در حالت پرریسک اسکن یک یا چند package serial داخل Carton را می‌خواهد. Backend هیچ تطبیق verifiedScan با childPackageIds ندارد و Pending Label UI نیز context کامل کارتن را نمایش نمی‌دهد.
+
+[بالا] 11. Label record پس از چاپ موفق به وضعیت PRINTED/VERIFIED نمی‌رود
+completePrint فقط Print Job و Print Attempt را تغییر می‌دهد و labels.status همان PENDING می‌ماند. transitionPackage نیز label را به‌روزرسانی نمی‌کند. بنابراین منبع حقیقت واحد برای وضعیت لیبل وجود ندارد و پس از reload هم Label و Package/Attempt می‌توانند روایت متفاوتی داشته باشند.
+
+[بالا] 12. Finished Goods movement واقعی مدل نشده است
+پس از READY، Package فقط status می‌گیرد؛ zone/location، warehouse bin، movement record، operator/time انتقال و اسکن مقصد برای Carton وجود ندارد. UI هم مرحله «Move to Finished Goods Warehouse» ندارد. بخش 11.19 و الزام audit حرکت کارتن اجرا نشده‌اند.
+
+[بالا] 13. Packaging Session کامل نیست
+جلسه عمومی operator/device/station/start و idle/close/handover دارد، اما رکورد Packaging Session اختصاصی با source batchها، packages produced، start/end و pause/resume ندارد. association از Package به session هست، ولی query/summary و transition PAUSE/RESUME مخصوص بسته‌بندی پیاده نشده است. Batch نیز هنگام checkpoint به یک Packaging Session فعال lock/assign نمی‌شود؛ پس شرط «not assigned to another Packaging Session» صریح enforce نشده است.
+
+[متوسط رو به بالا] 14. package configuration فقط نام است، نه specification
+Master Data نوع بسته code/name/status دارد، اما ظرفیت/وزن هدف/tolerance/label template/product compatibility/effective version برای هر package type ندارد. active PACKAGING configuration تنها یک JSON عمومی است و createPackage تقریباً همه مشخصات مهم را از request می‌گیرد. «All packaging formats are managed through Configuration» هنوز محقق نشده است.
+
+[متوسط رو به بالا] 15. نقش نشست برای بسته‌های بالاتر کامل enforce نمی‌شود
+createPackage فقط برای level=UNIT selectedRole را PACKAGING_OPERATOR الزام می‌کند. CARTON/EPS/PALLET session معتبر می‌خواهند ولی selectedRole ایستگاه را کنترل نمی‌کنند. Permission HTTP packaging:write بخشی از امنیت را پوشش می‌دهد، اما ADMIN/MANAGER یا role دارای مجوز می‌تواند با session ایستگاه نامرتبط مونتاژ کند و actorStation تاریخی غلط شود.
+
+[متوسط] 16. EPS و PALLET اسکن فیزیکی ندارند
+مدل nesting عمیق از نظر persistence کار می‌کند، اما scanPackageItem فقط CARTON و UNIT را می‌شناسد. EPS/PALLET با childPackageIds ارسالی مستقیم ساخته می‌شوند و هیچ event اسکن sequence/device برای CARTON→EPS یا EPS→PALLET ثبت نمی‌شود. در نتیجه قابلیت فنی nesting با اجرای فیزیکی قابل ردیابی برابر نیست.
+
+[متوسط] 17. UI وزن و محتوای CARTON را نادرست/ناقص نشان می‌دهد
+ستون وزن فقط مجموع p.items را حساب می‌کند. CARTON/EPS/PALLET items مستقیم ندارند و محتوا در childPackageIds است، پس وزن کارتن در صفحه معمولاً 0 نمایش داده می‌شود. شمارش child وجود دارد، اما product/grade، total net/gross، scan progress، label context و location دیده نمی‌شوند.
+
+[متوسط] 18. UI ساخت UNIT از dropdown استفاده می‌کند و بسته را خودکار چاپ نمی‌کند
+در مرحله checkpoint Batch اسکن می‌شود، اما مرحله ساخت هر UNIT Batch را از dropdown انتخاب می‌کند و وزن دستی است. پس احتمال انتخاب Batch اشتباه میان checkpoint و پرکردن وجود دارد. پس از create نیز Package DRAFT می‌ماند و اپراتور باید چند دکمه جدا تا queue print و READY بزند؛ «label automatically after successful weighing» اجرا نشده است.
+
+[متوسط] 19. Manager actions سند ناقص‌اند
+Cancel و reprint عمومی وجود دارند، اما reopen Carton و move مدیریتی مخصوص بسته‌بندی وجود ندارد؛ edit composition بعد از ساخت نیز ممکن نیست. مجوز cancel/damage هم همان packaging:write عمومی است و manager-only نیست، درحالی‌که سند این اختیارات را در بخش Manager Override مطرح می‌کند.
+
+[متوسط] 20. برگشت اقلام مصرفی در cancellation روشن و کامل نیست
+ساخت CARTON در صورت وجود قلم CARTON یک واحد مصرف می‌کند. CANCEL پیش از confirmation UNITها را آزاد می‌کند، اما مصرف CARTON را reverse نمی‌کند و transaction ارتباطی برای reversal ندارد. برای DAMAGE مصرف‌شدن طبیعی است، ولی برای cancellation پیش از استفاده باید سیاست صریح و قابل audit وجود داشته باشد.
+
+[متوسط] 21. گزارش بسته‌بندی وجود ندارد
+نمای فعلی فقط تعداد Package و UNIT آزاد را نشان می‌دهد. خروجی تولید در هر session/operator، variance وزن، نرخ reject/correction، throughput، مصرف مواد، pending labels، carton fill، yield، aging و Finished Goods aggregation وجود ندارد.
+
+[متوسط] 22. PDA/Terminal گردش بسته‌بندی ندارند
+Terminal عملاً Receiving kiosk است. PDA نقش PACKAGING_OPERATOR را برای ورود/session می‌شناسد، اما صفحات توزین UNIT، اسکن Carton، label/reprint و exception بسته‌بندی ندارد. بنابراین اجرای اسکن‌محور فقط در پنل مدیریتی وب ممکن است، نه ابزار handheld خط.
+
+[متوسط] 23. پوشش تست مثبت قوی‌تر از تست کنترل‌های adversarial است
+تست PostgreSQL واقعی زنجیره تولید→UNIT→CARTON→Shipment و reload را دارد و ارزشمند است، اما helper تست با tolerancePercent=0 و سپس transition مستقیم PRINT_SUCCESS چاپ واقعی را دور می‌زند. تست HTTP/PostgreSQL برای client-controlled tolerance، mixed product/grade، print-job/package atomicity، unlabeled shipment rejection، label payload، Finished Goods movement، remove scan و reprint با child serial وجود ندارد. بعضی تست‌های repository نیز state را دستی می‌سازند و گردش واقعی را نمی‌سنجند.
+
+[متوسط] 24. نگاشت Business Ruleهای بسته‌بندی کامل نیست
+خطاهای مفیدی مانند PACKAGE_WEIGHT_OUT_OF_TOLERANCE، CARTON_DUPLICATE_SCAN و CARTON_SCAN_ALLOCATION_MISMATCH وجود دارند، اما همه BR-PK/CT/LBها به ruleId قابل ردیابی در پاسخ خطا متصل نیستند. به‌ویژه قواعدی که اصلاً enforce نشده‌اند (mixed content، global serial، label contents/state و reprint داخلی) قابل اثبات ماشینی نیستند.
+
+ارزیابی قابلیت‌ها
+=================
+
+Packaging eligibility: checkpoint و status دارد؛ lock اختصاصی Batch به Packaging Session و QC gate صریح ندارد.
+
+UNIT weighing: inventory accounting و tolerance formula دارد؛ منبع وزن فیزیکی و authority تنظیمات ناامن است.
+
+UNIT traceability: source Batch/session/device خوب است؛ serial global، محصول snapshot و label content ناقص‌اند.
+
+Carton assembly: duplicate/exact scan و persistence خوب است؛ ترتیب ساخت و اسکن برخلاف سند و امکان remove scan مفقود است.
+
+Deep nesting: ساختار و PostgreSQL مناسب؛ رخدادهای اسکن فیزیکی EPS/PALLET وجود ندارند.
+
+Printing/reprint: attempt history و scan verification پایه مناسب؛ Package/Label/Job اتمیک نیستند و context/reprint verification کارتن ناقص است.
+
+Cancel/damage: release inventory و terminal states مناسب؛ scan evidence حذف و consumable reversal مبهم است.
+
+Finished Goods: READY_TO_SHIP و Shipment وجود دارد؛ warehouse location/movement اسکن‌شده وجود ندارد.
+
+Audit/persistence: زیرساخت عمومی قوی است؛ حذف scan events و رکوردهای ناقص label/session قابلیت استناد را کاهش می‌دهد.
+
+نظر نهایی و اولویت پیشنهادی
+==========================
+ترتیب منطقی رسیدگی در آینده:
+
+1. اتصال وزن UNIT به reading/Measurement واقعی ترازو و حذف اختیار client بر target/tolerance.
+2. اتمیک‌کردن Print Job، Label و Package state و منع READY/Shipment بدون attempt موفق.
+3. بازطراحی مونتاژ Carton به draft scan list → confirmation → create Carton، با remove/void بدون حذف تاریخچه.
+4. ساخت label payload/template واقعی برای UNIT و CARTON و پیاده‌سازی BR-LB-008/010.
+5. enforce کردن mixed product/grade policy و uniqueness سراسری serial.
+6. افزودن Finished Goods location/movement و Packaging Session اختصاصی با lock و pause/resume.
+7. اسکن فیزیکی nesting سطوح بالاتر، UI عملیاتی/PDA و گزارش‌های بسته‌بندی.
+8. افزودن تست adversarial HTTP+PostgreSQL برای همه کنترل‌های بالا، با چاپ واقعی state-driven نه transition دستی.
+
+حکم نهایی: هسته داده و persistence بسته‌بندی «خوب و قابل توسعه» است و زنجیره happy-path واقعی را حفظ می‌کند، اما به علت وزن دستی و قابل جعل، کنترل تلرانس client-side، ترتیب نادرست Carton assembly و امکان واگرایی چاپ/وضعیت، برای بهره‌برداری واقعی و بدون نظارت هنوز آماده نیست.
+
+یادداشت روش بررسی
+=================
+در این نوبت هیچ فایل کد، migration، تست، تنظیم یا داده عملیاتی تغییر نکرد. تست جدیدی نوشته یا اجرا نشد. تنها فایل ایجادشده همین گزارش است و همه نتیجه‌ها از بررسی مستقیم refهای GitHub بالا و تطبیق آنها با سند مرجع به دست آمده‌اند.

@@ -1,0 +1,151 @@
+گزارش بررسی بخش کنترل کیفیت AnbarSYS / StoreMesh
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ بدون تغییر کد، تنظیمات، تست یا داده عملیاتی
+
+مبنای نسخه GitHub
+=================
+پیش از بررسی، repositoryهای مرتبط با git fetch --prune تازه‌سازی شدند. گزارش مستقیماً براساس فایل‌های commitشده در refهای زیر در GitHub تهیه شده است:
+
+- storemesh-platform: origin/feat/addendum-01-fix-request-07 @ 8681403
+- storemesh-site-server: origin/audit-fr7-v3 @ 34e209e
+- storemesh-web: origin/audit-fr7-web-v2 @ 1603cc6
+- storemesh-pda: origin/feat/operations-completion-round-3 @ 52a459f
+- storemesh-terminal: origin/feat/operations-completion-round-3 @ abbe707
+- storemesh-contracts: origin/feat/addendum-01-fix-request-07 @ 2b48758
+
+این شاخه‌ها جدیدتر از origin/main هستند؛ بنابراین ارزیابی مربوط به آخرین کد منتشرشده روی GitHub است، نه main قدیمی. ورک‌تری‌های محلی با refهای متناظر origin یکسان بودند و مبنای قضاوت، محتوای خود refهای ریموت است.
+
+دامنه بررسی
+===========
+Quality Control Module، نقش QC Inspector، چک‌لیست قابل تنظیم، Approval/Rejection/Quarantine، امضای دیجیتال عملیاتی، Rework، Exception، آزادسازی قرنطینه، Audit، PostgreSQL، پنل وب، PDA/Terminal، قرارداد API و تست‌ها با سند مرجع تطبیق داده شدند. آزمایشگاه، LIMS، گواهی شیمیایی/میکروبی و مدارک آزمایشگاهی طبق سند خارج از Version 1 هستند و به‌عنوان نقص محسوب نشده‌اند.
+
+جمع‌بندی مدیریتی
+================
+ماژول QC فعلی از نظر ساختار اولیه از یک فرم Pass/Fail ساده جلوتر است: چک‌لیست قابل تعریف، پاسخ آیتمی، attestation، نقش مستقل، قرنطینه، corrective task، Exception، audit و persistence واقعی دارد. این پایه ارزشمند است.
+
+اما تصمیم QC هنوز به‌طور قابل اتکا مسیر عملیات را کنترل نمی‌کند. نتیجه REJECTED فقط یک رکورد و task می‌سازد و Batch را مسدود نمی‌کند؛ بنابراین همان Batch ردشده می‌تواند وارد تولید، بسته‌بندی یا ارسال شود. علاوه بر آن، مرحله بازرسی با وضعیت واقعی Batch تطبیق داده نمی‌شود، نقش امضا از client پذیرفته می‌شود و قرنطینه فقط مکان Batch را تغییر می‌دهد، نه Container فیزیکی آن را. این موارد برای کنترل کیفیت عملیاتی، شکاف‌های ساختاری و نه صرفاً UI هستند.
+
+نظر نهایی: برای ثبت آزمایشی QC و قرنطینه دستی مناسب است؛ برای استفاده واقعی به‌عنوان gate کیفیت و سابقه امضاشده قابل استناد هنوز آماده نیست.
+
+نقاط مثبت تأییدشده
+===================
+1. نقش مستقل QUALITY_OPERATOR و permission جداگانه quality:approve وجود دارد.
+2. نقش‌های غیر-QC در تست دسترسی از انجام QC منع می‌شوند.
+3. Checklist شامل code، product، stage، name، active و آیتم‌های مرتب‌شده با required flag است.
+4. کد آیتم‌ها در هر Checklist باید یکتا و prompt آنها غیرخالی باشد.
+5. ثبت QC فقط با Checklist فعال و منطبق با product/stage درخواست پذیرفته می‌شود.
+6. همه آیتم‌های required باید در payload پاسخ حضور داشته باشند.
+7. نتیجه فقط APPROVED، REJECTED یا QUARANTINED می‌تواند باشد.
+8. attestation نیازمند confirmation صریح و role غیرخالی است و signedAt/userId ذخیره می‌شود.
+9. inspectorId در HTTP از JWT گرفته می‌شود و مقدار ارسالی client جای آن را نمی‌گیرد.
+10. REJECTED و QUARANTINED به‌طور پیش‌فرض corrective task می‌سازند.
+11. QUARANTINED مکان/وضعیت قبلی Batch را snapshot کرده، Batch را به QUARANTINE می‌برد و Exception پایدار ایجاد می‌کند.
+12. قرنطینه مجدد روی Batch قرنطینه‌شده با BATCH_ALREADY_QUARANTINED رد می‌شود و وضعیت اصلی از بین نمی‌رود.
+13. releaseQuarantine دلیل اجباری می‌خواهد و وضعیت/مکان قبلی را قابل بازگردانی می‌کند.
+14. assertBatchUsable مانع ورود Batch قرنطینه‌شده به مسیرهای اصلی تولید، بسته‌بندی و ارسال می‌شود.
+15. QC Check، Checklist، Responses، Attestation و correctiveTaskId در PostgreSQL ذخیره می‌شوند.
+16. Audit عمومی requestId، user، device، IP، roles/station و before/after state را برای درخواست‌های HTTP نگه می‌دارد.
+17. عملیات idempotent است و خطای میانی از طریق سازوکار rollback دامنه، mutation ناقص را باقی نمی‌گذارد.
+18. UI نمای تعداد Approved/Rejected/Quarantine، ساخت Checklist، بازرسی، attestation و release دارد.
+19. Version 1 به‌درستی وارد حوزه LIMS و آزمایشگاه نشده است.
+
+مغایرت‌ها و ریسک‌های اصلی
+=========================
+
+[بحرانی] 1. نتیجه REJECTED هیچ اثر مسدودکننده‌ای روی Batch ندارد
+qualityCheck با result=REJECTED فقط Quality Check و corrective task می‌سازد. status و zone Batch تغییر نمی‌کنند و assertBatchUsable نیز فقط QUARANTINED را مسدود می‌کند. در نتیجه Batch ردشده همچنان می‌تواند وارد production، packaging یا shipment شود. این با مسئولیت «Reject Product / Approve Processing» در سند ناسازگار است و QC را از gate واقعی به یادداشت جانبی تبدیل می‌کند.
+
+[بحرانی] 2. مرحله QC با وضعیت و محل واقعی Batch اعتبارسنجی نمی‌شود
+Backend فقط بررسی می‌کند checklist.stage با input.stage برابر باشد؛ کنترل نمی‌کند Batch واقعاً در همان مرحله یا وضعیت واجد بازرسی باشد. برای مثال می‌توان Checklist مرحله RECEIVING را روی Batch واقع در PACKAGING اجرا کرد، به شرط همسان بودن product. بنابراین سابقه QC ممکن است از نظر زمانی/عملیاتی نادرست باشد.
+
+[بحرانی] 3. قرنطینه مکان Batch و Container را از هم جدا می‌کند
+وقتی Batch داخل Container است، qualityCheck فقط batch.zone/status را به QUARANTINE تغییر می‌دهد. container.zone، container.status و batchIds ظرف تغییر نمی‌کنند و هیچ حرکت فیزیکی اسکن‌شده‌ای ثبت نمی‌شود. نتیجه می‌تواند Batch دیجیتال در QUARANTINE و ظرف فیزیکی در WASHING/PACKAGING باشد؛ همان ناسازگاری مکان که مدل کانتینری باید جلوگیری کند.
+
+[بحرانی] 4. نقش درج‌شده در امضا قابل جعل است
+سرور inspectorId را از JWT جایگزین می‌کند، اما attestation.role را مستقیماً از body client می‌پذیرد و بررسی نمی‌کند که این role واقعاً در JWT کاربر وجود داشته یا نقش انتخاب‌شده نشست باشد. یک QUALITY_OPERATOR می‌تواند role='MANAGER' یا هر متن دیگری بفرستد و همان متن به‌عنوان نقش امضا ذخیره شود. actorRoles صحیح در Audit وجود دارد، ولی attestation خودش قابل اتکا نیست.
+
+[بالا] 5. UI اجازه ثبت پاسخ منفی واقعی برای آیتم الزامی را نمی‌دهد
+هر آیتم Checklist در UI یک checkbox است. کد فقط checkboxهای checked را «پاسخ‌داده‌شده» می‌داند و اگر required unchecked باشد، ارسال را مسدود می‌کند. بنابراین اپراتور برای ثبت REJECTED/QUARANTINED هم مجبور است تمام آیتم‌های الزامی را تیک مثبت بزند. Backend پاسخ false را می‌پذیرد، اما UI اصلی آن را عملاً غیرقابل ثبت کرده است. پاسخ باید حداقل Pass/Fail/N/A یا مقدار صریح داشته باشد.
+
+[بالا] 6. QC Approval به‌عنوان پیش‌نیاز مراحل حساس enforce نمی‌شود
+هیچ مسیر production/packaging/shipment بررسی نمی‌کند که Approval لازم برای stage مربوط وجود داشته باشد. Missing Quality Approval نیز به Exception خودکار تبدیل نمی‌شود. اگر برای یک محصول/مرحله Checklist تعریف شده باشد، عملیات همچنان می‌تواند بدون اجرای آن ادامه یابد.
+
+[بالا] 7. آزادسازی قرنطینه کنترل و امضای ضعیف‌تری از خود قرنطینه دارد
+release فقط reason و permission می‌خواهد؛ Checklist، responses، attestation صریح، session/device عملیاتی یا reinspection evidence نمی‌خواهد. همان QC Operator می‌تواند بلافاصله تصمیم خودش را آزاد کند و کنترل four-eyes یا manager approval وجود ندارد. سند صریحاً four-eyes را برای QC الزام نکرده، اما این رفتار از قابلیت استناد release می‌کاهد.
+
+[بالا] 8. مقصد release می‌تواند مرحله تولید را دور بزند
+Backend هر zone فعال ارسالی را می‌پذیرد و eligibility آن را نسبت به pre-quarantine state/status کنترل نمی‌کند. client می‌تواند Batch آزادشده را مستقیماً به PACKAGING یا زون نامرتبط بفرستد، در حالی که status قدیمی restore می‌شود. UI نیز گزینه legacy COLD_ROOM را دارد که در مدل جدید inactive شده و COLD_ROOM_CLEAN/DIRTY را نشان نمی‌دهد.
+
+[بالا] 9. Exception قرنطینه هنگام Release بسته نمی‌شود
+QUALITY_QUARANTINE Exception ایجاد می‌شود، اما qualityCheck/release هیچ exceptionId نگه نمی‌دارند و release آن Exception را resolve نمی‌کند. بنابراین Batch می‌تواند آزاد شده باشد ولی Exception مدیریتی آن همچنان OPEN بماند؛ یا برعکس Exception جداگانه حل شود بدون release واقعی.
+
+[بالا] 10. Rework یک گردش QC کامل نیست
+corrective task ساخته می‌شود، اما requiredRole به‌صورت پیش‌فرض null است و هر کاربر دارای operations:write می‌تواند آن را claim کند. نوع rework، دستور اصلاح، expected output، dependency برای reinspection، نتیجه rework و ارتباط «تکمیل task → QC مجدد → release/approval» وجود ندارد. تکمیل task به‌تنهایی وضعیت QC را تغییر نمی‌دهد.
+
+[متوسط رو به بالا] 11. Checklistها master-data معتبر و versioned نیستند
+createQcChecklist وجود product و stage را در داده‌های پایه بررسی نمی‌کند؛ هر رشته‌ای پذیرفته می‌شود. endpoint و state machine برای edit، deactivate، replace/version و effective date وجود ندارد. QC تاریخی checklistId را نگه می‌دارد، اما snapshot کامل نام/آیتم‌ها روی خود Quality Check ثبت نمی‌شود؛ اگر در آینده Checklist ویرایش شود، معنای سابقه می‌تواند مبهم گردد.
+
+[متوسط رو به بالا] 12. پاسخ‌ها از نظر دامنه کافی اعتبارسنجی نمی‌شوند
+Backend فقط حضور codeهای required را کنترل می‌کند. response code ناشناخته، code تکراری، نبود value، نوع نامعتبر value یا پاسخ‌های متناقض پذیرفته می‌شوند. همچنین نتیجه نهایی APPROVED با پاسخ false ناسازگار مسدود نمی‌شود و هیچ rule قابل تنظیم برای derive کردن نتیجه وجود ندارد.
+
+[متوسط] 13. رکورد QC session/device/station مستقل ندارد
+quality_checks شامل inspector، checklist، responses، attestation و timestamp است، اما session_id، device_id، station، stage snapshot و previous/new operational state مستقیم ندارد. Audit HTTP بخشی از این اطلاعات را نگه می‌دارد، اما خود رکورد QC به‌تنهایی self-contained نیست و فراخوانی مستقیم domain نیز این شواهد را ندارد.
+
+[متوسط] 14. APPROVED/REJECTED تاریخچه دارند ولی «وضعیت جاری QC» مشخص نیست
+می‌توان چند تصمیم APPROVED و REJECTED برای یک Batch/stage ثبت کرد. مدل supersedes/revision/currentDecision ندارد و UI همه آنها را در KPI می‌شمارد. در نتیجه معلوم نیست آخرین تصمیم معتبر کدام است و شمارنده Approved/Rejected تعداد رویدادهاست، نه تعداد Batchهای دارای وضعیت جاری.
+
+[متوسط] 15. دامنه شیء QC فقط Batch است
+ماژول نمی‌تواند inspection را مستقیماً به Container، Tray، Package، Carton، Shipping Box، Cycle یا Equipment متصل کند. برای QC محصول Batch مناسب است، اما کنترل عملیاتی بسته‌بندی و تجهیزات باید یا با entity عمومی پشتیبانی شود یا صریحاً از دامنه Version 1 خارج اعلام گردد.
+
+[متوسط] 16. صفحه تعریف Checklist برای کاربر فاقد مجوز هم نمایش داده می‌شود
+QC Operator permission quality:approve دارد ولی config:write ندارد. بااین‌حال فرم «تعریف چک‌لیست» بدون can(config:write) نمایش داده می‌شود و تنها پس از submit با 403 رد می‌گردد. این نقص امنیت backend نیست، اما UX نقش‌محور نادرست است.
+
+[متوسط] 17. QC در PDA/Terminal قابل اجرا نیست
+PDA فقط inventory/task/movement عمومی دارد و فرم Checklist/inspection/attestation/quarantine/release ندارد. Terminal نیز مخصوص Receiving است. بنابراین QC عملیاتی در محل کار فقط از پنل مدیریتی وب انجام می‌شود، نه ابزار اسکن‌محور موبایل/خط تولید.
+
+[متوسط] 18. Batch در UI با dropdown انتخاب می‌شود، نه اسکن فیزیکی
+فرم QC همه Batchهای هم‌محصول را در dropdown نشان می‌دهد و هیچ Scanner Capture برای Batch/Container ندارد. این خطر بازرسی و امضای Batch اشتباه را بالا می‌برد، به‌خصوص وقتی کدهای مشابه هم‌زمان فعال باشند.
+
+[متوسط] 19. گزارش و جست‌وجوی QC محدود است
+نمای فعلی سه شمارنده و جدول ساده دارد. فیلتر بر اساس stage/product/inspector/date/result، نرخ rejection/rework، aging قرنطینه، overdue inspection، trend و export رسمی QC وجود ندارد. reports() نیز گزارش اختصاصی QC ارائه نمی‌دهد.
+
+[متوسط] 20. تست PostgreSQL واقعی گردش QC وجود ندارد
+تست repository یک qualityChecks fixture ساده و دستی ذخیره می‌کند. تست domain برای checklist/attestation/rework و تست HTTP برای double quarantine وجود دارند، اما تست واقعی PostgreSQL که از API با JWT نقش QC، Checklist، پاسخ منفی، قرنطینه، restart/reload، rework، reinspection و release عبور کند وجود ندارد. Container/Basket consistency نیز در تست QC بررسی نشده است.
+
+ارزیابی قابلیت‌ها
+=================
+
+Checklist Configuration: پایه مناسب؛ validation مرجع، versioning، deactivate/edit و UI مجوزمحور ناقص.
+
+Inspection: backend پاسخ آیتمی و attestation دارد؛ stage eligibility، اسکن فیزیکی و مدل پاسخ UI ناقص.
+
+Approval: ثبت می‌شود، اما gate مراحل بعدی و current-decision model ندارد.
+
+Rejection: corrective task می‌سازد، ولی Batch را مسدود یا وارد state ردشده نمی‌کند؛ پرریسک‌ترین شکاف ماژول.
+
+Quarantine: Batch را واقعاً از عملیات منع می‌کند و وضعیت قبلی را حفظ می‌کند؛ اما Container movement، Exception linkage و physical scan ناقص است.
+
+Release: دلیل و permission دارد؛ شواهد reinspection، attestation، مقصد سازگار و separation of duties ناقص.
+
+Rework: فقط یک task عمومی است، نه چرخه اصلاح و تأیید مجدد.
+
+Signature/Audit: هویت JWT و Audit خوب‌اند؛ نقش attestation قابل جعل و رکورد QC فاقد session/device snapshot مستقل است.
+
+نظر نهایی و اولویت پیشنهادی
+==========================
+ترتیب منطقی رسیدگی در آینده:
+
+1. تعریف state اثرگذار برای REJECTED و الزام QC gate در مراحل پیکربندی‌شده.
+2. اعتبارسنجی stage واقعی Batch و همگام‌کردن قرنطینه/آزادسازی با Container و movement فیزیکی.
+3. استخراج role امضا فقط از JWT/session و حذف اعتماد به role ارسالی client.
+4. اصلاح UI پاسخ‌ها به Pass/Fail/N/A و الزام اسکن Batch/Container.
+5. اتصال Quarantine Exception به Release و ساخت rework/reinspection workflow واقعی.
+6. کنترل مقصد release، four-eyes اختیاری و ثبت session/device روی QC record.
+7. versioned checklist با master-data validation و snapshot تاریخی.
+8. افزودن QC به PDA و تست PostgreSQL/HTTP کامل.
+
+حکم نهایی: زیرساخت ثبت QC و قرنطینه «قابل قبول برای پایلوت کنترل‌شده» است، اما به علت غیرمسدودبودن REJECTED، امکان امضای نقش جعلی، نبود stage validation و ناهماهنگی Container هنگام قرنطینه، برای کنترل کیفیت عملیاتی واقعی و قابل استناد آماده نیست.
+
+یادداشت روش بررسی
+=================
+در این نوبت هیچ فایل کد، migration، تست، تنظیم یا داده عملیاتی تغییر نکرد. تست جدیدی نوشته یا اجرا نشد. تنها فایل ایجادشده همین گزارش است و همه نتیجه‌ها از بررسی مستقیم refهای GitHub بالا و تطبیق آنها با سند مرجع به دست آمده‌اند.

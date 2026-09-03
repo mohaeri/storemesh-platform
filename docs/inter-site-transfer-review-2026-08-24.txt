@@ -1,0 +1,189 @@
+گزارش بررسی بخش انتقال بین‌سایتی AnbarSYS / StoreMesh
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ بدون تغییر کد، تنظیمات، تست یا داده عملیاتی
+
+مبنای نسخه GitHub
+=================
+پیش از بررسی، repositoryهای مرتبط با git fetch --prune تازه‌سازی شدند. گزارش مستقیماً براساس فایل‌های commitشده در refهای زیر در GitHub تهیه شده است:
+
+- storemesh-platform: origin/feat/addendum-01-fix-request-07 @ 8681403
+- storemesh-site-server: origin/audit-fr7-v3 @ 34e209e
+- storemesh-web: origin/audit-fr7-web-v2 @ 1603cc6
+- storemesh-pda: origin/feat/operations-completion-round-3 @ 52a459f
+- storemesh-terminal: origin/feat/operations-completion-round-3 @ abbe707
+- storemesh-contracts: origin/feat/addendum-01-fix-request-07 @ 2b48758
+
+این شاخه‌ها جدیدتر از origin/main هستند؛ بنابراین ارزیابی مربوط به آخرین کد منتشرشده روی GitHub است، نه main قدیمی. مبنای قضاوت محتوای خود refهای ریموت است.
+
+دامنه بررسی
+===========
+Multi-Site Operations، SC-SITE-001..003، BR-SITE-001..003، BR-SH-001..006، ساخت Internal Shipment در سایت مبدأ، رزرو Package، LOAD/DISPATCH/DELIVER/CANCEL، Manifest، احراز اصالت و تمامیت، دریافت در سایت مقصد، ساخت موجودی محلی، جلوگیری از duplicate، شجره خارجی، Site JWT isolation، Outbox/Cloud، Audit، PostgreSQL، UI، PDA/Terminal، قرارداد API و تست‌ها بررسی شدند.
+
+مدل مورد انتظار سند
+===================
+هر سایت Database و write ownership مستقل دارد. انتقال فقط باید از یک Shipment در سایت مبدأ و Receiving متناظر با source=INTERNAL_TRANSFER در مقصد انجام شود. سایت مبدأ پس از Dispatch موجودی خود را SHIPPED و غیرقابل ویرایش می‌کند؛ مقصد پس از اسکن محموله و تأیید دریافت، Batch جدید محلی با reference به Shipment/Batch مبدأ و Inventory Transaction ایجاد می‌کند. هیچ distributed transaction یا direct cross-site write لازم نیست و قطع اینترنت/Cloud نباید عملیات محلی را متوقف کند.
+
+جمع‌بندی مدیریتی
+================
+جهت معماری کلان درست است. انتقال در دو StoreMesh/Database مستقل مدل شده، مبدأ Packageهای READY_TO_SHIP را در Internal Shipment رزرو و هنگام DISPATCH درخت آنها را SHIPPED می‌کند؛ مقصد با یک Manifest، Batchهای جدید متعلق به سایت خودش می‌سازد و sourceSite/shipmentCode/external parent را حفظ می‌کند. duplicate receive، wrong destination و premature manifest رد می‌شوند و Site JWTهای متقاطع نیز جداگانه block هستند. این با اصل ownership مستقل و نبود distributed transaction هم‌راستاست.
+
+اما مرز اعتماد بین سایت‌ها امن نیست. Manifest صرفاً JSON قابل paste است و هیچ signature، hash، nonce، source-server authentication یا lookup تأییدشده‌ای ندارد؛ یک کاربر دارای operations:write در مقصد می‌تواند موجودی دلخواه بسازد. علاوه بر آن دریافت فیزیکی هیچ Shipment QR، Package scan یا Container scan نمی‌خواهد و `receivedBy` از body client پذیرفته می‌شود. در مبدأ نیز LOAD/DISPATCH بدون اسکن، Vehicle، Shipping Session یا revalidation انجام می‌شود.
+
+نظر نهایی: معماری ownership و persistence برای prototype مناسب است؛ برای انتقال واقعی بین ایران، دبی و رم به علت Manifest قابل جعل و نبود کنترل فیزیکی دوطرفه آماده نیست.
+
+نقاط مثبت تأییدشده
+===================
+1. هر سایت StoreMesh/Repository مستقل دارد و انتقال direct write به DB سایت دیگر انجام نمی‌دهد.
+2. Site JWT با claim سایت متفاوت توسط سرور مقصد با 403/SITE رد می‌شود.
+3. Internal Shipment از Customer Shipment با kind و state machine مستقل جدا شده است.
+4. Internal Shipment مقصد سایت و packageIds می‌خواهد و Shipment خالی رد می‌شود.
+5. Package باید top-level، READY_TO_SHIP و بدون shipmentId قبلی باشد.
+6. Package nested نمی‌تواند مستقل انتقال داده شود.
+7. Package رزروشده نمی‌تواند هم‌زمان به Internal Shipment دوم تخصیص یابد.
+8. state machine مبدأ READY→LOADED→DISPATCHED→DELIVERED و cancellation پیش از load را دارد.
+9. DISPATCH وضعیت Package و همه descendants را SHIPPED و shipmentId را حفظ می‌کند.
+10. Manifest شامل version، sourceSite، destinationSite، shipmentCode، status و package content است.
+11. packageItemsRecursive محتوای UNITهای nested در CARTON/EPS/PALLET را تا Batch allocation استخراج می‌کند.
+12. Manifest خالی برای Package غیرخالی در مقصد رد می‌شود.
+13. مقصد destinationSite را با app.site خودش تطبیق می‌دهد.
+14. مقصد فقط Manifest وضعیت DISPATCHED یا DELIVERED را می‌پذیرد.
+15. دریافت تکراری براساس site+sourceSite+shipmentCode هم در domain و هم unique constraint DB رد می‌شود.
+16. product/grade/size ورودی باید در Master Data فعال مقصد وجود داشته باشد.
+17. مقصد Batch جدید با site محلی، status=RECEIVED، zone=RECEIVING و sourceTransfer می‌سازد.
+18. externalParents حداقل source site و source batch code را حفظ می‌کند.
+19. وزن هر allocation به Batch مقصد و Measurement با reason=INTERNAL_TRANSFER تبدیل می‌شود.
+20. Batch مقصد label/print job محلی دریافت می‌کند.
+21. Internal Transfer record خود Manifest کامل را در JSONB نگه می‌دارد.
+22. تمام عملیات state-changing idempotent و snapshot-rollback هستند.
+23. دریافت نامعتبر به‌صورت اتمیک rollback می‌شود و Batch نیمه‌ساخته باقی نمی‌گذارد.
+24. Audit عمومی در هر سایت user/request/IP/result/device/roles/station و before/after دارد.
+25. هر event در Outbox محلی قرار می‌گیرد؛ وابستگی synchronous به Cloud وجود ندارد.
+26. PostgreSQL Shipment، Package assignment، source transfer metadata، External Parents و Internal Transfer را ذخیره می‌کند.
+27. تست domain انتقال بین دو StoreMesh مستقل، مقصد غلط، prematurity، duplicate و nested hierarchy را پوشش می‌دهد.
+28. Cross-site design در قطع ارتباط Cloud همچنان local-first می‌ماند.
+
+مغایرت‌ها و ریسک‌های اصلی
+=========================
+
+[بحرانی] 1. Manifest قابل جعل است و می‌تواند موجودی مصنوعی بسازد
+receiveInternalTransfer هر object ارسالی client را منبع حقیقت می‌داند. signature/HMAC، public-key signature، digest، trusted source registry، mTLS/server credential، signed QR، nonce یا callback به source وجود ندارد. مهاجم یا client معیوب می‌تواند sourceSite، shipmentCode، package، batchCode، product و weight دلخواه بسازد و مقصد Batch واقعی ایجاد می‌کند. destination/status/duplicate checks اصالت محتوا را اثبات نمی‌کنند.
+
+[بحرانی] 2. دریافت فیزیکی بدون هیچ اسکن Package/Shipment/Container انجام می‌شود
+SC-SITE-001 می‌گوید اپراتور مقصد incoming shipment را اسکن و receipt را confirm کند. API فعلی فقط sessionId و manifest JSON می‌خواهد؛ Shipment QR، Package/Carton scan، expected-vs-scanned، seal verification، Container scan، وزن ورودی یا confirmation مرحله‌ای وجود ندارد. UI نیز textarea برای paste JSON دارد. با یک submit، موجودی بدون مشاهده کالای فیزیکی ایجاد می‌شود.
+
+[بحرانی] 3. receiving container rule دور زده می‌شود
+Receiving معمول سیستم Container/Basket معتبر و scanned را اجباری می‌کند، اما receiveInternalTransfer Batchها را مستقیماً با zone=RECEIVING و containerId=null می‌سازد. Delivery/Receiving Session و container capacity/status/assignment بررسی نمی‌شوند. محصول فیزیکی وارد موجودی می‌شود ولی هیچ ظرف/مکان قابل ردیابی ندارد و برای مراحل بعد باید جداگانه نجات داده شود.
+
+[بحرانی] 4. receivedBy از client قابل جعل است
+server در /api/internal-transfers/receive مقدار receivedBy را با user.sub جایگزین نمی‌کند. domain همان رشته/UUID body را در transfer ذخیره می‌کند. یک اپراتور می‌تواند شخص دیگری را به‌عنوان دریافت‌کننده ثبت کند یا مقدار نامعتبر بدهد؛ Audit context هویت واقعی را دارد، اما رکورد کسب‌وکاری transfer قابل اتکا نیست و مقدار non-UUID می‌تواند persistence را شکست دهد.
+
+[بحرانی] 5. مبدأ بدون اسکن فیزیکی LOAD و DISPATCH می‌کند
+Internal Shipment بلافاصله READY است. LOAD هیچ session، device، operator، vehicle یا Package scan نمی‌خواهد و DISPATCH نیز صرفاً status transition است. Package eligibility در لحظه dispatch دوباره بررسی نمی‌شود. کنترل دقیق Carton scan که در Customer Shipment وجود دارد، برای انتقال بین‌سایتی کاملاً غایب است.
+
+[بحرانی] 6. دریافت مقصد و DELIVERED مبدأ handshake واقعی ندارند
+مبدأ می‌تواند پس از DISPATCH خودش Shipment را DELIVERED کند، بدون receipt proof مقصد. مقصد نیز receipt را ثبت می‌کند ولی acknowledgment امضاشده یا event correlation به مبدأ نمی‌فرستد. بنابراین ممکن است مبدأ DELIVERED و مقصد فاقد موجودی باشد، یا مقصد دریافت کرده ولی مبدأ برای همیشه DISPATCHED بماند. عدم distributed transaction درست است، اما state reconciliation/acknowledgment لازم است.
+
+[بالا] 7. Manifest endpoint permission اختصاصی ندارد
+GET /api/shipments/:id/manifest هیچ needs('shipping:write' یا permission read مخصوص انتقال) ندارد. در production auth عمومی سرور همچنان user معتبر می‌خواهد، اما هر نقش authenticated می‌تواند آن را فراخوانی کند؛ در محیط non-production با auth غیرفعال عمومی می‌شود. route همچنین Shipment را به kind=INTERNAL_TRANSFER محدود نمی‌کند.
+
+[بالا] 8. Manifest validation ساختاری بسیار ضعیف است
+manifestVersion بررسی نمی‌شود؛ sourceSite/shipmentCode/packageCode/type/batchCode required یا format-validated نیستند؛ package و item duplicate detection، total weight، count، hierarchy، status consistency و maximum size وجود ندارد. Manifest با shipmentCode/source ناقص ممکن است تازه در DB شکست بخورد یا سابقه مبهم ایجاد کند.
+
+[بالا] 9. destinationSite هر رشته‌ای و حتی سایت مبدأ می‌تواند باشد
+createInternalShipment مقصد را فقط truthy می‌خواهد. catalog سایت‌های IRAN/DUBAI/ROME، status سایت، ممنوعیت destinationSite===source site و route/permission policy وجود ندارد. Shipment به TYPO یا همان سایت ساخته و Packageها رزرو می‌شوند، بدون مقصد واقعی برای دریافت.
+
+[بالا] 10. Internal cancellation Packageها را آزاد نمی‌کند
+READY→CANCELLED فقط status Shipment را تغییر می‌دهد؛ shipmentId روی Packageها باقی می‌ماند. Packageهای محموله لغوشده دیگر در Shipment دیگری قابل استفاده نیستند و موجودی Finished Goods عملاً stranded می‌شود. reason، actor/session و cancellation task cleanup نیز وجود ندارد.
+
+[بالا] 11. eligibility در LOAD/DISPATCH revalidate نمی‌شود
+Package فقط هنگام createInternalShipment READY_TO_SHIP بررسی می‌شود. اگر بعداً DAMAGED، quarantined، unlabeled، locked یا دارای blocking exception شود، LOAD و DISPATCH آن را دوباره نمی‌سنجند و markPackageTree در نهایت وضعیت را SHIPPED می‌کند. همان ریسک customer shipment در این مسیر شدیدتر است چون scan هم وجود ندارد.
+
+[بالا] 12. Label و QC شرط انتقال نیستند
+READY_TO_SHIP می‌تواند مستقل از Print Job موفق جعل/transition شود؛ createInternalShipment label status/attempt را نمی‌سنجد. QC Approval نیز لازم نیست و REJECTED Batch در مدل فعلی block نمی‌شود. انتقال کالای بی‌لیبل یا ردشده میان سایت‌ها ممکن است.
+
+[بالا] 13. فهرست Packageها join table مستقل ندارد
+Shipment.packageIds پس از load از packages.shipment_id بازسازی می‌شود، نه از Shipment Lineهای immutable. این برای active/dispatched کار می‌کند، اما history را به وضعیت جاری Package وابسته می‌سازد و اصلاح cancellation به‌سادگی می‌تواند expected list را پاک کند. مدل سند shipment_cartons با رکورد مستقل loaded_at/loaded_by را پیشنهاد می‌کند.
+
+[بالا] 14. batchIds رکورد Internal Transfer پس از restart از بین می‌رود
+domain هنگام receipt مقدار transfer.batchIds را پر می‌کند، اما جدول internal_transfers ستونی/رابطه‌ای برای آنها ندارد و repository در load همیشه batchIds:[] می‌سازد. UI بعد از restart تعداد Batchهای ایجادشده را صفر نشان می‌دهد. Manifest باقی است، ولی ارتباط مستقیم قابل query بین Receipt و Batchهای مقصد پایدار نیست.
+
+[بالا] 15. Receiving/Inventory Transaction متناظر کامل ساخته نمی‌شود
+سند transfer را paired Shipment + Receiving و سناریو Inventory Transaction در مقصد می‌خواهد. implementation یک internalTransfers record، Batch و Measurement می‌سازد؛ Delivery/Receiving entity، referenceShipmentId، inventory movement/receipt transaction، arrival time/condition و completion state مستقل ندارد. sourceTransfer string جای workflow کامل Receiving را گرفته است.
+
+[بالا] 16. Package hierarchy و identity در مقصد از بین می‌رود
+Manifest Packageهای مبدأ را به itemهای تخت تبدیل می‌کند و مقصد فقط Batch جدید می‌سازد. Carton/EPS/Pallet/UNIT identity، serial، parent-child hierarchy، label history و exact package contents به inventory object مقصد منتقل نمی‌شوند. Manifest archive باقی است، اما مقصد نمی‌تواند همان Carton را در Finished Goods/Shipment بعدی به‌عنوان Package واقعی مدیریت کند.
+
+[متوسط رو به بالا] 17. genealogy خارجی حداقلی و شکننده است
+externalParents فقط site و batchCode دارد؛ source shipment ID/code، package code، source entity ID، allocation sequence و cryptographic digest روی هر Batch مقصد snapshot نمی‌شود. Batch code در سایت مبدأ string است و بدون signed manifest قابلیت استناد مستقل ندارد.
+
+[متوسط رو به بالا] 18. یک allocation مبدأ می‌تواند در Manifest تکرار شود
+مقصد manifestItems را flatMap می‌کند و برای هر row Batch جدید می‌سازد؛ duplicate batchCode/packageCode یا repeated item شناسایی نمی‌شود. یک Manifest جعلی/خراب می‌تواند وزن را دو یا چند برابر وارد موجودی کند، حتی اگر shipmentCode خودش فقط یک‌بار پذیرفته شود.
+
+[متوسط رو به بالا] 19. source packageIds ورودی duplicate صریحاً رد نمی‌شوند
+createInternalShipment برخلاف Customer Shipment حتی Set هم استفاده نمی‌کند. یک Package ID می‌تواند چند بار در آرایه باشد، Manifest آن را چند بار صادر کند و در مقصد موجودی تکراری بسازد. assignment روی Package یک‌بار است، اما Shipment payload و receipt quantity duplicate می‌شوند.
+
+[متوسط] 20. Site master data synchronization/reconciliation ندارد
+مقصد product/grade/size را فقط با code فعال محلی تطبیق می‌دهد. اختلاف catalog کل transfer را block می‌کند که بهتر از ورود داده ناشناخته است، اما mapping/version، alias، preflight و Exception قابل اقدام وجود ندارد. اپراتور فقط خطا می‌بیند و نمی‌داند کدام reference باید هماهنگ شود.
+
+[متوسط] 21. Source Shipment metadata عملیاتی ناقص است
+createdBy، shipping session، loadedBy، dispatchedBy، vehicle، planned/actual date، seal number، package scan sequence و notes روی Internal Shipment نیستند. Audit HTTP بخشی از actor را دارد، اما Shipment به‌تنهایی self-contained و مناسب سند خروج نیست.
+
+[متوسط] 22. Destination receipt metadata ناقص است
+receivedAt و receivedBy ذخیره می‌شوند، اما device/session، condition، received package count/weight، discrepancy، damaged/missing، seal check، QC decision و receiving containerها روی record نیستند. no discrepancy workflow یا Exception خودکار وجود ندارد.
+
+[متوسط] 23. UI مبدأ وجود ندارد
+پنل وب فرم ساخت Internal Shipment، انتخاب destination/package، scan/load/dispatch، cancellation، تولید/دانلود Manifest و وضعیت acknowledgment ندارد. مسیر مبدأ فقط از API قابل اجراست؛ صفحه Transfers فقط دریافت JSON را نشان می‌دهد.
+
+[متوسط] 24. UI مقصد به paste JSON متکی است
+textarea آزاد هم خطای انسانی و هم دستکاری را آسان می‌کند. QR scan، file signature validation، source summary، expected contents، count/weight comparison و confirmation screen وجود ندارد. پس از دریافت فقط جدول source/shipment/batch count نشان داده می‌شود که count بعد از restart نیز صفر می‌شود.
+
+[متوسط] 25. PDA/Terminal انتقال بین‌سایتی را اجرا نمی‌کنند
+هیچ incoming shipment scan، package verification، unloading/container assignment یا discrepancy capture در PDA/Terminal وجود ندارد. برای عملیات انبار دبی/رم این workflow باید handheld-first باشد، نه paste JSON در پنل مدیریتی.
+
+[متوسط] 26. دریافت هر دو وضعیت DISPATCHED و DELIVERED را می‌پذیرد ولی state receipt ندارد
+پذیرش DELIVERED برای recovery ممکن است مفید باشد، اما Internal Transfer مقصد lifecycle مثل EXPECTED→ARRIVED→VERIFYING→RECEIVED/EXCEPTION ندارد. receipt یک عملیات یک‌مرحله‌ای است و امکان pause/reconcile ندارد.
+
+[متوسط] 27. Outbox فقط گزارش Cloud است، نه کانال مطمئن transfer
+local Outbox مزیت availability را تأمین می‌کند، اما هیچ event consumer/site inbox، delivery acknowledgment، retry/dead-letter یا ordered transfer protocol میان مبدأ و مقصد وجود ندارد. کاربر Manifest را دستی جابه‌جا می‌کند. این با نبود distributed transaction سازگار است، ولی قابلیت اطمینان end-to-end را کامل نمی‌کند.
+
+[متوسط] 28. BR-SITE/BR-SH mapping کامل نیست
+خطاهایی مانند TRANSFER_DESTINATION_MISMATCH، TRANSFER_NOT_DISPATCHED و PACKAGE_ALREADY_SHIPPED وجود دارند، اما BR-SITE-002 و BR-SH-001..006 به‌عنوان errorCode واحد سندی در همه مسیرها استفاده نمی‌شوند. compliance و client behavior از روی BR-ID قابل اثبات نیست.
+
+[متوسط] 29. تست PostgreSQL واقعی دوطرفه وجود ندارد
+تست‌های انتقال فعلی دو StoreMesh حافظه‌ای می‌سازند و wrong destination/premature/duplicate/nested manifest را بررسی می‌کنند. تست real PostgreSQL با دو site/database context که create→load→dispatch→manifest→destination scan/receive→flush/restart هر دو طرف→trace/reconciliation را اجرا کند وجود ندارد. forged manifest، duplicate item/package، internal cancel release، batchIds persistence، invalid receivedBy، label/QC gate و manifest authorization نیز تست نشده‌اند.
+
+ارزیابی انطباق با قواعد سایت
+===========================
+
+BR-SITE-001 — مالکیت محلی: از نظر DB مستقل و JWT site claim خوب اجرا شده؛ Manifest جعلی می‌تواند مالکیت جدید مصنوعی ایجاد کند و مرز اعتماد را تضعیف می‌کند.
+
+BR-SITE-002 — فقط Shipment+Receiving: Shipment و receipt-like record وجود دارند، اما Receiving استاندارد/فیزیکی کامل نیست و اصالت pairing اثبات نمی‌شود؛ انطباق ناقص.
+
+BR-SITE-003 — Cloud read-only: معماری local Outbox/Cloud read-only رعایت شده و انتقال به Cloud write وابسته نیست.
+
+SC-SITE-001 — انتقال ایران→دبی: منطق پایه source/destination وجود دارد؛ Shipment scan، container receiving، inventory transaction، acknowledgment و package identity destination ناقص‌اند.
+
+SC-SITE-002 — قطع اینترنت: عملیات local و Outbox از نظر طراحی مناسب است.
+
+SC-SITE-003 — QC در مقصد: Batch محلی مقصد ساخته می‌شود و write ownership درست است؛ اما trace خارجی و QC/package continuity حداقلی است.
+
+نظر نهایی و اولویت پیشنهادی
+==========================
+ترتیب منطقی رسیدگی در آینده:
+
+1. تعریف Signed Transfer Manifest با manifest ID/UUID، digest، key identity، expiry/nonce و trust registry سایت‌ها؛ حذف اعتماد به JSON آزاد.
+2. ساخت protocol ناهمگام Site Outbox→Destination Inbox→Receipt Acknowledgment بدون distributed transaction.
+3. الزام Shipment/Package scans، Shipping Session و revalidation کامل در LOAD/DISPATCH مبدأ.
+4. الزام incoming Shipment/Package/Container scans، وزن/condition و confirmation مرحله‌ای در مقصد.
+5. استخراج receivedBy فقط از JWT و ثبت session/device/operators هر دو طرف.
+6. مدل join پایدار Shipment Items و Destination Transfer Items؛ حفظ batchIds، counts، weights و package hierarchy پس از restart.
+7. اصلاح cancellation برای آزادسازی Packageها و حفظ history، reason و task cleanup.
+8. whitelist سایت‌ها، منع self-transfer، validation کامل schema/version/duplicates/totals و manifest size limits.
+9. ساخت UI مبدأ و handheld-first UI مقصد با discrepancy/exception workflow.
+10. تست adversarial دوطرفه HTTP+PostgreSQL با restart و forged/replayed/tampered manifest scenarios.
+
+حکم نهایی: اصل استقلال سایت‌ها و ساخت Batch محلی مقصد درست انتخاب شده است، اما انتقال فعلی بیشتر «import دستی JSON» است تا زنجیره انتقال فیزیکی امن. تا زمانی که Manifest امضاشده، scan دوطرفه، container receiving، acknowledgment و روابط پایدار Shipment/Receipt وجود نداشته باشند، برای انتقال واقعی بین ایران، دبی و رم آماده نیست.
+
+یادداشت روش بررسی
+=================
+در این نوبت هیچ فایل کد، migration، تست، تنظیم یا داده عملیاتی تغییر نکرد. تست جدیدی نوشته یا اجرا نشد. تنها فایل ایجادشده همین گزارش است و همه نتیجه‌ها از بررسی مستقیم refهای GitHub بالا و تطبیق آنها با سند مرجع به دست آمده‌اند.

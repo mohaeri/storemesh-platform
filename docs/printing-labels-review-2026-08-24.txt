@@ -1,0 +1,264 @@
+گزارش بررسی بخش «چاپ و لیبل» StoreMesh / AnbarSYS
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ تطبیق سند با کد و تست‌های موجود روی GitHub
+
+منابع بررسی
+============
+
+این گزارش مستقیماً از refهای GitHub تهیه شده است، نه از فایل‌های اصلاح‌نشده یا تغییرات محلی:
+
+- سند مرجع: storemesh-platform، origin/feat/addendum-01-fix-request-07، commit 8681403
+  فایل docs/anbarsys-spec.md، به‌ویژه فصل‌های 14 و 15، قواعد BR-LB-001 تا BR-LB-011، state machineهای 7.15 تا 7.18، سناریوهای بحرانی چاپ و بخش‌های امنیت/هم‌زمانی
+- Backend: storemesh-site-server، origin/audit-fr7-v3، commit 34e209e
+- پنل وب: storemesh-web، origin/audit-fr7-web-v2، commit 1603cc6
+- ترمینال: storemesh-terminal، origin/feat/operations-completion-round-3، commit abbe707
+- PDA: storemesh-pda، origin/feat/operations-completion-round-3، commit 52a459f
+- Contracts: storemesh-contracts، origin/feat/addendum-01-fix-request-07، commit 2b48758
+
+هیچ کد، migration، داده، تنظیمات یا تستی تغییر داده یا اجرا نشد. تنها همین فایل گزارش ایجاد شد. نتیجه یک ارزیابی ایستای کد و تست‌های commitشده روی GitHub است و ادعای تست زنده با چاپگر صنعتی یا PostgreSQL نیست.
+
+نظر نهایی
+==========
+
+بخش چاپ و لیبل از نظر «حفظ هویت واحد، ثبت تلاش‌ها، بازیابی خطا و جلوگیری از retry جعلی در UI» پایه خوبی دارد، اما هنوز Print Engine مستقل و کنترل‌شده‌ای که سند تعریف کرده نیست. مهم‌ترین مشکل معماری این است که سه واقعیت جدا از هم نگه‌داری می‌شوند و همگام نیستند:
+
+1. وضعیت Label
+2. وضعیت Print Attempt / Print Job
+3. وضعیت Package یا شیء کسب‌وکار
+
+در نتیجه سیستم می‌تواند Package را LABEL_PRINTED اعلام کند بدون آنکه Print Job واقعاً موفق شده باشد؛ یا Print Job را PRINTED کند بدون آنکه Package به مرحله بعد برود. همچنین تلاش FAILED را می‌توان از endpoint عمومی complete مستقیماً موفق اعلام کرد و مسیر retry و اسکن فیزیکی را دور زد. بنابراین در وضعیت فعلی، «چاپ موفق» در سیستم تضمین قابل اتکایی برای وجود و اتصال صحیح لیبل فیزیکی نیست.
+
+برای محیط آزمایشی و چاپ ساده مناسب است، اما برای اتکای عملیاتی و رهگیری کنترل‌شده لیبل در تولید واقعی هنوز آماده نیست. انطباق کلی با فصل‌های 14 و 15 حدود 40٪ تا 50٪ ارزیابی می‌شود.
+
+نقاط قوت تأییدشده در GitHub
+============================
+
+1. مدل Label از Print Attempt جدا شده است. جدول labels برای هر site/entityType/entityId فقط یک رکورد می‌پذیرد و identity نیز در هر سایت unique است. این طراحی با اصل «یک هویت برای یک شیء» همسو است.
+
+2. retry همان Label موجود را بازیابی می‌کند و attempt جدید با attemptNo بعدی می‌سازد؛ Package، Carton، Batch یا Shipment جدیدی ایجاد نمی‌شود. این قسمت با BR-LB-003، BR-LB-006 و BR-LB-011 هم‌راستاست.
+
+3. print_attempts در PostgreSQL نگه‌داری می‌شود و attemptNo، وضعیت، خطا، زمان درخواست/پایان، sessionId، deviceId و verifiedScan را ذخیره می‌کند. تاریخچه تلاش‌های شکست‌خورده حذف نمی‌شود.
+
+4. complete/fail/retry نیازمند Session فعال و Device معتبر هستند. device provenance در Print Attempt و Audit ثبت می‌شود.
+
+5. شکست چاپ Exception پایدار MISSING_OR_FAILED_LABEL ایجاد و رخداد LABEL_PRINT_FAILED ثبت می‌کند. تولید نیز با شکست چاپ از بین نمی‌رود و شیء اصلی باقی می‌ماند؛ این اصل با BR-LB-002 همسو است.
+
+6. retry در backend فقط وقتی verifiedScan دقیقاً برابر label.identity باشد پذیرفته می‌شود.
+
+7. پنل وب مقدار مورد انتظار را داخل دکمه یا dataset قرار نمی‌دهد. ورودی retry از scanner field مستقل، readonly و scanner-verified گرفته می‌شود. کلیک بدون اسکن یا اسکن اشتباه در client و backend رد می‌شود. تست مستقل reprint-verification نیز دقیقاً این مسیر را پوشش می‌دهد.
+
+8. قالب PDF آفلاین برای QR کانتینر وجود دارد و QR بر اساس code دائمی کانتینر تولید می‌شود. تست، ساختار واقعی PDF و وجود identity را بررسی می‌کند.
+
+9. ترمینال یک boundary واقعی برای Printer Protocol دارد و فقط پاسخ مثبت چاپگر را success می‌داند؛ پاسخ PAPER_OUT یا خطای اتصال باعث fail شدن job می‌شود. SimulatedPrinter نیز صریحاً test double معرفی شده است.
+
+10. workflow ترمینال صف PENDING را دریافت می‌کند، چاپ را به adapter می‌سپارد و سپس complete یا fail را همراه sessionId به backend گزارش می‌دهد.
+
+11. برای Container، درخواست چاپ اختیاری شده و ساخت Basket الزاماً Label جدید تولید نمی‌کند؛ این با قاعده QR دائمی سبدهای reusable در سند سازگار است.
+
+یافته‌های بحرانی
+===============
+
+C1 — Package می‌تواند بدون چاپ واقعی LABEL_PRINTED شود
+
+state machine بسته‌بندی endpoint مستقلی برای action=PRINT_SUCCESS دارد. این action صرفاً وضعیت Package را از PRINTING به LABEL_PRINTED تغییر می‌دهد و هیچ Print Attempt موفق، printer acknowledgement، session/device چاپ یا Label status=PRINTED را بررسی نمی‌کند. هر کاربر دارای packaging:write می‌تواند آن را فراخوانی کند، حتی اگر job هنوز PENDING یا FAILED باشد.
+
+اثر: Package می‌تواند READY_TO_SHIP و سپس SHIPPED شود در حالی که هیچ لیبل فیزیکی موفقی ثبت نشده است. این مغایر BR-LB-005، قاعده «Unlabeled cartons remain at printing station» و سناریوی Carton Without Label است.
+
+پیشنهاد آینده: PRINT_SUCCESS عمومی حذف یا به confirmation token یک Print Attempt موفق وابسته شود؛ انتقال Package به LABEL_PRINTED باید در همان transaction موفقیت چاپ و فقط توسط Print Engine رخ دهد.
+
+C2 — نتیجه Print Job، وضعیت Package را به‌روزرسانی نمی‌کند
+
+completePrint فقط job و attempt را PRINTED می‌کند و Audit می‌نویسد. Label اصلی همچنان PENDING می‌ماند و Package/Shipping Box/Batch/Container متناظر تغییر وضعیت نمی‌دهد. بنابراین حتی مسیر درست ترمینال نیز سه state را اتمیک همگام نمی‌کند.
+
+اثر: گزارش‌ها و UIهای مختلف می‌توانند درباره چاپ‌شدن یک شیء جواب‌های متفاوت بدهند. Label state machine سند عملاً اجرا نمی‌شود.
+
+C3 — اسکن retry از طریق endpoint complete قابل دورزدن است
+
+completePrint هیچ transition guard برای وضعیت فعلی attempt/job ندارد. تنها وجود job و session را بررسی می‌کند. بعد از fail شدن Attempt، همان شناسه FAILED را می‌توان مستقیماً به /complete فرستاد و PRINTED کرد؛ بدون فراخوانی retry، بدون verifiedScan و بدون ساخت Attempt جدید. complete دوباره روی job چاپ‌شده نیز منع نشده است.
+
+این مسیر حفاظت واقعی retry را دور می‌زند و سابقه را تحریف می‌کند: Attempt شکست‌خورده به‌جای باقی‌ماندن FAILED به PRINTED بازنویسی می‌شود. مغایر BR-LB-004، BR-LB-005، state machine تلاش چاپ و هدف اصلی Reprint Workflow است.
+
+پیشنهاد آینده: complete فقط attempt در SENT_TO_PRINTER/PRINTING را قبول کند؛ FAILED terminal باشد؛ retry همیشه attempt جدید بسازد؛ transitionها با compare-and-set و idempotency کنترل شوند.
+
+C4 — چاپ اولیه و retry روی وضعیت فیزیکی قابل تفکیک نیستند
+
+queuePrint یک Attempt با PENDING می‌سازد، ولی مرحله‌های REQUESTED، SENT_TO_PRINTER و PRINTING وجود ندارند. هیچ «lease/claim» برای یک چاپگر نیست. چند ترمینال می‌توانند همان PENDING job را هم‌زمان بخوانند و هر دو فیزیکی چاپ کنند. Complete شدن اولی مانع چاپی که قبلاً در ترمینال دوم آغاز شده نمی‌شود.
+
+اثر: هویت دیتابیسی تکراری نمی‌شود، اما چند نسخه فیزیکی ناخواسته از یک لیبل تولید می‌شود؛ دقیقاً ریسکی که Print Lock و سناریوی response lost در سند برای آن تعریف شده‌اند.
+
+یافته‌های مهم
+==============
+
+H1 — Label state machine پیاده نشده است
+
+سند NOT_CREATED/PENDING/PRINTING/PRINTED/VOID/REPLACED را تعریف می‌کند. دیتابیس فقط PENDING/VERIFIED/VOID دارد و کد complete/fail/retry اساساً status رکورد Label را تغییر نمی‌دهد. VERIFIED نیز در مسیر چاپ استفاده نمی‌شود و REPLACED وجود ندارد.
+
+H2 — Print Attempt state machine بیش از حد ساده است
+
+سند REQUESTED → SENT_TO_PRINTER → PRINTING → SUCCESS یا FAILED را می‌خواهد. کد فقط PENDING/PRINTED/FAILED دارد. معلوم نیست job تحویل چاپگر شده، چاپگر پذیرفته، در حال چاپ است یا پاسخ گم شده است. سناریو «چاپ انجام شد ولی پاسخ سرور گم شد» قابل مدیریت ایمن نیست.
+
+H3 — مفهوم Reprint Request/Authorization وجود ندارد
+
+سند برای reprint وضعیت‌های REQUESTED/AUTHORIZED/PRINTING/COMPLETED/FAILED/CANCELLED و سیاست مجوز بر اساس نوع لیبل دارد. کد فقط generic permission «print:write» دارد؛ Retail/Carton/EPS همان مجوز Basket را دارند. Manager approval، approval user، cancel و تنظیمات نوع لیبل وجود ندارند.
+
+H4 — دلیل Reprint ثبت نمی‌شود
+
+retryPrint فقط verifiedScan و sessionId می‌گیرد. reason اجباری، reason code و گزینه‌های Printer Error/Damaged/Lost/Poor Quality/Customer Request وجود ندارند. Audit LABEL_PRINT_REQUEUED نیز reason، approval user و reprint number را ندارد. مغایر فصل 15.11، 15.17 و 15.18.
+
+H5 — verification فعلی برای شکست چاپ اولیه می‌تواند workflow را قفل کند
+
+retry همیشه اسکن label.identity موجود را می‌خواهد. اگر چاپ اولیه واقعاً به‌علت printer offline یا نبود رول هیچ خروجی فیزیکی تولید نکرده باشد، چیزی برای اسکن وجود ندارد؛ بنابراین retry مجاز backend عملاً ناممکن می‌شود. از سوی دیگر، برای Carton پرریسک سند پیشنهاد می‌کند خود Carton یا یک/چند Package داخل آن اسکن شود، نه لزوماً برچسب خراب/موجود.
+
+پیشنهاد آینده: دو مسیر جدا تعریف شود: «retry پس از عدم تولید فیزیکی» با اسکن شیء/محتوای Carton، و «replacement/reprint لیبل موجود» با اسکن لیبل قبلی؛ هر دو باید context فیزیکی را اثبات کنند.
+
+H6 — محتوای Label بسیار ناقص است
+
+queuePrint payload را فقط با identity می‌سازد؛ برای Container فقط singleUse افزوده می‌شود. Product، weight، production/expiry date، lot، barcode، template version و configuration-specific fields در Label snapshot ذخیره نمی‌شوند. ترمینال نیز فقط {code, entityType} را به چاپگر می‌دهد.
+
+اثر: «چاپ دقیقاً همان نسخه اولیه» برای داده‌های متغیر قابل اثبات نیست و الزامات deterministic label generation و retrieve original label content محقق نشده است.
+
+H7 — Template Management وجود ندارد
+
+Template entity/version، paper size، QR position، fields، barcode type، logo، assignment به package type و API مدیریت template دیده نمی‌شود. PDF کانتینر یک قالب hardcoded client-side است. چند template برای یک نوع بسته و version snapshot وجود ندارد.
+
+H8 — Printer Assignment و انتخاب چاپگر واقعی وجود ندارد
+
+Device registry می‌تواند دستگاه نوع PRINTER ثبت کند، اما Print Job هیچ printerId/assignedWorkstation ندارد و API چاپگر مقصد را انتخاب نمی‌کند. Session device همان Terminal است، نه الزاماً Printer. پنل وب «Zebra ZT411، متصل» را hardcoded نشان می‌دهد و وضعیت registry/heartbeat چاپگر را مصرف نمی‌کند.
+
+H9 — Pending Label Queue اطلاعات لازم را ندارد
+
+صف وب فقط label، entityType، تعداد تلاش و status را نشان می‌دهد. Object context موردنیاز سند شامل creation time، package count، total weight، product/grade summary، operator، terminal، waiting time، failure reason و assigned workstation کامل نیست. جست‌وجو، فیلتر، انتخاب printer و تفکیک Pending/Failed/History نیز وجود ندارد.
+
+H10 — Exception شکست چاپ خودکار بسته نمی‌شود
+
+failPrint Exception پایدار ایجاد می‌کند، ولی complete/retry موفق Exception مرتبط را resolve نمی‌کند. در نتیجه پس از چاپ موفق، هشدار MISSING_OR_FAILED_LABEL ممکن است همچنان OPEN بماند و داشبورد استثناها وضعیت نادرست نشان دهد.
+
+H11 — مدیریت excessive reprint وجود ندارد
+
+attemptNo عملاً امکان شمارش را می‌دهد، اما reprintCount رسمی، threshold قابل تنظیم، warning مدیریتی و Exception پس از عبور از حد وجود ندارد. شمارنده reset نمی‌شود چون attempts باقی می‌مانند، ولی قاعده کسب‌وکار فصل 15.15 اجرا نشده است.
+
+H12 — چاپ دستی عمومی ناقص است
+
+برای Container endpoint درخواست لیبل وجود دارد و auto queue برای Batch/Package/Fresh Shipping Box ساخته می‌شود، اما API عمومی و کنترل‌شده «انتخاب شیء موجود → اعتبارسنجی eligibility → درخواست چاپ اولیه/دستی» برای همه انواع لیبل، testing printer یا damaged/lost label وجود ندارد.
+
+H13 — پوشش نوع Label ناقص است
+
+entityTypeها عملاً CONTAINER، BATCH، PACKAGE و FRESH_SHIPPING_BOX هستند. Basket/Tray با CONTAINER قابل بازنمایی‌اند، اما Retail Package/Carton/EPS/Pallet همگی PACKAGE هستند و labelType/template اختصاصی snapshot نمی‌شود. Shipment label اختیاری نیز وجود ندارد.
+
+H14 — قاعده «چاپ فقط پس از تأیید محتوا» کامل تضمین نمی‌شود
+
+برای Carton، SEAL پس از scan کامل به READY_FOR_LABEL می‌رود و queue ایجاد می‌شود که نقطه قوت است. ولی برای UNIT و لایه‌های دیگر صحت اطلاعات لیبل و تکمیل همه الزامات از طریق یک Label eligibility validator مرکزی کنترل نمی‌شود. queuePrint خود به‌تنهایی هر entityType/entityId/identity را می‌پذیرد.
+
+H15 — عملیات چاپ از run/idempotency استاندارد domain استفاده نمی‌کند
+
+completePrint، failPrint و retryPrint مانند اغلب عملیات domain داخل run نیستند. retry در server Idempotency-Key می‌گیرد اما domain آن را مصرف نمی‌کند؛ complete/fail نیز transition اتمیک استاندارد، request hash و response replay ندارند. در قطع شبکه، تکرار درخواست می‌تواند Audit تکراری یا وضعیت مبهم بسازد.
+
+یافته‌های متوسط و UI/Device
+===========================
+
+M1 — پنل وب چاپگر را همیشه «متصل» نشان می‌دهد، حتی اگر هیچ Printer ثبت نشده یا heartbeat آن OFFLINE باشد. این برای اپراتور اطلاعات عملیاتی نادرست تولید می‌کند.
+
+M2 — دکمه «چاپ شد» در پنل وب confirmation دستی است و هیچ ارتباطی با چاپگر یا spooler ندارد. هر دارنده print:write می‌تواند job را بدون چاپ فیزیکی موفق اعلام کند.
+
+M3 — «خطا» در پنل وب همیشه reason ثابت «خطای چاپگر» می‌فرستد و نوع خطا (paper/ribbon/offline/communication) را ثبت نمی‌کند.
+
+M4 — پنل وب تاریخچه را به‌شکل همه attemptها کنار هم نشان می‌دهد، اما آن‌ها را زیر Label واحد گروه‌بندی نمی‌کند؛ تشخیص Original Print، Reprint #N و آخرین وضعیت دشوار است.
+
+M5 — PDF آفلاین Container در browser ساخته می‌شود و دانلود شدن آن در Print Attempt/Audit ثبت نمی‌شود. کاربر می‌تواند PDF را بارها چاپ کند بدون آنکه reprintCount یا مجوز reprint اعمال شود. بنابراین این مسیر خارج از Print Engine مرکزی است.
+
+M6 — PDF کانتینر فقط code و type دارد و template/version/printer/print attempt را ثبت نمی‌کند. از نظر QR دائمی سبد مفید است، اما از منظر controlled production document ناقص است.
+
+M7 — ترمینال همه PENDING jobهای کل سایت را پردازش می‌کند، نه jobهای station/printer خودش را. در چند ترمینال، تداخل و چاپ در ایستگاه اشتباه محتمل است.
+
+M8 — ترمینال hardware abstraction مناسبی دارد، ولی README درست هشدار می‌دهد adapterهای فعلی certified نیستند. command واقعی، timeout، language و پاسخ هر مدل چاپگر باید در آزمون سخت‌افزاری تأیید شود.
+
+M9 — PDA مطابق سند چاپگر ندارد و عملیات چاپی در آن دیده نمی‌شود؛ این نکته مثبت است. با این حال PDA راهنمای انتقال کار چاپ به نزدیک‌ترین fixed terminal یا نمایش pending label مرتبط با شیء اسکن‌شده ندارد.
+
+M10 — هیچ action صریح «label attached» یا تأیید اتصال فوری لیبل به شیء وجود ندارد. پس قاعده ماندن Carton/EPS در ایستگاه تا نصب لیبل صرفاً با status تقریبی مدل شده و proof فیزیکی ندارد.
+
+M11 — labels دارای FK چندریختی واقعی به entity نیست؛ entity_id فقط UUID است. برنامه هنگام queuePrint وجود/فعال‌بودن نوع شیء را به‌صورت مرکزی validate نمی‌کند. دیتابیس نیز نمی‌تواند انتساب Label به شیء حذف‌شده/ناموجود را تضمین کند.
+
+M12 — جدول قدیمی print_jobs در migration 001 وجود دارد، اما repository وضعیت را از labels + print_attempts بازسازی می‌کند و جدول print_jobs را save/load نمی‌کند. وجود schema بلااستفاده باعث ابهام عملیاتی و احتمال گزارش‌گیری از منبع اشتباه می‌شود.
+
+مقایسه مستقیم با قواعد BR-LB
+============================
+
+- BR-LB-001، هویت Carton قبل از چاپ: عمدتاً رعایت شده؛ Package پیش از queue ساخته می‌شود و Carton scans قبل از SEAL کنترل می‌شوند.
+- BR-LB-002، شکست چاپ Carton را باطل نکند: رعایت پایه؛ شیء اصلی باقی می‌ماند.
+- BR-LB-003، reprint شیء جدید نسازد: رعایت شده.
+- BR-LB-004، همه تلاش‌ها ثبت شوند و نبود Audit مانع شود: تلاش‌ها ثبت می‌شوند، اما write اتمیک و fail-closed بودن Audit به‌طور اختصاصی تضمین نشده و Attempt FAILED قابل بازنویسی است؛ ناقص.
+- BR-LB-005، failed print موفق نشود: نقض بحرانی؛ همان Attempt FAILED از complete قابل PRINTED شدن است.
+- BR-LB-006، موفقیت retry با serial اصلی: identity حفظ می‌شود، اما Label status و Package اتمیک به‌روزرسانی نمی‌شوند؛ ناقص.
+- BR-LB-007، صف Cartonهای بدون لیبل: صف عمومی attempts وجود دارد، ولی context و رفتار تخصصی Carton ناقص است.
+- BR-LB-008، شناسایی Carton فیزیکی و نمایش خلاصه کامل: عمدتاً پیاده نشده.
+- BR-LB-009، چاپ از context Carton: queue خودکار وجود دارد، ولی context در UI/Job حفظ و نمایش کامل نمی‌شود.
+- BR-LB-010، verification چاپ مجدد پرریسک: اسکن مستقل هویت لیبل وجود دارد و قابل تقدیر است، اما نوع شیء/محتوای Carton و سطح ریسک configurable نیست و complete bypass دارد.
+- BR-LB-011، عدم انتقال serial بین Cartonها: uniqueness و reuse همان Label رعایت شده؛ endpoint reassignment وجود ندارد.
+
+ارزیابی تست‌های موجود روی GitHub
+================================
+
+تست‌های مثبت موجود:
+
+- state-machines.test.js حفظ identity، ساخت Attempt جدید، device provenance، رد verifiedScan اشتباه و نیاز Session را بررسی می‌کند.
+- reprint-verification.test.js در Web ثابت می‌کند کلیک بدون ورودی scanner و echo کردن expected identity ممکن نیست.
+- container-label-pdf.test.js PDF و QR آفلاین کانتینر را بررسی می‌کند.
+- terminal devices.test.js acknowledgement مثبت چاپگر و رد PAPER_OUT را آزمایش می‌کند.
+- terminal workflow.test.js مسیر صف PENDING → printer adapter → complete/fail با session را پوشش می‌دهد.
+- تست‌های packaging و PostgreSQL ایجاد Package/Carton و reload را دارند، ولی چاپ فیزیکی واقعی را شبیه‌سازی نمی‌کنند.
+
+شکاف‌های مهم تست:
+
+- تستی وجود ندارد که failPrint سپس completePrint روی همان Attempt را رد کند؛ این همان bypass بحرانی C3 است.
+- تستی وجود ندارد که Package بدون Print Attempt موفق نتواند PRINT_SUCCESS/READY شود.
+- تستی وجود ندارد که موفقیت Print Job، Label و Package را اتمیک و پس از reload PostgreSQL همگام کند.
+- تست چند ترمینال/چاپگر برای claim هم‌زمان یک PENDING job و جلوگیری از چاپ فیزیکی تکراری وجود ندارد.
+- سناریوی response lost بعد از چاپ فیزیکی پوشش داده نشده است.
+- تست Printer registry/heartbeat/assignment و جلوگیری از چاپ روی Printer بازنشسته یا OFFLINE وجود ندارد.
+- تست authorization بر اساس label type، supervisor approval و reason اجباری وجود ندارد چون قابلیت‌ها پیاده نشده‌اند.
+- تست threshold reprint و management warning وجود ندارد.
+- تست resolve خودکار Exception پس از چاپ موفق وجود ندارد.
+- تست end-to-end واقعی «Carton completed → queue → printer acknowledgement → label/package state → shipment block/release → flush/reload» وجود ندارد.
+- تست سخت‌افزاری certified برای مدل واقعی Zebra یا چاپگر مقصد وجود ندارد؛ README نیز صریحاً این ادعا را نمی‌کند.
+
+ارزیابی انطباق تقریبی
+=====================
+
+- هویت واحد Label و جلوگیری از serial reassignment: خوب
+- نگه‌داری Attemptها در PostgreSQL: متوسط رو به خوب
+- retry scan مستقل در Web و backend: خوب، ولی قابل دورزدن از complete
+- همگامی Label/Attempt/Package: ضعیف و بحرانی
+- Pending Queue و failure recovery: متوسط رو به ضعیف
+- Template و محتوای deterministic: بسیار ضعیف
+- Printer assignment/heartbeat/lock: فاقد پیاده‌سازی مؤثر
+- authorization/reason/approval reprint: ضعیف
+- Audit کامل چاپ و reprint: متوسط رو به ضعیف
+- UI عملیاتی Print Management: حداقلی
+- چاپگر واقعی و hardware certification: هنوز انجام نشده
+- انطباق کلی: حدود 40٪ تا 50٪
+
+اولویت پیشنهادی اصلاحات آینده (هیچ اصلاحی در این بررسی اعمال نشده است)
+====================================================================
+
+P0:
+1. یک transaction واحد برای success/failure که Label، Attempt و Package/Object را اتمیک همگام کند.
+2. ممنوع‌کردن complete روی FAILED/PRINTED و حذف bypass اسکن retry.
+3. حذف PRINT_SUCCESS قابل جعل از Package API یا وابسته‌کردن آن به Attempt موفق معتبر.
+4. claim/lease اتمیک Print Job به printerId برای جلوگیری از چاپ فیزیکی هم‌زمان.
+
+P1:
+5. state machine کامل Label و Attempt، همراه مدیریت response-lost.
+6. reprint request مستقل با reason، authorization/approval بر اساس label type و scan strategy مناسب شیء.
+7. Printer assignment واقعی بر اساس station، registry و heartbeat.
+8. snapshot کامل و versioned محتوای Label و Template.
+9. بستن خودکار Exception بعد از موفقیت و warning برای excessive reprints.
+
+P2:
+10. Pending Queue کامل با context، waiting time، filters، history grouping و انتخاب Printer.
+11. ثبت همه دانلود/چاپ‌های PDF داخل Print Engine یا حذف مسیر چاپ خارج از Audit.
+12. تست PostgreSQL و hardware end-to-end با قطع شبکه، پاسخ گم‌شده، paper/ribbon out و چند ترمینال.
+
+جمع‌بندی اجرایی
+===============
+
+پایه درست این ماژول، جداسازی Label از Attempt و حفظ identity در retry است؛ اصلاح قبلی اسکن مستقل نیز واقعی و مؤثر است. اما Print Engine هنوز authority واحد چاپ نیست. تا وقتی Package بتواند موفقیت چاپ را مستقل اعلام کند و Attempt شکست‌خورده بتواند مستقیم complete شود، وضعیت «LABEL_PRINTED» برای کنترل ارسال یا رهگیری فیزیکی قابل اعتماد نیست. پیش از استفاده تولیدی، چهار مورد P0 باید بسته و سپس با PostgreSQL واقعی و چاپگر واقعی، از Carton completion تا shipment release آزمایش شوند.

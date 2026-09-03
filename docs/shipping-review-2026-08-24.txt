@@ -1,0 +1,199 @@
+گزارش بررسی بخش ارسال‌ها AnbarSYS / StoreMesh
+تاریخ بررسی: 2026-08-24
+نوع بررسی: فقط‌خواندنی؛ بدون تغییر کد، تنظیمات، تست یا داده عملیاتی
+
+مبنای نسخه GitHub
+=================
+پیش از بررسی، repositoryهای مرتبط با git fetch --prune تازه‌سازی شدند. گزارش مستقیماً براساس فایل‌های commitشده در refهای زیر در GitHub تهیه شده است:
+
+- storemesh-platform: origin/feat/addendum-01-fix-request-07 @ 8681403
+- storemesh-site-server: origin/audit-fr7-v3 @ 34e209e
+- storemesh-web: origin/audit-fr7-web-v2 @ 1603cc6
+- storemesh-pda: origin/feat/operations-completion-round-3 @ 52a459f
+- storemesh-terminal: origin/feat/operations-completion-round-3 @ abbe707
+- storemesh-contracts: origin/feat/addendum-01-fix-request-07 @ 2b48758
+
+این شاخه‌ها جدیدتر از origin/main هستند؛ بنابراین ارزیابی مربوط به آخرین کد منتشرشده روی GitHub است، نه main قدیمی. مبنای قضاوت محتوای خود refهای ریموت است.
+
+دامنه بررسی
+===========
+فصل 13 Shipping Workflow، Shipment State Machine، قواعد BR-SH-001..006، Customer و Sales Order، ساخت Shipment، Picking Tasks، اسکن Carton، Quality/Label eligibility، Vehicle loading، Shipment Documents، Partial Shipment، Cancellation، Finished Goods inventory، Fresh Export EPS Box، Internal Shipment/Manifest/Transfer، Audit، PostgreSQL، UI، PDA/Terminal، قرارداد API و تست‌ها بررسی شدند.
+
+جمع‌بندی مدیریتی
+================
+هسته happy-path ارسال مشتری به‌شکل قابل‌فهم پیاده شده است: Customer و Sales Order، تخصیص Carton، ساخت Picking Task، اسکن فیزیکی با session/device، جلوگیری از duplicate/unexpected scan، الزام تکمیل اسکن‌ها، Vehicle، state machine شش‌مرحله‌ای، cascade وضعیت SHIPPED به UNITها، partial fulfillment، cancellation اولیه، audit و persistence واقعی PostgreSQL وجود دارند. تست end-to-end واقعی نیز زنجیره تولید تا Carton و Shipment را پس از reload تأیید می‌کند.
+
+اما کنترل‌های حیاتی فصل 13 در لحظه ارسال دوباره ارزیابی نمی‌شوند. Carton فقط هنگام ایجاد Shipment از نظر READY_TO_SHIP و quarantine بررسی می‌شود؛ Scan/READY/LOAD/SHIP دیگر status، label، lock، QC یا exception را revalidate نمی‌کنند. اگر Carton بعداً DAMAGED یا وضعیت آن عوض شود، اسکن عضویت برای ادامه کافی است. Fresh Shipping Box اصلاً وارد Customer Shipment نمی‌شود و cancellation پس از Picking برای Shipping Operator عادی باز است و Taskها را لغو نمی‌کند.
+
+نظر نهایی: مسیر ساده ارسال Carton برای پایلوت کنترل‌شده مناسب است؛ برای dispatch واقعی، ارسال تازه، کنترل قطعی label/QC/damage، مدیریت cancellation و اسناد قابل استناد هنوز آماده نیست.
+
+نقاط مثبت تأییدشده
+===================
+1. Customer entity مستقل با code یکتا، address/contact و ACTIVE/INACTIVE وجود دارد.
+2. Sales Order فقط برای Customer فعال ساخته می‌شود و quantity مثبت integer می‌خواهد.
+3. Customer Shipment دقیقاً به یک Sales Order و Customer مشتق‌شده از آن متصل است.
+4. packageIds ورودی deduplicate می‌شوند و Shipment خالی رد می‌شود.
+5. Customer Shipment فقط Package سطح CARTON با type=CARTON را در پیاده‌سازی فعلی می‌پذیرد.
+6. Carton هنگام assignment باید READY_TO_SHIP و فاقد shipmentId باشد.
+7. Batchهای داخل hierarchy به‌صورت recursive بررسی می‌شوند و Batch قرنطینه‌ای Shipment را block می‌کند.
+8. تعداد Carton تخصیص‌یافته از quantity سفارش بیشتر نمی‌شود.
+9. برای هر Carton یک Picking Task با requiredRole=SHIPPING_OPERATOR ایجاد می‌شود.
+10. Shipment state machine شامل DRAFT، PICKING، READY، LOADED، SHIPPED و CLOSED است.
+11. هر Carton پیش از READY باید اسکن شود؛ نبود حتی یک Carton با SHIPMENT_SCAN_INCOMPLETE block می‌شود.
+12. Wrong/unexpected Carton و duplicate scan رد می‌شوند.
+13. Scan record شامل package، code، session، device، sequence و server time است و در PostgreSQL می‌ماند.
+14. LOAD بدون Vehicle رد می‌شود و vehicle/loadedAt ذخیره می‌گردد.
+15. SHIP وضعیت Carton و همه descendants را به SHIPPED cascade و shipmentId را روی درخت حفظ می‌کند.
+16. UNIT داخل Carton پس از customer SHIP دیگر به‌صورت مستقل قابل ارسال داخلی نیست.
+17. Sales Order پس از ارسال جزئی PARTIALLY_FULFILLED و پس از تکمیل quantity، FULFILLED می‌شود.
+18. CLOSED transition وجود دارد و بعد از CLOSED هیچ transition عملیاتی دیگری پذیرفته نمی‌شود.
+19. Customer cancellation در DRAFT/PICKING/READY shipmentId Cartonها را آزاد می‌کند.
+20. Internal Shipment state machine از Customer Shipment جداست و destinationSite دارد.
+21. Manifest internal transfer محتوای nested Package را تا Batch allocation به‌صورت recursive استخراج می‌کند.
+22. سایت مقصد، وضعیت prematurity و دریافت تکراری Internal Transfer را کنترل می‌کند.
+23. عملیات state-changing idempotent و همراه snapshot rollback هستند.
+24. Audit عمومی user/request/IP/result/device/roles/station و before/after state را ثبت می‌کند.
+25. PostgreSQL Customer، Sales Order، Shipment، Package assignment و Carton Scanها را ذخیره می‌کند.
+26. تست PostgreSQL واقعی receive→production→UNIT→CARTON→customer SHIP→flush/load را پوشش می‌دهد.
+27. UI مسیر Customer→Sales Order→Shipment→Scan→Picking/Ready/Load/Ship/Close را ارائه می‌کند.
+28. UI برای اسکن Carton از scanner-verified field استفاده می‌کند و dropdown به‌تنهایی جای اسکن را نمی‌گیرد.
+
+مغایرت‌ها و ریسک‌های اصلی
+=========================
+
+[بحرانی] 1. Fresh Shipping Box قابل ارسال به مشتری نیست
+سند صریحاً Shipment را شامل Carton و/یا EPS Shipping Box می‌داند و برای Fresh Export اسکن EPS Box را الزام می‌کند. createShipment فقط state.packages را می‌بیند و فقط level/type=CARTON را قبول می‌کند؛ Fresh Shipping Box در state.shippingBoxes و جدول جداست و هیچ shipmentId، scan route یا transition ارسال ندارد. بنابراین کل خروجی مسیر Fresh Export در Shipping Workflow به بن‌بست می‌رسد.
+
+[بحرانی] 2. eligibility کارتن در Scan/Ready/Load/Ship دوباره اعتبارسنجی نمی‌شود
+createShipment یک‌بار READY_TO_SHIP و quarantine را بررسی می‌کند. scanShipmentCarton فقط وجود code در packageIds را می‌سنجد. READY فقط تعداد scanها، LOAD فقط vehicle و SHIP فقط state transition را بررسی می‌کنند. status فعلی Carton، shipmentId، child integrity، Batch quarantine، QC، lock، label و blocking exception در هیچ‌یک دوباره چک نمی‌شوند. تغییر وضعیت میان assignment و dispatch می‌تواند بدون block تا SHIPPED عبور کند.
+
+[بحرانی] 3. Carton آسیب‌دیده می‌تواند ارسال شود
+Package می‌تواند در READY_TO_SHIP به DAMAGED تغییر کند، بدون اینکه از Shipment خارج شود یا shipmentId پاک گردد. Scan آن هنوز به‌دلیل membership پذیرفته می‌شود و READY/LOAD/SHIP status DAMAGED را نمی‌سنجند؛ SHIP سپس markPackageTree همان Carton را دوباره SHIPPED می‌کند. این مستقیماً کنترل «Only eligible inventory may be loaded» را نقض می‌کند.
+
+[بحرانی] 4. موفقیت Label شرط Shipment نیست
+Shipment creation و transitions فقط Package.status را می‌بینند و labels.status یا Print Attempt موفق را بررسی نمی‌کنند. از آنجا که Package state و Print Job در کد مستقل‌اند، client می‌تواند Package را با print_success مستقیم به READY_TO_SHIP ببرد. Carton بی‌لیبل یا با job شکست‌خورده می‌تواند به Shipment برسد؛ خلاف Fresh/Carton validation و Shipment state machine سند.
+
+[بحرانی] 5. Quality Verification در Shipping Workflow وجود ندارد
+فصل 13 میان Scan و Load مرحله Quality Verification دارد. createShipment فقط assertBatchUsable را اجرا می‌کند که عمدتاً QUARANTINED را block می‌کند؛ APPROVED QC لازم نیست، REJECTED نیز در مدل QC فعلی Batch را block نمی‌کند. READY/SHIP هم QC را revalidate نمی‌کنند. محصول ردشده یا فاقد approval می‌تواند ارسال شود.
+
+[بحرانی] 6. Internal Transfer manifest قابل جعل است
+receiveInternalTransfer یک JSON manifest ارسالی client را بدون signature، source-site authentication، nonce/hash یا server-to-server verification می‌پذیرد. هر کاربر دارای operations:write می‌تواند manifest با sourceSite، batchCode، product و weight دلخواه بسازد، به شرط وجود Master Data مقصد، و موجودی جدید ایجاد کند. destination/status و duplicate check کافی نیستند؛ اصالت و تمامیت سند انتقال اثبات نمی‌شود.
+
+[بالا] 7. Manifest endpoint بدون authorization منتشر شده است
+GET /api/shipments/:id/manifest پس از middleware verify قرار دارد، اما هیچ requireAuth/needs اختصاصی روی خود route ندارد. در محیطی که auth صریحاً غیرفعال شده باشد کاملاً عمومی است و حتی در حالت عادی نیز کد route user/permission را enforce نمی‌کند. افزون بر آن shipmentManifest نوع Shipment را به INTERNAL_TRANSFER محدود نمی‌کند و می‌تواند برای Shipment مشتری نیز فراخوانی شود.
+
+[بالا] 8. Cancellation پس از Picking manager-only نیست
+POST shipment/cancel همان shipping:write را می‌خواهد و UI دکمه لغو را برای همه کاربران Shipping در DRAFT/PICKING/READY نشان می‌دهد. هیچ override:approve یا نقش Manager و هیچ reason اجباری نیست. سند می‌گوید لغو confirmed picking فقط توسط Manager انجام شود.
+
+[بالا] 9. Cancellation، Picking Taskها را لغو نمی‌کند
+Customer cancellation Cartonها را آزاد می‌کند، اما Taskهای Pick Carton همچنان OPEN/IN_PROGRESS باقی می‌مانند. اپراتور می‌تواند task محموله لغوشده را claim/complete کند و داشبورد کار کاذب نشان دهد. این خلاف اثر صریح cancellation در 13.15 است.
+
+[بالا] 10. سابقه package list محموله لغوشده بعد از reload از بین می‌رود
+Shipment.packageIds جدول join مستقل ندارد و هنگام load از packages.shipment_id بازسازی می‌شود. Customer cancellation shipmentId بسته‌ها را null می‌کند؛ پس پس از restart، cancelled Shipment با packageIds خالی load می‌شود و فهرست Cartonهای originally allocated از سابقه دائمی حذف می‌گردد. Scanهای انجام‌شده می‌مانند، اما Cartonهای انتظاررفته و اسکن‌نشده قابل بازسازی نیستند؛ خلاف permanent shipment history.
+
+[بالا] 11. Internal cancellation موجودی را آزاد نمی‌کند
+updateInternalShipment در READY→CANCELLED فقط status Shipment را عوض می‌کند و shipmentId Packageها را پاک نمی‌کند. Package برای همیشه به Shipment لغوشده متصل می‌ماند و دیگر قابل تخصیص نیست. این با اصل restored inventory availability ناسازگار است و برای انتقال داخلی یک بن‌بست واقعی ایجاد می‌کند.
+
+[بالا] 12. Picking Task state به Shipment state متصل نیست
+READY فقط scan completeness را می‌سنجد؛ لازم نیست Picking Taskها claim یا completed شده باشند. برعکس completion/failure/reassignment Task هیچ اثری بر Shipment ندارد. در نتیجه Task engine و Shipping state دو روایت مستقل از انجام Picking دارند.
+
+[بالا] 13. Damaged/Missing Carton replacement workflow وجود ندارد
+پس از createShipment endpoint برای remove Carton، add replacement، approve damage، تبدیل به partial shipment یا اصلاح expected list وجود ندارد. Missing Carton فقط Shipment را در PICKING نگه می‌دارد و تنها راه عملی cancellation کامل است. Exception/Manager Override پایدار نیز خودکار ایجاد نمی‌شود.
+
+[بالا] 14. Sales Order مدل تجاری کافی ندارد
+Order فقط customerId و آرایه packageType/quantity دارد. product، grade، size، SKU، destination/address، shipping method، requested date، priority، order line ID، approval، note و status lifecycle سفارش وجود ندارد. سند CRM کامل نمی‌خواهد، اما Shipment باید واقعاً با Customer Order و مقصد/روش مشخص مطابقت داشته باشد.
+
+[بالا] 15. محاسبه fulfillment چندخطی نادرست است
+limits با Object.fromEntries ساخته می‌شود؛ اگر order چند line با packageType یکسان داشته باشد line قبلی overwrite می‌شود، نه جمع. هنگام SHIP نیز shipped count صرفاً تعداد همه packageIds و total جمع همه quantities است و نوع Package line-by-line سنجیده نمی‌شود. چون Customer Shipment فعلاً فقط CARTON می‌پذیرد، order دارای EPS/نوع دیگر می‌تواند وضعیتی غیرقابل fulfillment یا محاسبه اشتباه داشته باشد.
+
+[بالا] 16. Duplicate Carton در request صریحاً رد نمی‌شود
+createShipment packageIds را با Set بی‌صدا deduplicate می‌کند. BR-SH-003 می‌گوید duplicate باید BLOCK شود؛ silent correction ممکن است client bug یا اسکن دوباره را پنهان کند و expected count را برخلاف تصور کاربر تغییر دهد.
+
+[متوسط رو به بالا] 17. Lock و blocking exception در مدل Shipping قابل بررسی نیست
+Package/Carton فیلد locked ندارد و Shipment READY بررسی «No unresolved blocking exceptions» را اجرا نمی‌کند. Exceptionهایی مثل PACKAGE_DAMAGED، MISSING_OR_FAILED_LABEL یا QC issue می‌توانند باز بمانند و Shipment ادامه یابد.
+
+[متوسط رو به بالا] 18. Loading event واقعی مدل نشده است
+Scan موجود مربوط به verification پیش از READY است. READY→LOAD فقط vehicle را ثبت می‌کند؛ sessionId/device/operator ندارد و Carton-by-Carton loading sequence اختیاری نیز entity/endpoint جدا ندارد. loadedAt و audit request بخشی از شواهد را می‌دهند، اما «چه کسی کدام Carton را در چه ترتیب واقعاً بار زد» ثبت نمی‌شود.
+
+[متوسط رو به بالا] 19. Vehicle یک رشته آزاد است
+Vehicle registry، status/capacity، assignment، plate validation و driver وجود ندارد. هر متن غیرخالی پذیرفته می‌شود و shipping method نیز پیکربندی‌شده نیست. برای Version 1 ناوگان کامل لازم نیست، ولی حداقل Vehicle identity و shipping method از Shipment requirements سند هستند.
+
+[متوسط] 20. Shipping Session اختصاصی enforce نمی‌شود
+Scan یک session فعال می‌خواهد، اما selectedRole/station آن را SHIPPING_OPERATOR/SHIPPING بررسی نمی‌کند. HTTP permission امنیت نقش را تا حدی پوشش می‌دهد، ولی session ایستگاه دیگر می‌تواند scan provenance نادرست بسازد. LOAD/SHIP/CLOSE حتی sessionId عملیاتی در body/record Shipment ندارند.
+
+[متوسط] 21. Shipment اطلاعات مقصد و زمان برنامه‌ریزی را snapshot نمی‌کند
+customerId ذخیره می‌شود، اما address/contact جاری Customer، destination، shipmentDate و shippingMethod روی Shipment snapshot نمی‌شوند. تغییر بعدی Customer می‌تواند سند نمایشی گذشته را عوض کند یا اطلاعات dispatch تاریخی را مبهم سازد.
+
+[متوسط] 22. اسناد ارسال فقط HTML کلاینتی و ناپایدارند
+UI یک فایل HTML شامل Packing List، Carton List و Summary می‌سازد. Backend document entity، document version/hash، generatedAt/generatedBy، immutable archive، PDF رسمی یا regeneration history ندارد. اطلاعات product/weight/grade، address، method و loading operator نیز ناقص‌اند. برای convenience خوب است، برای سند قابل استناد کافی نیست.
+
+[متوسط] 23. Customer management در UI ناقص است
+Backend updateCustomer دارد، اما صفحه فقط Customer جدید می‌سازد و فهرست/ویرایش/فعال‌سازی مشتریان را جداگانه نشان نمی‌دهد. updateCustomer نیز نام خالی را در API رد نمی‌کند. Order history و وضعیت Customer/Order برای تصمیم ارسال در UI محدود است.
+
+[متوسط] 24. Internal Shipping تقریباً UI عملیاتی ندارد
+صفحه Transfers فقط paste کردن Manifest JSON برای دریافت را دارد. ساخت Internal Shipment، انتخاب destination، scan/loading، dispatch، deliver، cancellation و manifest export در UI ارائه نشده است. این مسیر فقط از API/domain قابل استفاده است.
+
+[متوسط] 25. Receive Internal Transfer ساختار Package را حفظ نمی‌کند
+Manifest hierarchy را به items تخت تبدیل و در مقصد Batchهای جدید ایجاد می‌کند؛ Package/Carton/EPS/Pallet identity و hierarchy مقصد بازسازی نمی‌شود. External parent batch code حفظ می‌شود، اما trace carton-level و shipping identity طرف مبدأ به inventory object مقصد منتقل نمی‌شود.
+
+[متوسط] 26. Internal Shipment اسکن و Vehicle ندارد
+createInternalShipment مستقیماً READY است و LOAD بدون scan، session، device یا vehicle انجام می‌شود. سپس DISPATCH همه package tree را SHIPPED می‌کند. از نظر کنترل فیزیکی بسیار ضعیف‌تر از Customer Shipment است، درحالی‌که همان خطر اشتباه Carton وجود دارد.
+
+[متوسط] 27. Inventory movement به Dispatch Area ثبت نمی‌شود
+Package zone/location و movement event برای Pick→Shipping→Vehicle وجود ندارد. Shipping فقط status و shipmentId را تغییر می‌دهد. فصل 12/13 انتقال فیزیکی و dispatch area قابل‌پیکربندی را می‌خواهد.
+
+[متوسط] 28. PDA/Terminal گردش Shipping ندارند
+Terminal مخصوص Receiving است. PDA نقش SHIPPING_OPERATOR و task عمومی را می‌شناسد، اما shipment list، expected cartons، scan verification، loading و exception UI ندارد. بنابراین اسکن در محل بارگیری فقط از پنل مدیریتی وب انجام می‌شود، نه handheld مناسب انبار.
+
+[متوسط] 29. گزارش ارسال محدود است
+UI جدول وضعیت و یک سند client-side دارد؛ گزارش Shipment rate، aging، partials، missing/damaged، operator throughput، vehicle/load history، customer history و search/filter/export رسمی وجود ندارد. reports() نیز aggregation اختصاصی Shipping ندارد.
+
+[متوسط] 30. خطاها به BR-SH IDهای سند نگاشت کامل ندارند
+کدهای مفیدی مانند SHIPMENT_CARTON_DUPLICATE، PACKAGE_ALREADY_SHIPPED و SHIPMENT_SCAN_INCOMPLETE وجود دارند، اما spec API می‌گوید Business Rule violation باید خود BR-SH-* باشد. BR-SH-001..006 به‌صورت سیستماتیک در پاسخ‌ها/تست‌ها single-source نشده‌اند.
+
+[متوسط] 31. پوشش تست happy-path خوب ولی adversarial ناقص است
+تست‌های domain lifecycle، partial/cancel، duplicate scan و internal transfer وجود دارند و یک تست PostgreSQL واقعی customer SHIP را reload می‌کند. اما تست real PostgreSQL/HTTP برای Fresh Box shipment، damage-after-assignment، quarantine/QC-after-scan، missing label، cancellation task cleanup/history after restart، internal cancel release، forged manifest، public manifest authorization، multi-line order و load scan provenance وجود ندارد. تست فعلی PRINT_SUCCESS را مستقیم transition می‌دهد و label eligibility واقعی را دور می‌زند.
+
+ارزیابی قابلیت‌ها
+=================
+
+Customer/Sales Order: پایه ساده و پایدار؛ line semantics، مقصد/روش/تاریخ و approval ناقص.
+
+Shipment creation: assignment و quantity guard مناسب؛ Fresh Box/Pallet، label/QC/lock و duplicate rejection ناقص.
+
+Picking: Task و اسکن Carton مناسب؛ Task lifecycle از Shipment جدا و replacement workflow مفقود.
+
+Verification: exact expected scan خوب؛ eligibility فقط در create بررسی می‌شود و در dispatch قابل اتکا نیست.
+
+Loading: Vehicle/time پایه وجود دارد؛ scan sequence/operator/session/device واقعی ناقص.
+
+Ship/Close: cascade و read-only state مناسب؛ blocking exception/QC/label gate ناقص.
+
+Cancellation: Customer package release پایه دارد؛ manager gating، task cleanup، permanent allocation history و Internal cancellation معیوب‌اند.
+
+Fresh Export: در Shipping Workflow پیاده نشده و مهم‌ترین شکاف functional است.
+
+Internal Transfer: جداسازی سایت و duplicate/destination checks مناسب؛ manifest unsigned، مسیر فیزیکی ضعیف و hierarchy مقصد از دست می‌رود.
+
+Audit/Persistence: happy-path قوی؛ cancelled allocation history و shipment-specific evidence ناقص.
+
+نظر نهایی و اولویت پیشنهادی
+==========================
+ترتیب منطقی رسیدگی در آینده:
+
+1. پشتیبانی first-class از Fresh Shipping Box در Order/Shipment/Scan/Ship و persistence.
+2. ساخت eligibility validator واحد و اجرای اجباری آن در assign، scan، READY، LOAD و SHIP: status، label attempt، QC، lock، shipment ownership و exceptions.
+3. بستن مسیر DAMAGED/REJECTED/unlabeled Carton و افزودن remove/replace/partial-resolution با Manager approval.
+4. اصلاح cancellation: manager gating پس از Picking، reason، cancel Tasks، release Internal packages و حفظ expected package history در join table مستقل.
+5. امضا و authenticate کردن Manifest، محدودکردن endpoint به Internal Shipment و ثبت server-to-server receipt proof.
+6. مدل Shipping Session و loading scan events با operator/device/vehicle/sequence.
+7. تکمیل Sales Order lines، destination/address/method/date snapshot و fulfillment per line/type.
+8. ساخت immutable backend shipment documents و Finished Goods/Dispatch movements.
+9. افزودن Shipping UI به PDA و تکمیل Internal Shipment UI.
+10. تست adversarial HTTP+PostgreSQL با restart برای همه کنترل‌های بالا و نگاشت BR-SH-*.
+
+حکم نهایی: مسیر ساده Carton customer shipment از نظر state/persistence قابل قبول است، اما به علت نبود Fresh Box shipping، عدم revalidation کارتن در dispatch، امکان ارسال DAMAGED/بی‌لیبل/فاقد QC و اشکالات cancellation/manifest، برای ارسال واقعی و بدون نظارت آماده نیست.
+
+یادداشت روش بررسی
+=================
+در این نوبت هیچ فایل کد، migration، تست، تنظیم یا داده عملیاتی تغییر نکرد. تست جدیدی نوشته یا اجرا نشد. تنها فایل ایجادشده همین گزارش است و همه نتیجه‌ها از بررسی مستقیم refهای GitHub بالا و تطبیق آنها با سند مرجع به دست آمده‌اند.
