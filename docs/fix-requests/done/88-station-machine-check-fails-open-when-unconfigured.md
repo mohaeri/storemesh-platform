@@ -34,7 +34,7 @@ Option A (fail closed) was selected, matching the request's recommendation. A si
 - Backend: `392938660dc01db5f5e074d3083d91f53bba0fd7` — https://github.com/mohaeri/storemesh-site-server/pull/21
 - Contracts: `8b83a8adf988458203f1899bef4e1dc0e79b1961` — https://github.com/mohaeri/storemesh-contracts/pull/8
 - Web (verified unchanged): `4be92a1287631470609961b4167f4a7be422ca1a` — https://github.com/mohaeri/storemesh-web/pull/9
-- Platform report: `pending`
+- Platform report: `4c7ad2dc899b305936e896a7a1272614d7f72f71`
 
 ## Working-tree and synchronization verification
 
