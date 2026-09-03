@@ -32,7 +32,7 @@ Status: completed, tested, committed, and pushed.
 - Backend: `9594322ff2e8e58d6840885b91196e565768a8b4` — https://github.com/mohaeri/storemesh-site-server/pull/21
 - Web: `109847c6f40cecd66af9557fb2a24e4e3172175d` — https://github.com/mohaeri/storemesh-web/pull/9
 - Contracts: `1efd3f9b3779505b526906541194d77c01399e70` — https://github.com/mohaeri/storemesh-contracts/pull/8
-- Platform report: `pending`
+- Platform report: `c1cd219e8a3d14a3e31cf49f21009cc87216bd2c`
 
 ## Working-tree and synchronization verification
 
