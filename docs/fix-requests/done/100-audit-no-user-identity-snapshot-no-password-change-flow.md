@@ -23,7 +23,7 @@ Status: completed and pushed
 - Contracts: `e93436807383a973080b09b03458378ea4d78179` — https://github.com/mohaeri/storemesh-contracts/pull/8
 - Cloud: `85a97c674894a0428d7b03295576a6f807f902a4` — https://github.com/mohaeri/storemesh-cloud/pull/1
 - Web: `1b71f122e440658b0241ca2e6e4ada2ca83e0baa` — https://github.com/mohaeri/storemesh-web/pull/9
-- Platform report commit: recorded by the immediately following metadata commit.
+- Platform report commit: `984468588e2bbdd72fd2ae5cbfad9cad61bbc571`; this SHA is recorded by the immediately following metadata commit.
 
 ## Working-tree confirmation
 
