@@ -20,7 +20,7 @@ Status: completed and pushed
 ## Commits and pull requests
 
 - PDA: `dd133b002edfaeb9d034ab7ddcdbd08c8e81d6ad` — https://github.com/mohaeri/storemesh-pda/pull/5
-- Platform report: recorded by the platform commits that add and finalize this file.
+- Platform report: `092cbc4241eedb40fdf7131308e2abef0ea979b7` (report creation), followed by the metadata-finalization commit containing this SHA. No platform pull request exists for this branch.
 
 ## Working-tree verification
 
