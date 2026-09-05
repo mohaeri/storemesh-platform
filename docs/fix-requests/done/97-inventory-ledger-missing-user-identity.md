@@ -31,3 +31,7 @@ Status: completed and pushed
 - Contracts has no remaining FR97 change; the pre-existing unrelated untracked `package-lock.json` remains untouched.
 - Platform has no remaining FR97 change after the report commit; unrelated pre-existing specification, coordination, and scratch files remain untouched.
 - The open request file was not edited or removed.
+
+## Re-verification addendum — after FR108
+
+Re-verified on backend HEAD `f1c013924d18eca10b43d18e09ade43d3bac8f3f` after deterministic audit/outbox reload ordering landed. Two complete runs used separate fresh, fully migrated PostgreSQL 17 databases with explicit `DATABASE_URL`; each run finished **534 passed, 0 failed, 0 skipped**. The FR97 real-PostgreSQL inventory-ledger identity test passed in both runs.

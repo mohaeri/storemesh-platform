@@ -29,3 +29,7 @@ Status: completed and pushed
 - Contracts has no remaining FR93 change; the pre-existing unrelated untracked `package-lock.json` remains untouched.
 - Platform has no remaining FR93-scoped change after committing this report; unrelated pre-existing files remain untouched.
 - The source file `docs/fix-requests/open/93-audit-events-missing-entity-type.md` was not edited or removed.
+
+## Re-verification addendum — after FR108
+
+Re-verified on backend HEAD `f1c013924d18eca10b43d18e09ade43d3bac8f3f` after deterministic audit/outbox reload ordering landed. Two complete runs used separate fresh, fully migrated PostgreSQL 17 databases with explicit `DATABASE_URL`; each run finished **534 passed, 0 failed, 0 skipped**. The FR93 real-PostgreSQL entity-type test passed in both runs.
