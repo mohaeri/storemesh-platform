@@ -31,7 +31,7 @@ Every PostgreSQL acceptance run used a separately created, migrated PostgreSQL 1
 ## Commits and pull requests
 
 - Backend: `f1c013924d18eca10b43d18e09ade43d3bac8f3f` — https://github.com/mohaeri/storemesh-site-server/pull/21
-- Platform report: recorded by the platform commits that add and finalize this file.
+- Platform report: `9963e9f2e19dfd5cdf974a3d55b37903f670c4bc` (report creation), followed by the metadata-finalization commit containing this SHA. No platform pull request exists for this branch.
 
 ## Working-tree verification
 
