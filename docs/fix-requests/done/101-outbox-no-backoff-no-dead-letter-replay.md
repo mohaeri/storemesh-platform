@@ -38,7 +38,7 @@ All final suites used `DATABASE_URL=postgresql://postgres@127.0.0.1:55439/storem
 - Cloud: `4ab798c06c1fd814e406a3d24c328951410ff9ea` — https://github.com/mohaeri/storemesh-cloud/pull/1
 - Contracts: `d7a96019b8deb67a7859a9990fb824c055ce2c79` — https://github.com/mohaeri/storemesh-contracts/pull/8
 - Web: `80f47143bba96ce10b8809dbf93e58cfecadcb51` — https://github.com/mohaeri/storemesh-web/pull/9
-- Platform report: recorded by the platform commits that add and finalize this file.
+- Platform report: `68728630b510106b481c206589b20432478ac63a` (report creation), followed by the metadata-finalization commit containing this SHA. No platform pull request exists for this branch.
 
 ## Working-tree verification
 
