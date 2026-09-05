@@ -21,7 +21,7 @@ Status: completed and pushed
 - Backend: `251f0f15f4b1c856e05e57dd6c69643250ae2374` — https://github.com/mohaeri/storemesh-site-server/pull/21
 - Contracts: `f57b465d40ee912667691eb9800df0d9c89cd0c1` — https://github.com/mohaeri/storemesh-contracts/pull/8
 - Cloud: `faf814c9a036a163550f174a28c920f9af79ca52` — https://github.com/mohaeri/storemesh-cloud/pull/1
-- Platform completion-report commit: recorded in the metadata update immediately following the report commit; no platform PR exists for this branch.
+- Platform completion-report commit: `da5b9db64215c0ee9c4ae775d7ceb61a1119c30d`; this SHA metadata is recorded in the immediately following commit. No platform PR exists for this branch.
 
 ## Working-tree confirmation
 
