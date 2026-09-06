@@ -12922,6 +12922,8 @@ PROCESS_CONFIG WORK_ORDER<br>WOID (PK)<br>Arocess 1D (PK) ——efines _____y | 
 
 - **Destination is valid.** 
 
+**Implementation note, decided with Mohamad 2026-09-04 (fast-track backlog-reduction pass; see removed `needs-decision/inventory-movement-hardening-questions.md`, question 1):** "destination is valid" today means the target zone exists, is active, and the container isn't locked/owned by another active session — it does not check whether the destination is a *legitimate next step* for what the container holds (the way `releaseQuarantine`, after FR59, checks a forward-zone map derived from the batch's pre-quarantine status). Building an equivalent "legal zone graph" for general container movement was evaluated and explicitly deferred: general movement is not linear the way a batch's process stages are (a container legitimately goes to cold storage temporarily, back out, staged near a station, etc.), and designing that graph correctly needs real operational input this pass didn't have time for. Current pilot scale accepted the existing (looser) check as sufficient for now. Revisit if a real misrouting incident occurs or when the model above is worth building — not a permanent decision, just not this pass.
+
 - **Operator has permission.** 
 
 ###### **If validation fails, movement cannot continue.** 
@@ -29428,6 +29430,8 @@ Critical rule:
 
 inventory.adjust must not automatically imply inventory.adjust.approve. 
 
+**Implementation note, decided with Mohamad 2026-09-04 (fast-track backlog-reduction pass; see removed `needs-decision/inventory-movement-hardening-questions.md`, question 2):** the shipped system collapses this list into coarser roles (`inventory:read`, `storage:write`, `inventory:adjust.approve`) rather than gating each of `view`/`move`/`adjust`/`consume`/`release`/`count` independently. Accepted as sufficient for the current pilot's operator count; splitting into the full fine-grained set is mechanical whenever it's actually needed (e.g. someone who should count without moving, or consume without adjusting), but designing those exact boundaries wasn't done this pass. Revisit when operator count or role complexity grows, not before.
+
 ## **10.22 Processing Permissions** 
 
 For each processing domain: 
@@ -31135,6 +31139,8 @@ UI button disabling JavaScript flags Client-side timers Operator discipline
 Client-side controls improve usability. 
 
 They do not provide concurrency safety. 
+
+**Implementation note, decided with Mohamad 2026-09-04 (fast-track backlog-reduction pass; see removed `needs-decision/inventory-movement-hardening-questions.md`, question 3):** the shipped system relies on PostgreSQL transactions plus site-level state versioning; there is no row-level lock scoped to an individual batch/container/package balance. Accepted as sufficient at the current pilot's operator count — under low concurrency this is tolerable, but as concurrent operators increase, unrelated operations can start contending and retrying against each other. Explicitly deferred, not solved: adding per-entity optimistic or row locking is a real architectural change that shouldn't be built speculatively without a known scale target. Revisit when operator count actually grows, not before.
 
 11.73 Version 1 Boundary 
 

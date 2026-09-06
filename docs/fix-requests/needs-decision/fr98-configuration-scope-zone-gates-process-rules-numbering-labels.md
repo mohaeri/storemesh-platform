@@ -1,0 +1,3 @@
+# RESOLVED 2026-09-05 — see open/116, open/117, open/118
+
+Mohamad decided: zone gates and process rules stay code-level architecture (not configuration knobs — changing them requires a code review and deploy). Numbering schemes become runtime configurable (open/117, fail-closed exception documented — cosmetic-only, defaults to current prefixes when unconfigured). Label templates become per-site runtime configurable (open/118, fail-closed like PACKAGING/FRESH_EXPORT). The mechanical, non-decision part of the original FR98 (task priority configuration, receiving-variance re-check) is open/116. This file is kept as a stub, not deleted (rm/mv still return "Operation not permitted" on this mount).
