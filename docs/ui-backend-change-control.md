@@ -16,7 +16,7 @@ Last updated: 2026-09-08
 
 ### Sorting output routing and containers
 
-Status: UI correction proposed; no backend change authorized.
+Status: UI correction finalized in the Figma Make prototype on 2026-09-08; no backend change made or authorized.
 
 - Sorting output must expose the intended route: fresh export, freezing, freeze drying, conventional drying, QC quarantine, or disposal.
 - Fresh-export output must not subsequently enter washing.
@@ -25,6 +25,27 @@ Status: UI correction proposed; no backend change authorized.
 - Sorting output must use scanned existing reusable containers. The operator scans and weighs each container, assigns grade/size and route, and completes aggregate output batches with preserved genealogy.
 - The prototype action that creates a disposable container after sorting is a UI error and should be removed in the next Figma revision.
 - Backend tests already cover distinct scanned sorting-output containers and child-batch genealogy (`storemesh-site-server/test/sorting-output-containers.test.js`). Richer route selection must be checked against implemented transition rules before the UI claims backend support.
+
+Implemented UI behavior:
+
+- The operator first selects and locks the input baskets.
+- Every sorted output is recorded by scanning an existing reusable basket, capturing its load-cell weight, selecting final grade/size, selecting a process route, and selecting its immediate holding location.
+- Supported routes shown by the prototype are fresh export, freezing, freeze drying, conventional drying, QC quarantine, and disposal.
+- Fresh-export output visibly locks out washing. Freezing, freeze drying, and conventional drying visibly include their washing/slicing prerequisites.
+- Cold storage is modeled separately as a physical holding location.
+- Disposable-container creation was removed from sorting output. Mass balance and an explanation for variance above 2% remain visible.
+
+### Container creation and designated zones
+
+Status: UI correction finalized in the Figma Make prototype on 2026-09-08; no backend change made or authorized.
+
+- The Receiving > Containers screen now opens a functional Create Basket form.
+- The form captures basket type, ownership, tare weight, capacity, and one or more designated zones.
+- It generates a permanent basket identifier and QR state, adds the basket to the list immediately, and persists it in prototype `localStorage`.
+- The table displays capacity, tare weight, status, and every designated zone.
+- Only active baskets designated for `SORTING` appear in the sorting output-container selector.
+- Current zone and designated zones remain separate concepts.
+- Preview verification created `BSK-1004`, preserved it after navigation, and successfully used the eligible container pool during sorting-output scan and weighing.
 
 ## Historical backend changes before this rule
 
