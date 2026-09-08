@@ -40,12 +40,16 @@ Implemented UI behavior:
 Status: UI correction finalized in the Figma Make prototype on 2026-09-08; no backend change made or authorized.
 
 - The Receiving > Containers screen now opens a functional Create Basket form.
-- The form captures basket type, ownership, tare weight, capacity, and one or more designated zones.
-- It generates a permanent basket identifier and QR state, adds the basket to the list immediately, and persists it in prototype `localStorage`.
+- The form captures basket type, tare weight, capacity, and one or more designated zones. Ownership is not shown because permanent fleet containers are always organization-owned.
+- It generates a permanent, non-recyclable identifier and QR state, adds the basket to the list immediately, and persists it in prototype `localStorage`. The prototype uses type-specific prefixes: `BSK-` for baskets, `TRY-` for process trays, and `CTR-` for general containers.
 - The table displays capacity, tare weight, status, and every designated zone.
 - Only active baskets designated for `SORTING` appear in the sorting output-container selector.
 - Current zone and designated zones remain separate concepts.
-- Preview verification created `BSK-1004`, preserved it after navigation, and successfully used the eligible container pool during sorting-output scan and weighing.
+- Operators can edit the current tare weight, capacity, and designated zones. No separate calibration-history UI is included.
+- A damaged basket is not deleted and its identifier is never reused. The damage flow can name a healthy target basket for contents, preserves the old basket record, and permanently locks its QR.
+- No deactivate/retire control is shown because the current backend has no corresponding endpoint; this was intentionally left unchanged.
+- Disposable containers remain traceable in a separate tab and are excluded from the permanent reusable fleet and sorting-container selection.
+- Preview verification confirmed type-specific prefix generation, ownership-field removal, current tare/zone editing, damage reporting with permanent code locking, and disposable-container separation.
 
 ## Historical backend changes before this rule
 
