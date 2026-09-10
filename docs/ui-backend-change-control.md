@@ -1,6 +1,6 @@
 # UI / Backend Change Control
 
-Last updated: 2026-09-08
+Last updated: 2026-09-10
 
 ## Standing rule
 
@@ -13,6 +13,33 @@ Last updated: 2026-09-08
 - Finalized documentation changes must be committed and pushed. Unrelated local changes must not be included.
 
 ## Open UI/backend alignment notes
+
+### Production workbench — current-backend alignment correction
+
+Status: UI-only Figma Make Version 13 finalized and verified on 2026-09-10; no backend or contract change made.
+
+This section supersedes any conflicting route claims in the older “Sorting output routing and containers” note below. The prototype now follows the behavior that is currently implemented in `storemesh-site-server`:
+
+- One received container is sorted per operation. Every output is assigned to a scanned, existing, healthy reusable basket/crate; no disposable container is created by sorting.
+- The sort result records child genealogy, final grade and size, exact output weight, mass balance, and a classified loss reason whenever loss is positive.
+- Manager destination and physical movement are separate records. A designated-zone mismatch is displayed as a warning; stage, current-zone, lock, health, and scan mismatches remain hard gates.
+- Conventional drying accepts a `SORTED` batch directly in `DRYING`. The other implemented chain is `SORTED -> WASHED -> SLICED -> FROZEN -> FREEZE_DRIED`, with physical movement and exact container/tray checks between stages.
+- Washing and slicing keep batch identity, classification, and official weight. The optional scale reading is informational.
+- Slicing allocates existing process trays with unique sequence numbers and optional quantities. When all quantities are supplied, their total must equal the batch weight; final allocation releases the source basket.
+- Freeze requires every assigned tray to be scanned exactly once. Freeze completion preserves weight and routes the same batch to freeze drying. Freeze-dry and conventional-dry completion capture positive final weights not exceeding their recorded inputs and expose yield.
+- Machine cycles expose ready, running, paused, completing, completed, failed, cancelled, and manager recovery/scrap behavior. Failed material stays blocked until the manager action resolves it.
+- Physical merge remains a separate operation over two or more compatible parent contributions and a scanned empty output basket.
+- Production results and event history use a monotonic sequence as the stable secondary order when timestamps tie.
+
+Known product-policy differences are labeled in the UI instead of being simulated as backend support. In particular, the current backend does not implement a permanent “fresh selection can never be washed” lock, and normal drying does not require washing/slicing. These policies would require explicit approval before any backend change.
+
+Verification evidence:
+
+- TypeScript `--noEmit`: pass.
+- Vite production build: pass, 19 modules transformed.
+- Prototype domain tests: 14 passed, 0 failed, 0 skipped, 0 todo.
+- Figma interactive scenario: destination decision and physical transfer separated; wrong basket scan rejected; wash and slice preserved identity/weight; tray allocation released the basket; freeze pause/resume and completion worked; freeze-dry output was 2 kg from 10 kg input and displayed 20% yield; preview Reload restored the saved batch.
+- Persistent storage is browser-local prototype state and is explicitly labeled “without API/equipment connection”; it is not evidence of factory integration.
 
 ### Sorting output routing and containers
 

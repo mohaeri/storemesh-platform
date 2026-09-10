@@ -1,0 +1,35 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const folder = path.dirname(fileURLToPath(import.meta.url));
+const [input, output] = process.argv.slice(2);
+if (!input || !output) throw new Error('Usage: node assemble.mjs baseline-WebApp.tsx output-WebApp.tsx');
+const source = fs.readFileSync(input, 'utf8');
+const start = source.indexOf('function ProductionScreen(');
+const end = source.indexOf('function FreshExportScreen(', start);
+if (start < 0 || end < start || source.includes('// BEGIN PRODUCTION WORKSPACE')) throw new Error('Unexpected baseline; do not overwrite an already assembled version');
+const fragments = ['ProductionWorkbench.tsx', 'SortingScreen.tsx', 'ProductionInventory.tsx'].map(name => fs.readFileSync(path.join(folder, name), 'utf8'));
+const replacement = '// BEGIN PRODUCTION WORKSPACE\n' + fragments.join('\n') + '\n// END PRODUCTION WORKSPACE\n';
+let result = source.slice(0, start) + replacement + source.slice(end);
+const inventoryStart = result.indexOf('function InventoryScreen()');
+const inventoryEnd = result.indexOf('// BEGIN PRODUCTION WORKSPACE');
+if (inventoryStart < 0 || inventoryEnd < inventoryStart) throw new Error('Missing original inventory component');
+let inventory = result.slice(inventoryStart, inventoryEnd).replace('function InventoryScreen()', 'function ReceivingInventoryScreen()');
+const inventoryRead = 'const batch=readPrototypeBatch(); const total=';
+if (!inventory.includes(inventoryRead)) throw new Error('Inventory baseline changed');
+inventory = inventory.replace(inventoryRead, 'const receipt=readPrototypeBatch(); const consumed=readProductionLedger().consumedInputs; const batch={...receipt,baskets:receipt.baskets.filter(b=>!consumed.includes(receipt.id+":"+b.code))}; const total=');
+inventory = inventory.replace('value="۱"', 'value={batch.baskets.length?"۱":"۰"}');
+result = result.slice(0, inventoryStart) + inventory + result.slice(inventoryEnd);
+const originalTrace = result.lastIndexOf('function TraceScreen() {');
+if (originalTrace < 0) throw new Error('Missing original trace component');
+// Match the original spaced declaration, not the new compact wrapper.
+result = result.slice(0, originalTrace) + result.slice(originalTrace).replace('function TraceScreen() {', 'function LegacyTraceScreen() {');
+const transferStart = result.indexOf('function TransfersScreen('), transferEnd = result.indexOf('function TasksScreen(', transferStart);
+let transfer = result.slice(transferStart, transferEnd);
+transfer = transfer.replace('const batch=readPrototypeBatch();', 'const receipt=readPrototypeBatch(); const consumed=readProductionLedger().consumedInputs; const batch={...receipt,baskets:receipt.baskets.filter(b=>!consumed.includes(receipt.id+":"+b.code))};');
+transfer = transfer.replace('writePrototypeBatch(updated);', 'writePrototypeBatch({...updated,baskets:receipt.baskets.map(b=>updated.baskets.find(x=>x.code===b.code)||b)});');
+result = result.slice(0, transferStart) + transfer + result.slice(transferEnd);
+fs.mkdirSync(path.dirname(path.resolve(output)), { recursive: true });
+fs.writeFileSync(output, result);
+console.log(JSON.stringify({ input: path.resolve(input), output: path.resolve(output), replacedChars: end - start, chars: result.length }));
