@@ -52,17 +52,17 @@ function pwFreeCarrier(ledger: PWLedger, code: string, exceptId = "") {
 function recordSortingOutputs(batch: any, selected: string[], outputs: any[], lossReason: string) {
   const ledger = readProductionLedger();
   if (ledger.storageError) throw Error(ledger.storageError);
-  if (selected.length !== 1) throw Error("هر ثبت سورتینگ یک سبد ورودی دارد؛ سبد بعدی را جداگانه ثبت کنید.");
-  const signature = `${batch.id}:${selected[0]}`;
-  if (ledger.consumedInputs.some(key => pwCode(key) === pwCode(signature))) throw Error("این سبد ورودی قبلاً سورت شده است.");
+  if (!selected.length || new Set(selected.map(pwCode)).size !== selected.length) throw Error("حداقل یک سبد ورودی غیرتکراری لازم است.");
+  const signatures = selected.map(code => `${batch.id}:${code}`);
+  if (signatures.some(signature => ledger.consumedInputs.some(key => pwCode(key) === pwCode(signature)))) throw Error("یکی از سبدهای ورودی قبلاً سورت شده است.");
   const sources = (batch.baskets || []).filter((x: any) => selected.some(code => pwCode(code) === pwCode(x.code)));
-  if (sources.length !== 1) throw Error("سبد انتخابی در محموله پیدا نشد.");
-  const physical = pwCarriers().find((c: any) => c.code === pwCode(sources[0].code));
-  if (physical && !pwHealthy(physical) || /قرنطینه|در راه|خراب|QUARANTINE|BLOCKED|DAMAGED/.test(sources[0].status || "") || /قرنطینه/.test(sources[0].zone || "")) throw Error("ورودی مسدود یا ظرف آسیب‌دیده است.");
-  if (!/سردخانه|COLD_ROOM|COLD_STORAGE/.test(sources[0].zone || "")) throw Error("ورودی باید در سردخانه باشد.");
+  if (sources.length !== selected.length) throw Error("یکی از سبدهای انتخابی در محموله پیدا نشد.");
+  if (new Set(sources.map((source: any) => source.product)).size !== 1) throw Error("همه ورودی‌های سورت باید یک محصول باشند.");
+  if (sources.some((source: any) => { const physical = pwCarriers().find((c: any) => c.code === pwCode(source.code)); return physical && !pwHealthy(physical) || /قرنطینه|در راه|خراب|QUARANTINE|BLOCKED|DAMAGED/.test(source.status || "") || /قرنطینه/.test(source.zone || ""); })) throw Error("یکی از ورودی‌ها مسدود یا ظرف آن آسیب‌دیده است.");
+  if (sources.some((source: any) => !/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""))) throw Error("همه ورودی‌ها باید در سردخانه باشند.");
   const available = pwNumber(sources.reduce((sum: number, x: any) => sum + Number(x.gross) - Number(x.tare || 0), 0));
   const total = pwNumber(outputs.reduce((sum, x) => sum + Number(x.weight), 0)), loss = pwNumber(available - total);
-  if (!(available > 0) || !outputs.length || !Number.isFinite(total) || loss < 0 || outputs.some(x => !(Number(x.weight) > 0) || !x.grade || !x.size)) throw Error("گرید، اندازه و وزن معتبر همه خروجی‌ها و توازن وزن الزامی است.");
+  if (!(available > 0) || !outputs.length || !Number.isFinite(total) || loss < 0 || outputs.some(x => !(Number(x.weight) > 0) || !x.grade || !x.size || !x.destination)) throw Error("گرید، اندازه، وزن و مقصد معتبر همه خروجی‌ها و توازن وزن الزامی است.");
   if (new Set(outputs.map(x => pwCode(x.code))).size !== outputs.length) throw Error("سبد خروجی تکراری است.");
   if (loss > 0 && !["WASTE", "DAMAGE", "MOISTURE_LOSS", "RESIDUAL_MATERIAL", "MEASUREMENT_VARIANCE"].includes(lossReason)) throw Error("برای هر مقدار افت، یک علت طبقه‌بندی‌شده انتخاب کنید.");
   outputs.forEach(output => {
@@ -70,14 +70,17 @@ function recordSortingOutputs(batch: any, selected: string[], outputs: any[], lo
     if (selected.some(code => pwCode(code) === carrier.code)) throw Error("سبد ورودی نمی‌تواند خروجی همان عملیات باشد.");
     pwFreeCarrier(ledger, carrier.code);
     if (Number(output.weight) > carrier.capacityKg) throw Error("وزن خروجی از ظرفیت سبد بیشتر است.");
+    const parentContributions = output.parentContributions || [];
+    if (!parentContributions.length || parentContributions.some((row: any) => !(Number(row.inputWeightKg) > 0) || !selected.some(code => pwCode(code) === pwCode(row.batchId))) || Math.abs(parentContributions.reduce((sum: number, row: any) => sum + Number(row.inputWeightKg), 0) - Number(output.weight)) > .001) throw Error("شجره وزنی هر خروجی باید دقیق و برابر وزن آن باشد.");
   });
   const children = outputs.map(output => {
-    const code = pwId(ledger, "B"), item: PWItem = { id: code, code, parentId: String(batch.id), inputCodes: sources.map((x: any) => x.code), supplier: batch.supplier, product: sources[0].product, grade: output.grade, size: output.size, weightKg: pwNumber(output.weight), stage: "SORTED", zone: "SORTING", destination: null, plannedRoute: output.route || output.label || "", containerCode: pwCode(output.code), trays: [], allocated: false, consumed: false, blocked: false };
+    const contributed = output.parentContributions.map((row: any) => pwCode(row.batchId)), processing = ["DRYING", "FREEZING", "FREEZE_DRYING"].includes(output.destination);
+    const code = pwId(ledger, "B"), item: PWItem = { id: code, code, parentId: contributed.join(","), parentIds: contributed, parentContributions: output.parentContributions.map((row: any) => ({ id: pwCode(row.batchId), weightKg: Number(row.inputWeightKg) })), inputCodes: contributed, supplier: batch.supplier, suppliers: [batch.supplier], supplierContributions: [{ supplier: batch.supplier, weightKg: pwNumber(output.weight) }], product: sources[0].product, grade: output.grade, size: output.size, weightKg: pwNumber(output.weight), stage: "SORTED", zone: "SORTING", destination: output.destination, nextZone: processing ? "WASHING" : output.destination, containerCode: pwCode(output.code), trays: [], allocated: false, consumed: false, blocked: false };
     ledger.items.push(item); return item;
   });
-  ledger.consumedInputs.push(signature);
+  ledger.consumedInputs.push(...signatures);
   outputs.filter(output => output.designationWarning).forEach(output => pwEvent(ledger, "هشدار زون تعیین‌شده", pwCode(output.code), { zone: "SORTING", severity: "WARNING" }));
-  pwEvent(ledger, "ثبت سورتینگ", String(batch.id), { inputCodes: selected, children: children.map(x => x.code), inputWeightKg: available, outputWeightKg: total, lossKg: loss, lossReason: loss > 0 ? lossReason : null });
+  pwEvent(ledger, "ثبت سورتینگ", String(batch.id), { inputCodes: selected, children: children.map(x => ({ code: x.code, destination: x.destination, parents: x.parentContributions })), inputWeightKg: available, outputWeightKg: total, lossKg: loss, lossReason: loss > 0 ? lossReason : null });
   saveProductionLedger(ledger); return children;
 }
 const pwBox = { background: "white", border: "1px solid #dce9e7", borderRadius: 16, padding: 20 };
@@ -102,13 +105,13 @@ function ProductionScreen(props: any) {
   const move = (id: string) => execute("انتقال فیزیکی در شبیه‌ساز ثبت شد.", next => {
     const item = next.items.find(x => x.id === id); pwUsable(next, item);
     const destination = item.nextZone || item.destination;
-    if (!destination) throw Error("ابتدا مدیر باید مقصد را مشخص کند.");
+    if (!destination) throw Error("برای این بچ مسیر عملیاتی مشخص نشده است.");
     if (destination === item.zone) throw Error("بچ از قبل در محل مقصد است.");
     const before = item.zone; item.zone = destination; pwEvent(next, "انتقال فیزیکی", item.code, { from: before, to: destination, containerCode: item.containerCode });
   });
   const processBatch = (event: any, process: "WASH" | "SLICE") => {
     const data = form(event);
-    execute(process === "WASH" ? "شست‌وشو ثبت شد؛ اکنون انتقال به اسلایس را ثبت کنید." : "اسلایس ثبت شد؛ سینی‌های خروجی را اسکن و تخصیص دهید.", next => {
+    execute(process === "WASH" ? "شست‌وشو ثبت شد؛ اکنون انتقال به اسلایس را ثبت کنید." : "اسلایس ثبت شد؛ مرحله بعد از روی مقصد نهایی تعیین شد.", next => {
       const item = next.items.find(x => x.id === chosen); pwUsable(next, item);
       const required = process === "WASH" ? "SORTED" : "WASHED", zone = process === "WASH" ? "WASHING" : "SLICING";
       if (item.stage !== required || item.zone !== zone) throw Error(`بچ باید ${PW_STAGES[required]} و در ${PW_ZONES[zone]} باشد؛ انتقال فیزیکی را در صف کار ثبت کنید.`);
@@ -116,7 +119,7 @@ function ProductionScreen(props: any) {
       pwCarrier(item.containerCode, "basket");
       const observed = String(data.get("observed") || "").trim();
       if (observed && (!Number.isFinite(Number(observed)) || !(Number(observed) > 0))) throw Error("خوانش اطلاعاتی وزن باید مثبت باشد.");
-      item.stage = process === "WASH" ? "WASHED" : "SLICED"; item.nextZone = process === "WASH" ? "SLICING" : "FREEZING";
+      item.stage = process === "WASH" ? "WASHED" : "SLICED"; item.nextZone = process === "WASH" ? "SLICING" : item.destination === "DRYING" ? "DRYING" : "FREEZING";
       pwEvent(next, process === "WASH" ? "ثبت شست‌وشو" : "ثبت اسلایس", item.code, { observedWeightKg: observed ? Number(observed) : null, officialWeightKg: item.weightKg, nextZone: item.nextZone });
     });
   };
@@ -150,7 +153,7 @@ function ProductionScreen(props: any) {
       const ids = data.getAll("items").map(String), items = ids.map(id => next.items.find(x => x.id === id));
       if (!items.length) throw Error("حداقل یک بچ انتخاب کنید.");
       const scans = String(data.get("trays") || "").split(/[\s,،]+/).filter(Boolean).map(pwCode);
-      const expectedStage = type === "FREEZE" ? "SLICED" : type === "FREEZE_DRY" ? "FROZEN" : "SORTED", expectedZone = type === "FREEZE" ? "FREEZING" : type === "FREEZE_DRY" ? "FREEZE_DRYING" : "DRYING";
+      const expectedStage = type === "FREEZE" ? "SLICED" : type === "FREEZE_DRY" ? "FROZEN" : "SLICED", expectedZone = type === "FREEZE" ? "FREEZING" : type === "FREEZE_DRY" ? "FREEZE_DRYING" : "DRYING";
       items.forEach(item => { pwUsable(next, item); if (item.stage !== expectedStage || item.zone !== expectedZone) throw Error("مرحله یا محل فعلی یکی از بچ‌ها برای این چرخه مناسب نیست."); });
       if (items.some(item => !!item!.demo !== !!items[0]!.demo)) throw Error("بچ آزمایشی و داده شما نباید در یک چرخه ترکیب شوند.");
       const available = pwNumber(items.reduce((sum, item) => sum + item!.weightKg, 0));
@@ -179,7 +182,7 @@ function ProductionScreen(props: any) {
       if (action === "FAIL") items.forEach(item => { item.blocked = true; item.cycleFailureId = cycle.id; });
       if (action === "FINISH") {
         items.forEach(item => {
-          if (cycle.type === "FREEZE") { item.stage = "FROZEN"; item.zone = "FREEZE_DRYING"; item.nextZone = "FREEZE_DRYING"; }
+          if (cycle.type === "FREEZE") { const freezeOnly = item.destination === "FREEZING"; item.stage = "FROZEN"; item.zone = freezeOnly ? "PACKAGING" : "FREEZE_DRYING"; item.nextZone = item.zone; }
           else {
             const measured = Number(data.get(`weight-${item.id}`));
             if (!Number.isFinite(measured) || !(measured > 0) || measured > item.weightKg) throw Error(`وزن نهایی معتبر برای ${item.code} لازم است؛ حداکثر ${item.weightKg} kg.`);
@@ -213,11 +216,11 @@ function ProductionScreen(props: any) {
   const demo = () => execute("نمونه آزمایشی جداگانه اضافه شد؛ هیچ ورودی دریافت جایگزین نشد.", next => {
     const carriers = pwCarriers().filter((c: any) => { if (!pwHealthy(c) || pwTray(c)) return false; try { pwFreeCarrier(next, c.code); return true; } catch { return false; } });
     if (!carriers.length) throw Error("ابتدا یک سبد سالم در بخش کانتینرها ایجاد کنید؛ نمونه آزمایشی هم از کد موجود استفاده می‌کند.");
-    const carrier = carriers[0], code = pwId(next, "DEMO"); next.items.push({ id: code, code, parentId: "DEMO-RECEIPT", inputCodes: [], product: "محصول آزمایشی", grade: "A", size: "L", weightKg: Math.min(10, carrier.capacityKg), stage: "SORTED", zone: "SORTING", destination: null, containerCode: carrier.code, trays: [], allocated: false, consumed: false, blocked: false, demo: true });
+    const carrier = carriers[0], code = pwId(next, "DEMO"); next.items.push({ id: code, code, parentId: "DEMO-RECEIPT", inputCodes: [], product: "محصول آزمایشی", grade: "A", size: "L", weightKg: Math.min(10, carrier.capacityKg), stage: "SORTED", zone: "SORTING", destination: "FRESH_EXPORT", nextZone: "FRESH_EXPORT", containerCode: carrier.code, trays: [], allocated: false, consumed: false, blocked: false, demo: true });
     pwEvent(next, "افزودن نمونه آزمایشی", code); setIncludeDemo(true);
   });
   const cycleType = ["FREEZE", "FREEZE_DRY", "DRY"].includes(tab) ? tab : "";
-  const cycleEligible = live.filter(item => !pwBusy(ledger, item) && !item.blocked && (cycleType === "FREEZE" ? item.stage === "SLICED" && item.allocated && item.zone === "FREEZING" : cycleType === "FREEZE_DRY" ? item.stage === "FROZEN" && item.zone === "FREEZE_DRYING" : item.stage === "SORTED" && item.zone === "DRYING"));
+  const cycleEligible = live.filter(item => !pwBusy(ledger, item) && !item.blocked && (cycleType === "FREEZE" ? item.stage === "SLICED" && item.allocated && item.zone === "FREEZING" : cycleType === "FREEZE_DRY" ? item.stage === "FROZEN" && item.zone === "FREEZE_DRYING" : item.stage === "SLICED" && item.destination === "DRYING" && item.zone === "DRYING"));
   return <div dir="rtl" style={{ padding: 24, color: "#183e38", background: "#f3f7f6", flex: 1, minHeight: 0, overflow: "auto", fontFamily: "inherit" }}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 16 }}><div><h1 style={{ fontSize: 25, margin: 0 }}>میز کار تولید</h1><p style={{ color: "#6a817b", margin: "6px 0" }}>از سبد ورودی تا عملیات ماشین، خروجی و رهگیری</p></div><span style={{ padding: "8px 12px", borderRadius: 20, background: "#fff2ce", color: "#805900" }}>شبیه‌سازی مرورگر · بدون اتصال به API و تجهیزات</span></div>
     <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 16 }}>{tabs.map(([id, name]) => <PWButton key={id} secondary={tab !== id} onClick={() => switchTab(id)}>{name}</PWButton>)}</div>
@@ -226,15 +229,15 @@ function ProductionScreen(props: any) {
     {notice && <div role="status"><PWNotice>{notice}</PWNotice></div>}
     {tab === "sorting" && <SortingScreen {...props} />}
     {tab === "overview" && <>
-      <PWNotice>مسیر فعلی بک‌اند: پس از سورت، مدیر مقصد را انتخاب می‌کند. خشک‌کردن معمولی مستقیماً از بچ سورت‌شده انجام می‌شود. مسیر دیگر: شست‌وشو، اسلایس، تخصیص سینی، فریز، فریزدرای و بسته‌بندی. فریز در این نسخه خروجی مستقل نهایی ندارد. مقصد کاری و محل فیزیکی دو مرحله جدا هستند.</PWNotice>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>{[["بچ جاری", live.length], ["چرخه فعال", ledger.cycles.filter(c => PW_ACTIVE.includes(c.status)).length], ["منتظر تصمیم مقصد", live.filter(x => !x.destination && x.stage === "SORTED").length]].map(([title, count]) => <div key={String(title)} style={{ ...pwBox, flex: 1 }}><small>{title}</small><div style={{ fontSize: 28, marginTop: 8 }}>{count}</div></div>)}</div>
+      <PWNotice>مقصد نهایی هنگام توزین هر خروجی توسط کارشناس سورت تعیین می‌شود. خشک، فریز و فریزدرای همگی از شست‌وشو و اسلایس عبور می‌کنند؛ ارسال تازه هرگز شسته نمی‌شود. مدیر فقط بعداً با ثبت علت می‌تواند مقصد را اصلاح کند. مقصد کاری و انتقال فیزیکی همچنان دو ثبت جدا هستند.</PWNotice>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>{[["بچ جاری", live.length], ["چرخه فعال", ledger.cycles.filter(c => PW_ACTIVE.includes(c.status)).length], ["مسیر تعیین‌شده", live.filter(x => !!x.destination).length]].map(([title, count]) => <div key={String(title)} style={{ ...pwBox, flex: 1 }}><small>{title}</small><div style={{ fontSize: 28, marginTop: 8 }}>{count}</div></div>)}</div>
       {!live.length ? <PWEmpty>ابتدا یک سبد را در سورتینگ ثبت کنید؛ خروجی‌های آن در همین صف نمایش داده می‌شوند. <PWButton secondary onClick={demo}>افزودن نمونه آزمایشی جداگانه</PWButton></PWEmpty> : <div style={{ display: "grid", gap: 12 }}>{live.map(item => <div key={item.id} style={pwBox}>
         {summary(item)}<div style={{ fontSize: 13, marginBottom: 12 }}>محصول: {item.product} · گرید {item.grade} · اندازه {item.size} · مبدا {item.parentId} · سبد ورودی {item.inputCodes.join("، ") || "آزمایشی"}{item.plannedRoute ? ` · مسیر پیشنهادی سورت: ${item.plannedRoute}` : ""}</div>
         <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
-          {["SORTED", "WASHED"].includes(item.stage) && <form onSubmit={event => { const data = form(event); execute("تصمیم مقصد ثبت شد؛ انتقال فیزیکی هنوز انجام نشده است.", next => { if (role !== "manager") throw Error("برای تصمیم مقصد، نقش مدیر را انتخاب کنید."); const row = next.items.find(x => x.id === item.id); pwUsable(next, row); const destination = String(data.get("destination")), reason = String(data.get("reason") || "").trim(); if (row.destination && row.destination !== destination && !reason) throw Error("علت تغییر مقصد قبلی الزامی است."); if (row.destination === destination) throw Error("مقصد تغییری نکرده است."); const previous = row.destination; row.destination = destination; row.nextZone = destination; pwEvent(next, "تصمیم مدیر: مقصد", row.code, { previous, destination, reason: reason || null }); }); }} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <select name="destination" defaultValue={item.destination || "WASHING"} style={{ ...pwInput, width: 165 }} required>{["WASHING", "DRYING", "FRESH_EXPORT", "COLD_ROOM_CLEAN", "COLD_ROOM_DIRTY", "PACKAGING"].map(zone => <option key={zone} value={zone}>{PW_ZONES[zone]}</option>)}</select>{item.destination && <input name="reason" placeholder="علت تغییر مقصد" style={{ ...pwInput, width: 190 }} />}<PWButton disabled={role !== "manager" || pwBusy(ledger, item)}>ثبت مقصد مدیر</PWButton>
+          {item.destination && item.stage === "SORTED" && <form onSubmit={event => { const data = form(event); execute("اصلاح مقصد مدیر ثبت شد؛ انتقال فیزیکی هنوز انجام نشده است.", next => { if (role !== "manager") throw Error("برای اصلاح مقصد، نقش مدیر را انتخاب کنید."); const row = next.items.find(x => x.id === item.id); pwUsable(next, row); const destination = String(data.get("destination")), reason = String(data.get("reason") || "").trim(); if (!reason) throw Error("علت اصلاح مقصد الزامی است."); if (row.destination === destination) throw Error("مقصد تغییری نکرده است."); const previous = row.destination; row.destination = destination; row.nextZone = ["DRYING", "FREEZING", "FREEZE_DRYING"].includes(destination) ? "WASHING" : destination; pwEvent(next, "اصلاح مدیر: مقصد", row.code, { previous, destination, reason }); }); }} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <select name="destination" defaultValue={item.destination} style={{ ...pwInput, width: 180 }} required>{["FRESH_EXPORT", "DRYING", "FREEZING", "FREEZE_DRYING", "QC", "COLD_ROOM_CLEAN", "COLD_ROOM_DIRTY", "WASTE"].map(zone => <option key={zone} value={zone}>{PW_ZONES[zone]}</option>)}</select><input name="reason" required placeholder="علت اصلاح مقصد" style={{ ...pwInput, width: 190 }} /><PWButton disabled={role !== "manager" || pwBusy(ledger, item)}>اصلاح مقصد</PWButton>
           </form>}
-          <span>مرحله بعد: {PW_ZONES[item.nextZone || item.destination || ""] || "منتظر تصمیم مدیر"}</span><PWButton secondary disabled={pwBusy(ledger, item) || !(item.nextZone || item.destination) || item.zone === (item.nextZone || item.destination) || (item.stage === "SLICED" && !item.allocated)} onClick={() => move(item.id)}>تأیید انتقال فیزیکی</PWButton>
+          <span>مرحله بعد: {PW_ZONES[item.nextZone || item.destination || ""] || "مسیر نامشخص"}</span><PWButton secondary disabled={pwBusy(ledger, item) || !(item.nextZone || item.destination) || item.zone === (item.nextZone || item.destination) || (item.stage === "SLICED" && item.nextZone === "FREEZING" && !item.allocated)} onClick={() => move(item.id)}>تأیید انتقال فیزیکی</PWButton>
         </div>
       </div>)}</div>}
     </>}
@@ -242,10 +245,10 @@ function ProductionScreen(props: any) {
       <div style={pwBox}><h2>{tab === "wash" ? "ثبت شست‌وشوی یک بچ کامل" : "ثبت اسلایس یک بچ کامل"}</h2><PWNotice>هویت، گرید، اندازه و وزن رسمی بچ ثابت می‌ماند. خوانش ترازو فقط اطلاعاتی است. برای شروع، انتقال فیزیکی از صف کار را ثبت کنید.</PWNotice>
         <form onSubmit={event => processBatch(event, tab === "wash" ? "WASH" : "SLICE")}>{batchPicker(live.filter(x => x.stage === (tab === "wash" ? "SORTED" : "WASHED") && !pwBusy(ledger, x)))}{current && summary(current)}<PWField label="اسکن QR سبد همین بچ"><input name="scan" placeholder="اسکن یا ورود کد خوانده‌شده" required style={pwInput} /></PWField><PWField label="خوانش اطلاعاتی ترازو (kg، اختیاری)"><input name="observed" type="number" min="0.001" step="0.001" style={pwInput} /></PWField><PWButton disabled={!current || current.stage !== (tab === "wash" ? "SORTED" : "WASHED")}>تأیید پایان {tab === "wash" ? "شست‌وشو" : "اسلایس"}</PWButton></form>
       </div>
-      {tab === "slice" && <div style={pwBox}><h2>تخصیص سینی‌های خروجی اسلایس</h2>{batchPicker(live.filter(x => x.stage === "SLICED" && !pwBusy(ledger, x)))}{current?.stage === "SLICED" ? <>{summary(current)}<PWNotice>فقط سینی سالم از فهرست کانتینرها پذیرفته می‌شود. مقدار هر سینی اختیاری است؛ در صورت وزن‌کردن همه سینی‌ها، جمع باید برابر وزن بچ باشد.</PWNotice><form onSubmit={allocate}><PWField label="اسکن QR سینی موجود"><input name="scan" required style={pwInput} /></PWField><PWField label="ترتیب سینی"><input name="sequence" type="number" min="1" step="1" defaultValue="1" required style={pwInput} /></PWField><PWField label="مقدار محصول در سینی (kg، اختیاری)"><input name="quantity" type="number" min="0.001" step="0.001" style={pwInput} /></PWField><PWButton disabled={current.allocated}>ثبت این سینی</PWButton></form><div style={{ margin: "16px 0" }}>{current.trays.map(tray => <p key={tray.code}>{tray.sequence}. {tray.code} · {tray.quantityKg === null ? "بدون وزن مجزا" : `${tray.quantityKg} kg`}</p>)}</div><PWButton disabled={current.allocated || !current.trays.length} onClick={finishAllocation}>{current.allocated ? "تخصیص نهایی شده" : "تأیید پایان تخصیص و آزادسازی سبد"}</PWButton></> : <PWEmpty>بچ اسلایس‌شده را برای تخصیص سینی انتخاب کنید.</PWEmpty>}</div>}
+      {tab === "slice" && <div style={pwBox}><h2>تخصیص سینی‌های خروجی اسلایس</h2>{batchPicker(live.filter(x => x.stage === "SLICED" && x.destination !== "DRYING" && !pwBusy(ledger, x)))}{current?.stage === "SLICED" && current.destination !== "DRYING" ? <>{summary(current)}<PWNotice>برای مسیر فریز یا فریزدرای، فقط سینی سالم پذیرفته می‌شود. مسیر خشک در همان سبد به خشک‌کن می‌رود و این مرحله را ندارد.</PWNotice><form onSubmit={allocate}><PWField label="اسکن QR سینی موجود"><input name="scan" required style={pwInput} /></PWField><PWField label="ترتیب سینی"><input name="sequence" type="number" min="1" step="1" defaultValue="1" required style={pwInput} /></PWField><PWField label="مقدار محصول در سینی (kg، اختیاری)"><input name="quantity" type="number" min="0.001" step="0.001" style={pwInput} /></PWField><PWButton disabled={current.allocated}>ثبت این سینی</PWButton></form><div style={{ margin: "16px 0" }}>{current.trays.map(tray => <p key={tray.code}>{tray.sequence}. {tray.code} · {tray.quantityKg === null ? "بدون وزن مجزا" : `${tray.quantityKg} kg`}</p>)}</div><PWButton disabled={current.allocated || !current.trays.length} onClick={finishAllocation}>{current.allocated ? "تخصیص نهایی شده" : "تأیید پایان تخصیص و آزادسازی سبد"}</PWButton></> : <PWEmpty>فقط بچ اسلایس‌شده با مقصد فریز یا فریزدرای به سینی تخصیص می‌یابد.</PWEmpty>}</div>}
     </div>}
     {cycleType && <>
-      <div style={pwBox}><h2>{cycleType === "FREEZE" ? "ساخت چرخه فریز از سینی‌های تخصیص‌یافته" : cycleType === "FREEZE_DRY" ? "ساخت چرخه فریزدرای" : "ساخت چرخه خشک‌کن"}</h2><PWNotice>{cycleType === "DRY" ? "مطابق بک‌اند فعلی: بچ سورت‌شده که به محل خشک‌کن منتقل شده وارد چرخه می‌شود؛ شست‌وشو پیش‌نیاز این مسیر نیست." : cycleType === "FREEZE" ? "تمام سینی‌های بچ‌های انتخابی اسکن می‌شوند. پایان فریز، همان بچ را با وزن ثابت به مرحله فریزدرای می‌برد." : "بچ‌های منجمد در محل فریزدرای و وزن کل ورودی ثبت می‌شوند؛ اسکن تک‌تک سینی‌ها الزامی نیست."}</PWNotice>
+      <div style={pwBox}><h2>{cycleType === "FREEZE" ? "ساخت چرخه فریز از سینی‌های تخصیص‌یافته" : cycleType === "FREEZE_DRY" ? "ساخت چرخه فریزدرای" : "ساخت چرخه خشک‌کن"}</h2><PWNotice>{cycleType === "DRY" ? "فقط بچ شسته و اسلایس‌شده با مقصد خشک وارد خشک‌کن می‌شود." : cycleType === "FREEZE" ? "تمام سینی‌ها اسکن می‌شوند؛ مقصد فریز پس از چرخه به بسته‌بندی می‌رود و مقصد فریزدرای به مرحله فریزدرای." : "فقط بچی که مقصد نهایی آن فریزدرای است پس از فریز وارد این چرخه می‌شود."}</PWNotice>
         {!(ledger.machines[cycleType] || []).length ? <PWEmpty>هیچ تنظیم تجهیزی در این شبیه‌ساز فعال نیست. <PWButton onClick={() => execute("ماشین آزمایشی فعال شد؛ این تنظیم به کارخانه ارسال نشده است.", next => { next.machines[cycleType] = [`SIM-${cycleType}-01`]; pwEvent(next, "فعال‌سازی تجهیز آزمایشی", cycleType); })}>فعال‌سازی تجهیز آزمایشی {cycleType}</PWButton></PWEmpty> : !cycleEligible.length ? <PWEmpty>بچ آماده با مرحله و محل صحیح وجود ندارد. صف کار و انتقال فیزیکی را بررسی کنید.</PWEmpty> : <form onSubmit={event => createCycle(event, cycleType)}>
           <PWField label="ماشین آزمایشی"><select name="machine" style={pwInput}>{ledger.machines[cycleType].map(code => <option key={code}>{code}</option>)}</select></PWField><PWField label="بچ‌های ورودی (انتخاب یک یا چند مورد)"><div>{cycleEligible.map(item => <label key={item.id} style={{ display: "block", padding: 10, borderBottom: "1px solid #e2eae7" }}><input type="checkbox" name="items" value={item.id} /> {item.code} · {item.weightKg} kg · {item.containerCode || item.trays.map(t => t.code).join("، ")} {item.demo ? "(آزمایشی)" : ""}</label>)}</div></PWField>
           {cycleType === "FREEZE" ? <PWField label="کد سینی‌های اسکن‌شده؛ هر کد در یک خط"><textarea name="trays" rows={3} required style={pwInput} /></PWField> : <PWField label="وزن کل ورودی چرخه (kg)"><input name="inputWeight" type="number" min="0.001" step="0.001" required style={pwInput} /></PWField>}<PWButton>ایجاد چرخه آماده</PWButton>

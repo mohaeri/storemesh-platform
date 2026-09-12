@@ -1,6 +1,6 @@
 # UI / Backend Change Control
 
-Last updated: 2026-09-10
+Last updated: 2026-09-12
 
 ## Standing rule
 
@@ -14,9 +14,23 @@ Last updated: 2026-09-10
 
 ## Open UI/backend alignment notes
 
+### 2026-09-11 — Multi-input Sorting, operator routing, and exact genealogy
+
+- Approval and decision: Mohamad explicitly replaced the earlier single-input/manager-preapproval model. A sorting expert may lock multiple same-product baskets, weigh outputs one by one, and assign each output's final destination immediately. A manager is involved only for a later override, which requires a reason.
+- UI requirement: Sorting shows multiple scanned inputs, one-at-a-time output weighing into existing reusable baskets, final grade/size, final destination, mass balance/loss reason, and exact per-output parent weight contributions.
+- Existing backend/contract mismatch: the earlier implementation accepted only one input through the HTTP form, treated destination assignment as a later manager step, allowed conventional drying directly after Sorting, and always routed completed Freezing to Freeze Drying.
+- Approved backend behavior: final destinations are `FRESH_EXPORT`, `DRYING`, `FREEZING`, `FREEZE_DRYING`, `QC`, `COLD_ROOM_CLEAN`, `COLD_ROOM_DIRTY`, or `WASTE`. Washing is not a destination. `DRYING`, `FREEZING`, and `FREEZE_DRYING` automatically start with Washing then Slicing. `FREEZING` ends at Packaging; `FREEZE_DRYING` continues from Freezing to Freeze Drying and then Packaging. Fresh Export is rejected by Washing. Multi-input output genealogy contains only declared contributing parents, with positive contributions summing exactly to the output weight; supplier/harvest provenance follows those parents.
+- Repositories and files: `storemesh-site-server` domain/auth/server and tests; `storemesh-contracts` OpenAPI and contract tests; `storemesh-web` production UI and tests; `storemesh-platform` Figma source/prototype tests and this specification/change record.
+- Routes, requests, responses, or events: `POST /api/sorting` accepts `inputs[]`; every `outputs[]` item includes `destination` and, for multi-input work, `parentContributions[]`. The existing destination endpoint remains for backward compatibility and a reasoned manager override remains separate.
+- Database/migration impact: none; the repository already persists complete batch state, including destination, parents, and contribution arrays.
+- Tests and real PostgreSQL result: `storemesh-site-server` 542 passed, 0 failed, 0 skipped against PostgreSQL 17 with `DATABASE_URL` set; `storemesh-contracts` 78 passed, 0 failed, 0 skipped plus parity for 160 site and 8 cloud method/route templates; `storemesh-web` 99 passed, 0 failed, 1 PostgreSQL-only test skipped; Figma prototype 15 passed, 0 failed, 0 skipped; downloaded Figma source TypeScript check passed and Vite production build transformed 19 modules.
+- Commit SHAs and PR links: site server `0bb0845` ([PR #21](https://github.com/mohaeri/storemesh-site-server/pull/21)); contracts `d179030` ([PR #8](https://github.com/mohaeri/storemesh-contracts/pull/8)); web `a497eb8` ([PR #9](https://github.com/mohaeri/storemesh-web/pull/9)); platform prototype/specification commit is recorded in the follow-up metadata commit on branch `feat/addendum-01-fix-request-07` (no open platform PR at verification time).
+- Compatibility/deployment notes: legacy direct-domain single-input calls remain supported, but HTTP sorting fails closed when an output omits its destination. Existing batches without a destination may still use the compatibility assignment endpoint.
+- Figma verification: Version 14 saved on 2026-09-12. Its live preview accepted two simultaneously selected input baskets, calculated their combined 37.820 kg, exposed one-at-a-time output weighing and operator destination selection, and correctly rejected locking before the physical cold-room prerequisite was recorded.
+
 ### Production workbench — current-backend alignment correction
 
-Status: UI-only Figma Make Version 13 finalized and verified on 2026-09-10; no backend or contract change made.
+Status: superseded on 2026-09-11 by the approved multi-input/operator-routing model above.
 
 This section supersedes any conflicting route claims in the older “Sorting output routing and containers” note below. The prototype now follows the behavior that is currently implemented in `storemesh-site-server`:
 

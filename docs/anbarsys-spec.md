@@ -7480,7 +7480,7 @@ PROCESS_CONFIG WORK_ORDER<br>WOID (PK)<br>Arocess 1D (PK) ——efines _____y | 
 
 ## **1.7 Production Decision** 
 
-**After sorting, each production batch is assigned a destination.** 
+**During sorting, the sorting expert assigns one final destination to each individually weighed output batch. No manager pre-approval is required. A manager may later override that destination only with a recorded reason.**
 
 **Possible destinations include:** 
 
@@ -7500,7 +7500,7 @@ PROCESS_CONFIG WORK_ORDER<br>WOID (PK)<br>Arocess 1D (PK) ——efines _____y | 
 
 **Products processed through traditional drying methods.** 
 
-**Destination decisions are based on business requirements rather than system automation.** 
+**Washing is a prerequisite stage, not a final destination. Conventional Drying, Freezing, and Freeze Drying all pass through Washing and Slicing first. Fresh Export never enters Washing.**
 
 ## **1.8 Fresh Export Workflow** 
 
@@ -9250,13 +9250,11 @@ PROCESS_CONFIG WORK_ORDER<br>WOID (PK)<br>Arocess 1D (PK) ——efines _____y | 
 
 ## **4.13 Destination Assignment** 
 
-**Each Production Batch receives one destination.** 
+**Each individually weighed Sorting output receives one final destination from the Sorting operator. Sorting may lock one or more same-product input baskets in a single operation; outputs are scanned and weighed one basket at a time.**
 
 ###### **Possible destinations:** 
 
 - **Fresh Export** 
-
-- **Washing** 
 
 - **Freezing** 
 
@@ -9264,7 +9262,17 @@ PROCESS_CONFIG WORK_ORDER<br>WOID (PK)<br>Arocess 1D (PK) ——efines _____y | 
 
 - **Conventional Drying** 
 
-**The destination determines the next operational task.** 
+- **Quality Control**
+
+- **Clean or Dirty Cold-Room Holding**
+
+- **Waste**
+
+**The destination determines the route and immediately creates the next task. For Conventional Drying, Freezing, and Freeze Drying the first task is Washing, followed by Slicing. Conventional Drying then goes to Drying; Freezing goes to Freezing and then Packaging; Freeze Drying goes to Freezing, Freeze Drying, and then Packaging. Fresh Export goes directly to its fresh-export work and may not be washed.**
+
+**For a multi-input sort, every output records exact positive weight contributions only from the parent baskets that physically contributed to it. Contribution weights must sum exactly to that output's measured net weight. Supplier and harvest-period provenance are inherited proportionally from those declared parents; the system must not fabricate equal shares or attach non-contributing parents.**
+
+**A manager does not approve the initial destination. A later manager override requires a reason and creates a replacement route task.**
 
 ## **4.14 Basket Assignment** 
 
@@ -9684,15 +9692,19 @@ PROCESS_CONFIG WORK_ORDER<br>WOID (PK)<br>Arocess 1D (PK) ——efines _____y | 
 
 ## **5.11 Destination Determination** 
 
-**After washing the batch moves to its assigned destination.** 
+**After washing, every processing route moves to Slicing. After Slicing, the final destination determines whether the batch moves to Conventional Drying or to Freezing.**
 
 ###### **Examples:** 
 
 - **Slicing** 
 
-- **Freezing** 
+- **Conventional Drying**
 
-- **Packaging (if applicable)** 
+- **Freezing, followed by Packaging when the final destination is Freezing**
+
+- **Freezing and then Freeze Drying when the final destination is Freeze Drying**
+
+**Fresh Export is never accepted by Washing.**
 
 **The destination was determined during Sorting and normally does not change.** 
 

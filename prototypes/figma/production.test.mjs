@@ -15,15 +15,16 @@ function setup() {
   const localStorage = { getItem: k => data.get(k) || null, setItem: (k,v) => data.set(k,v) };
   const ctx = vm.createContext({ localStorage, readPrototypeBatch: () => receipt });
   vm.runInContext(js + '\nthis.api={recordSortingOutputs,readProductionLedger,saveProductionLedger,pwEvent,pwEmpty,pwFreeCarrier,pwUsable};',ctx);
-  const output = (code='OUT1',weight=10) => ({code,weight,grade:'A',size:'L'});
+  const output = (code='OUT1',weight=10,destination='FRESH_EXPORT',parentContributions=[{batchId:'IN1',inputWeightKg:weight}]) => ({code,weight,grade:'A',size:'L',destination,parentContributions});
   return { ...ctx.api, data, receipt, carriers, output, localStorage };
 }
 test('sorting persists one child per basket and exact mass balance', () => {
   const s=setup(); const children=s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',6),s.output('OUT2',4)],'');
   assert.equal(children.length,2); assert.notEqual(children[0].id,children[1].id);
   const l=s.readProductionLedger(); assert.equal(l.items.length,2); assert.equal(l.events[0].details.lossKg,0);
-  assert.equal(l.items[0].parentId,'R1'); assert.equal(l.items[0].inputCodes[0],'IN1'); assert.equal(l.items[0].zone,'SORTING'); assert.equal(l.items[0].destination,null);
+  assert.equal(l.items[0].parentId,'IN1'); assert.equal(l.items[0].inputCodes[0],'IN1'); assert.equal(l.items[0].zone,'SORTING'); assert.equal(l.items[0].destination,'FRESH_EXPORT'); assert.equal(l.items[0].nextZone,'FRESH_EXPORT');
 });
+test('multiple input baskets preserve exact weighted parents and create processing prerequisite route', () => { const s=setup(); s.receipt.baskets.push({code:'IN2',product:'Apple',gross:6,tare:1,zone:'COLD_ROOM_CLEAN'}); s.carriers.push({code:'IN2',type:'BASKET',capacityKg:20,status:'ACTIVE'}); s.data.set('storemesh.prototype.containers',JSON.stringify(s.carriers)); const [child]=s.recordSortingOutputs(s.receipt,['IN1','IN2'],[s.output('OUT1',15,'FREEZE_DRYING',[{batchId:'IN1',inputWeightKg:10},{batchId:'IN2',inputWeightKg:5}])],''); assert.equal(child.nextZone,'WASHING'); assert.deepEqual(Array.from(child.parentIds),['IN1','IN2']); assert.deepEqual(Array.from(s.readProductionLedger().consumedInputs),['R1:IN1','R1:IN2']); });
 test('consumed source cannot be sorted twice', () => { const s=setup(); s.recordSortingOutputs(s.receipt,['IN1'],[s.output()],''); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT2')],'')); assert.equal(s.readProductionLedger().items.length,1); });
 test('positive loss needs classified reason', () => { const s=setup(); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',9)],'')); s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',9)],'WASTE'); assert.equal(s.readProductionLedger().events[0].details.lossKg,1); });
 test('overweight and duplicate output reject without partial write', () => { const s=setup(); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',11)],'')); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',5),s.output('OUT1',5)],'')); assert.equal(s.readProductionLedger().items.length,0); });

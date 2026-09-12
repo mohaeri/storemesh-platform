@@ -1,11 +1,11 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source for the production-workbench revision installed in Figma Make as Version 13 on 2026-09-10.
+This folder keeps the reproducible source for the production-workbench revision installed in Figma Make as Version 14 on 2026-09-12.
 
 ## What is included
 
 - `ProductionWorkbench.tsx`: shared production ledger, routing, process cycles, results, and event history.
-- `SortingScreen.tsx`: one-container sorting flow with load-cell simulation, existing-container scans, mass balance, and child genealogy.
+- `SortingScreen.tsx`: multi-container input sorting with one-at-a-time weighed outputs, operator-selected final routes, exact parent contributions, load-cell simulation, existing-container scans, and child genealogy.
 - `ProductionInventory.tsx`: production output integration for Inventory and Trace.
 - `WebApp.tsx`: the complete assembled Figma Make source snapshot.
 - `assemble.mjs`: deterministic assembler used against the downloaded Version 12 baseline.
