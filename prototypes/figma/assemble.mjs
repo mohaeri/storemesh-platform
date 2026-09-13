@@ -6,9 +6,21 @@ const folder = path.dirname(fileURLToPath(import.meta.url));
 const [input, output] = process.argv.slice(2);
 if (!input || !output) throw new Error('Usage: node assemble.mjs baseline-WebApp.tsx output-WebApp.tsx');
 const source = fs.readFileSync(input, 'utf8');
+const assembledStart = source.indexOf('// BEGIN PRODUCTION WORKSPACE');
+const assembledEnd = source.indexOf('// END PRODUCTION WORKSPACE', assembledStart);
+if (assembledStart >= 0) {
+  if (assembledEnd < assembledStart) throw new Error('Incomplete assembled production workspace');
+  const fragments = ['ProductionWorkbench.tsx', 'SortingScreen.tsx', 'ProductionInventory.tsx'].map(name => fs.readFileSync(path.join(folder, name), 'utf8'));
+  const replacement = '// BEGIN PRODUCTION WORKSPACE\n' + fragments.join('\n') + '\n// END PRODUCTION WORKSPACE';
+  const result = source.slice(0, assembledStart) + replacement + source.slice(assembledEnd + '// END PRODUCTION WORKSPACE'.length);
+  fs.mkdirSync(path.dirname(path.resolve(output)), { recursive: true });
+  fs.writeFileSync(output, result);
+  console.log(JSON.stringify({ input: path.resolve(input), output: path.resolve(output), refreshed: true, chars: result.length }));
+  process.exit(0);
+}
 const start = source.indexOf('function ProductionScreen(');
 const end = source.indexOf('function FreshExportScreen(', start);
-if (start < 0 || end < start || source.includes('// BEGIN PRODUCTION WORKSPACE')) throw new Error('Unexpected baseline; do not overwrite an already assembled version');
+if (start < 0 || end < start) throw new Error('Unexpected baseline');
 const fragments = ['ProductionWorkbench.tsx', 'SortingScreen.tsx', 'ProductionInventory.tsx'].map(name => fs.readFileSync(path.join(folder, name), 'utf8'));
 const replacement = '// BEGIN PRODUCTION WORKSPACE\n' + fragments.join('\n') + '\n// END PRODUCTION WORKSPACE\n';
 let result = source.slice(0, start) + replacement + source.slice(end);

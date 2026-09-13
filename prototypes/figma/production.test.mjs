@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const ts = require(process.env.PROTOTYPE_TYPESCRIPT || 'typescript');
 const source = fs.readFileSync(new URL('./ProductionWorkbench.tsx', import.meta.url), 'utf8').split('const pwBox =')[0];
+const assembled = fs.readFileSync(new URL('./WebApp.tsx', import.meta.url), 'utf8');
+const hub = fs.readFileSync(new URL('./HubApp.tsx', import.meta.url), 'utf8');
 const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 function setup() {
   const data = new Map();
@@ -38,3 +40,20 @@ test('corrupt storage fails closed and remains intact', () => { const s=setup();
 test('storage write failure cannot report successful sorting', () => { const s=setup(); s.localStorage.setItem=()=>{throw Error('quota');}; assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output()],''),/quota/); assert.equal(s.readProductionLedger().items.length,0); });
 test('zone designation mismatch persists warning, not false hard gate', () => { const s=setup(); s.recordSortingOutputs(s.receipt,['IN1'],[{...s.output(),designationWarning:true}],''); const l=s.readProductionLedger(); assert.equal(l.events[0].details.severity,'WARNING'); assert.equal(l.items.length,1); });
 test('active cycle and blocked batch prevent further work', () => { const s=setup(); const l=s.pwEmpty(), item={id:'X',weightKg:10,zone:'SORTING'}; l.cycles=[{status:'READY',itemIds:['X']}]; assert.throws(()=>s.pwUsable(l,item)); l.cycles=[]; item.blocked=true; assert.throws(()=>s.pwUsable(l,item)); });
+test('web shell keeps sub-navigation inside content and removes control tower', () => {
+  assert.doesNotMatch(assembled, /control-tower|برج کنترل/);
+  assert.match(assembled, /<main className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">/);
+  assert.match(assembled, /<Sidebar screen=\{screen\} onNavigate=\{setScreen\} \/>\s*<main/);
+  assert.match(hub, /۲۰ صفحه Web/);
+  assert.doesNotMatch(hub, /۲۱ صفحه Web|۳۷ صفحه/);
+});
+test('inventory detail opens upward and page owns no outer scrollbar', () => {
+  assert.match(assembled, /aria-label="جزئیات ظروف بچ"/);
+  assert.match(assembled, /z-\[80\] bottom-7 left-0/);
+  assert.match(assembled, /function InventoryScreen\(\) \{ return <div className="flex flex-col flex-1 min-h-0 overflow-hidden">/);
+});
+test('production hides test controls and keeps same-session data flow', () => {
+  for (const label of ['نقش شبیه‌سازی', 'نمایش داده آزمایشی', 'افزودن نمونه آزمایشی جداگانه', 'بازخوانی', 'فعال‌سازی تجهیز آزمایشی']) assert.doesNotMatch(assembled, new RegExp(label));
+  assert.match(assembled, /با داده همین نشست/);
+  assert.match(assembled, /PW_DEFAULT_MACHINES/);
+});
