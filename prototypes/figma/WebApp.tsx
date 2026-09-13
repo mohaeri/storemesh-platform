@@ -469,6 +469,7 @@ function ScanOptionalWeighTransition({
   lastWeight,
   weight,
   setWeight,
+  suggestedCode = "",
   action = "تأیید اسکن",
   disabled = false,
 }: {
@@ -478,6 +479,7 @@ function ScanOptionalWeighTransition({
   lastWeight?: number
   weight: string
   setWeight: (value: string) => void
+  suggestedCode?: string
   action?: string
   disabled?: boolean
 }) {
@@ -544,7 +546,7 @@ function ScanOptionalWeighTransition({
         </div>
       )}
       <div style={{display:"flex",gap:8}}><PWButton disabled={disabled || !scan.trim()} onClick={()=>onScan(scan)}>{action}</PWButton><PWButton secondary disabled={disabled} onClick={()=>setSimulatorOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton></div>
-      <ScanSimulator open={simulatorOpen} title={action} suggestedCode={scan} onClose={()=>setSimulatorOpen(false)} onScan={(code)=>{setScan(code);onScan(code)}}/>
+      <ScanSimulator open={simulatorOpen} title={action} suggestedCode={scan||suggestedCode} onClose={()=>setSimulatorOpen(false)} onScan={(code)=>{setScan(code);onScan(code)}}/>
     </div>
   )
 }
@@ -2585,6 +2587,15 @@ function SortingScreen() {
       /قرنطینه/.test(b.zone || "")
     )
   }
+  const eligibleSources = batch.baskets.filter(
+    (b: any) =>
+      !blocked(b) &&
+      !inputCodes.includes(b.code) &&
+      b.destination === "SORTING" &&
+      /سردخانه|COLD_ROOM|COLD_STORAGE/.test(
+        b.currentLocation || b.zone || "",
+      ),
+  )
   const sources = inputCodes
       .map((code) => batch.baskets.find((b: any) => b.code === code))
       .filter(Boolean),
@@ -2811,10 +2822,11 @@ function SortingScreen() {
           <Card className="p-4">
             <h3 className="font-bold mb-3">۱. اسکن سبدهای ورودی</h3>
             {step === "input" && (
-              <ScanOptionalWeighTransition
+              <><div aria-label="سبدهای شناسایی‌شده برای سورت" className="mb-3 rounded-lg bg-[#edf8f3] p-3 text-[11px] text-[#365c4f]"><b>{eligibleSources.length} سبد در سردخانه و آماده ورود به سورت شناسایی شد.</b>{eligibleSources.length>0?<span className="block mt-1 font-mono">سبد بعدی: {eligibleSources[0].code} · {eligibleSources[0].product}</span>:<span className="block mt-1">سبد آزادی با مقصد سورتینگ وجود ندارد.</span>}</div><ScanOptionalWeighTransition
                 scan={scanCode}
                 setScan={setScanCode}
                 onScan={scanInput}
+                suggestedCode={eligibleSources[0]?.code||""}
                 lastWeight={
                   scannedSource
                     ? Number(scannedSource.gross) - Number(scannedSource.tare)
@@ -2823,7 +2835,7 @@ function SortingScreen() {
                 weight={entryWeight}
                 setWeight={setEntryWeight}
                 action="ثبت اسکن و افزودن به نشست"
-              />
+              /></>
             )}
             <div className="mt-3 divide-y">
               {sources.map((source: any) => (

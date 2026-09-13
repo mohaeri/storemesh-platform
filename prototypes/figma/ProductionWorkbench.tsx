@@ -95,6 +95,7 @@ function ScanOptionalWeighTransition({
   lastWeight,
   weight,
   setWeight,
+  suggestedCode = "",
   action = "تأیید اسکن",
   disabled = false,
 }: {
@@ -104,6 +105,7 @@ function ScanOptionalWeighTransition({
   lastWeight?: number
   weight: string
   setWeight: (value: string) => void
+  suggestedCode?: string
   action?: string
   disabled?: boolean
 }) {
@@ -170,7 +172,7 @@ function ScanOptionalWeighTransition({
         </div>
       )}
       <div style={{display:"flex",gap:8}}><PWButton disabled={disabled || !scan.trim()} onClick={()=>onScan(scan)}>{action}</PWButton><PWButton secondary disabled={disabled} onClick={()=>setSimulatorOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton></div>
-      <ScanSimulator open={simulatorOpen} title={action} suggestedCode={scan} onClose={()=>setSimulatorOpen(false)} onScan={(code)=>{setScan(code);onScan(code)}}/>
+      <ScanSimulator open={simulatorOpen} title={action} suggestedCode={scan||suggestedCode} onClose={()=>setSimulatorOpen(false)} onScan={(code)=>{setScan(code);onScan(code)}}/>
     </div>
   )
 }

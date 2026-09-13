@@ -14,6 +14,12 @@ Last updated: 2026-09-13
 
 ## Open UI/backend alignment notes
 
+### 2026-09-13 — Receiving-to-Sorting discovery (UI only)
+
+- Sorting now derives its visible eligible-input queue from the same persisted receiving batch: the basket must be unconsumed, physically located in a cold-room zone, and have `SORTING` as its explicit next destination.
+- The screen shows the number and next code of recognized baskets. Its shared scan simulator pre-fills that next eligible code and sends it through the same transition validator as hardware/manual scanning.
+- Backend/API/contract/database impact: none. No backend repository was changed.
+
 ### 2026-09-13 — Receiving destination and in-flow handoff (UI only)
 
 - Receiving now asks for the direct destination after shipment review and before completion.
