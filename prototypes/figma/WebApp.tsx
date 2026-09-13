@@ -1,9 +1,21 @@
 import { useState } from "react";
-type PrototypeBasket={id:number;code:string;product:string;grade:string;size:string;gross:number;tare:number;zone?:string;status?:string};
+type PrototypeBasket={id:number;code:string;product:string;grade:string;size:string;gross:number;tare:number;zone?:string;status?:string;currentLocation?:string;currentState?:string;destination?:string|null;nextAction?:string};
 type PrototypeBatch={id:string;supplier:string;reference:string;createdAt:string;status:string;destination?:string;baskets:PrototypeBasket[];events:{time:string;title:string;detail:string}[]};
 const PROTOTYPE_KEY="storemesh.prototype.batch";
-function readPrototypeBatch():PrototypeBatch{try{const x=localStorage.getItem(PROTOTYPE_KEY);if(x)return JSON.parse(x)}catch{} return {id:"RCV-1405-0928",supplier:"گلخانه نمونه",reference:"BL-1405-091",createdAt:"امروز ۱۴:۳۰",status:"آماده انتقال",baskets:[{id:1,code:"TMP-7862368",product:"گوجه فرنگی",grade:"A",size:"درشت",gross:20,tare:1.28},{id:2,code:"BSK-0002",product:"گوجه فرنگی",grade:"A",size:"درشت",gross:20.38,tare:1.28},{id:3,code:"BSK-0003",product:"گوجه فرنگی",grade:"B",size:"متوسط",gross:19.12,tare:1.28}],events:[{time:"۱۴:۳۰",title:"ثبت محموله",detail:"ایستگاه دریافت وب"}]}}
-function writePrototypeBatch(b:PrototypeBatch){localStorage.setItem(PROTOTYPE_KEY,JSON.stringify(b));window.dispatchEvent(new Event("storemesh-data"))}
+function normalizePrototypeBasket(b:PrototypeBasket):PrototypeBasket{const legacyWaiting="آماده"+" انتقال",location=b.currentLocation||b.zone||"RECEIVING";const waiting=b.currentState==="AWAITING_GATE_SCAN"||b.status===legacyWaiting;const state=waiting?"AWAITING_GATE_SCAN":b.currentState||b.status||"RECEIVED";const destination=waiting?(b.destination||"COLD_ROOM_DIRTY"):b.destination===undefined?(location==="RECEIVING"?"COLD_ROOM_DIRTY":null):b.destination;const nextAction=b.nextAction||(destination?`اسکن ورود به ${destination}`:"منتظر تخصیص برنامه تولید");return {...b,zone:location,status:state,currentLocation:location,currentState:state,destination,nextAction}}
+function normalizePrototypeBatch(value:PrototypeBatch):PrototypeBatch{const legacyWaiting="آماده"+" انتقال",baskets=(value.baskets||[]).map(normalizePrototypeBasket);const waiting=baskets.filter(b=>b.currentState==="AWAITING_GATE_SCAN").length;return {...value,status:waiting?`در انتظار اسکن سردخانه (${waiting})`:value.status===legacyWaiting?"موجودی ثبت‌شده":value.status,destination:waiting?"COLD_ROOM_DIRTY":value.destination,baskets,events:value.events||[]}}
+function readPrototypeBatch():PrototypeBatch{try{const x=localStorage.getItem(PROTOTYPE_KEY);if(x)return normalizePrototypeBatch(JSON.parse(x))}catch{} return normalizePrototypeBatch({id:"RCV-1405-0928",supplier:"گلخانه نمونه",reference:"BL-1405-091",createdAt:"امروز ۱۴:۳۰",status:"در انتظار اسکن سردخانه",destination:"COLD_ROOM_DIRTY",baskets:[{id:1,code:"TMP-7862368",product:"گوجه فرنگی",grade:"A",size:"درشت",gross:20,tare:1.28,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:"COLD_ROOM_DIRTY",nextAction:"اسکن ورود سردخانه"},{id:2,code:"BSK-0002",product:"گوجه فرنگی",grade:"A",size:"درشت",gross:20.38,tare:1.28,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:"COLD_ROOM_DIRTY",nextAction:"اسکن ورود سردخانه"},{id:3,code:"BSK-0003",product:"گوجه فرنگی",grade:"B",size:"متوسط",gross:19.12,tare:1.28,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:"COLD_ROOM_DIRTY",nextAction:"اسکن ورود سردخانه"}],events:[{time:"۱۴:۳۰",title:"ثبت محموله",detail:"ایستگاه دریافت وب"}]})}
+function writePrototypeBatch(b:PrototypeBatch){localStorage.setItem(PROTOTYPE_KEY,JSON.stringify(normalizePrototypeBatch(b)));window.dispatchEvent(new Event("storemesh-data"))}
+function applyReceiptWorkflowScan(batch:PrototypeBatch,rawCode:string,target:string):PrototypeBatch{const code=String(rawCode||"").trim().toUpperCase();if(!code)throw Error("ابتدا QR سبد را اسکن کنید.");const source=normalizePrototypeBatch(batch),basket=source.baskets.find(item=>item.code.toUpperCase()===code);if(!basket)throw Error("سبد اسکن‌شده در موجودی جاری پیدا نشد.");if(basket.destination!==target)throw Error(`مقصد مجاز این سبد ${basket.destination||"تعیین نشده"} است.`);const nextState=target==="COLD_ROOM_DIRTY"?"STORED":"IN_PROCESS";const nextDestination=target==="COLD_ROOM_DIRTY"?"SORTING":null;const nextAction=target==="COLD_ROOM_DIRTY"?"اسکن ورود سورتینگ":"تکمیل عملیات جاری";const at=new Date().toLocaleTimeString("fa-IR");return normalizePrototypeBatch({...source,baskets:source.baskets.map(item=>item.code.toUpperCase()===code?{...item,zone:target,status:nextState,currentLocation:target,currentState:nextState,destination:nextDestination,nextAction}:item),events:[...source.events,{time:at,title:"اسکن گذرگاه عملیاتی",detail:`${code} · ${basket.currentLocation} ← ${target} · اقدام بعدی: ${nextAction}`}]})}
+
+function ScanSimulator({open,title,suggestedCode,onClose,onScan}:{open:boolean;title:string;suggestedCode:string;onClose:()=>void;onScan:(code:string)=>void}){const [code,setCode]=useState(suggestedCode);if(!open)return null;const submit=(value:string)=>{onScan(String(value||"").trim().toUpperCase());onClose()};return <div className="fixed inset-0 z-[120] bg-[#09231dcc] flex items-center justify-center"><div className="bg-white rounded-2xl p-6 w-[480px] relative" dir="rtl"><button onClick={onClose} className="absolute left-4 top-3 text-[22px]">×</button><h3 className="font-bold text-[#18302a] mb-4">{title}</h3><div className="h-40 border-2 border-dashed border-[#29a574] rounded-xl flex flex-col items-center justify-center text-[54px]">⌗<span className="text-[12px] text-[#668078]">اسکنر سخت‌افزاری و شبیه‌ساز از یک اعتبارسنجی استفاده می‌کنند</span></div><input autoFocus value={code} onChange={e=>setCode(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")submit(code)}} className="w-full h-11 border rounded-lg px-3 mt-4 font-mono"/><button onClick={()=>submit(code||suggestedCode)} className="w-full mt-3 bg-[#176b50] text-white rounded-lg py-3 text-[12px] font-bold">شبیه‌سازی و اجرای همان اسکن</button></div></div>}
+
+type PrototypeUser={id:string;name:string;username:string;phone:string;role:string;active:boolean;last:string};
+const USERS_KEY="storemesh.prototype.users.v1";
+const USERS_DEFAULT:PrototypeUser[]=[{id:"U1",name:"علی رضایی",username:"ali.rezaei",phone:"۰۹۱۲۱۲۳۴۵۶۷",role:"اپراتور دریافت",active:true,last:"امروز ۰۹:۳۰"},{id:"U2",name:"فاطمه محمدی",username:"fatemeh.m",phone:"۰۹۱۲۹۸۷۶۵۴۳",role:"مسئول QC",active:true,last:"امروز ۱۰:۱۵"},{id:"U3",name:"مریم حسینی",username:"maryam.h",phone:"۰۹۱۲۵۵۵۴۴۳۳",role:"مدیر انبار",active:true,last:"امروز ۰۸:۴۵"}];
+function readPrototypeUsers():PrototypeUser[]{try{const raw=localStorage.getItem(USERS_KEY),value=raw?JSON.parse(raw):null;if(Array.isArray(value))return value}catch{}return USERS_DEFAULT}
+function validatePrototypeUser(form:Partial<PrototypeUser>,users:PrototypeUser[],editingId?:string){const name=String(form.name||"").trim(),username=String(form.username||"").trim().toLowerCase(),phone=String(form.phone||"").trim(),role=String(form.role||"").trim();if(!name||!username||!role)return "نام، نام کاربری و نقش الزامی است.";if(!/^[a-z0-9._-]{3,}$/i.test(username))return "نام کاربری باید حداقل سه نویسه و شامل حروف انگلیسی، عدد، نقطه، خط تیره یا زیرخط باشد.";if(users.some(user=>user.id!==editingId&&user.username.toLowerCase()===username))return "این نام کاربری قبلاً ثبت شده است.";if(phone&&!/^[۰-۹0-9+ -]{7,}$/.test(phone))return "شماره تماس معتبر نیست.";return ""}
+function writePrototypeUsers(users:PrototypeUser[]){localStorage.setItem(USERS_KEY,JSON.stringify(users));window.dispatchEvent(new Event("storemesh-users"))}
 
 type MasterProduct={id:string;code:string;name:string;category:string;grades:string[];sizes:string[];active:boolean};
 type MasterParty={id:string;code:string;name:string;contact:string;active:boolean};
@@ -312,6 +324,7 @@ function ReceivingScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
   const [generatedCode,setGeneratedCode]=useState("");
   const net=Math.max(0,gross-tare);
   const total=baskets.reduce((sum,b)=>sum+b.gross-b.tare,0);
+  const acceptContainerScan=(code:string)=>{if(!code)return;if(baskets.some(item=>item.code.toUpperCase()===code.toUpperCase()))return;setContainerCode(code.toUpperCase());setGross(24.68)};
   const addBasket=()=>{if(!containerCode||gross<=0)return;setBaskets([...baskets,{id:baskets.length+1,code:containerCode,product,grade,size,gross,tare}]);setContainerCode("");setGross(0);setTare(1.28)};
   const selectClass="w-full h-11 rounded-lg border border-[#d9e3de] bg-white px-3 text-[12px] text-[#18302a] outline-none focus:border-[#176b50]";
 
@@ -326,21 +339,22 @@ function ReceivingScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
 
     {stage!=="setup"&&<Card className="mt-4 overflow-hidden"><div className="p-3 border-b border-[#edf2ef] flex justify-between"><h4 className="font-bold text-[#18302a] text-[13px]">ظروف ثبت‌شده در این محموله</h4><span className="text-[11px] text-[#718079]">{baskets.length} ظرف · {total.toFixed(2)} کیلوگرم خالص</span></div>{baskets.length===0?<div className="m-4 border border-dashed border-[#ccd9d3] rounded-lg p-6 text-center text-[#82968e] text-[12px]">هنوز ظرفی ثبت نشده است؛ QR اولین ظرف را اسکن کنید.</div>:<><div className="grid grid-cols-[.35fr_1fr_1fr_1fr_.7fr_.7fr_.7fr_.7fr] bg-[#f3f6f4] px-3 py-2 text-[10px] text-[#718079]"><span>#</span><span>کد ظرف</span><span>محصول</span><span>گرید / اندازه</span><span>ناخالص</span><span>ظرف</span><span>خالص</span><span>عملیات</span></div>{baskets.map((b,i)=><div key={b.id} className="grid grid-cols-[.35fr_1fr_1fr_1fr_.7fr_.7fr_.7fr_.7fr] px-3 py-3 border-t border-[#edf2ef] text-[11px]"><span>{i+1}</span><b className="font-mono">{b.code}</b><span>{b.product}</span><span>{b.grade} · {b.size}</span><span>{b.gross.toFixed(2)}</span><span>{b.tare.toFixed(2)}</span><b>{(b.gross-b.tare).toFixed(2)}</b><button onClick={()=>setBaskets(baskets.filter(x=>x.id!==b.id))} className="text-[#b84242] text-right">حذف</button></div>)}</>}</Card>}
 
-    {stage==="review"&&<div className="mt-4 bg-[#fff8e3] border border-[#ead995] rounded-xl p-4 flex items-center gap-3"><div className="ml-auto"><h4 className="font-bold text-[13px]">کنترل نهایی</h4><p className="text-[11px] text-[#6e654a]">{baskets.length<expected?"تعداد ثبت‌شده کمتر از انتظار است؛ برای ادامه می‌توانید برگردید یا اختلاف را آگاهانه ثبت کنید.":"تعداد ظروف با انتظار محموله مطابقت دارد."}</p></div><button onClick={()=>setStage("capture")} className="bg-white rounded-lg px-4 py-2 text-[11px]">افزودن/اصلاح ظروف</button><button onClick={()=>{const id="RCV-"+String(Date.now()).slice(-8);writePrototypeBatch({id,supplier,reference,createdAt:new Date().toLocaleTimeString("fa-IR"),status:"آماده انتقال",baskets,events:[{time:new Date().toLocaleTimeString("fa-IR"),title:"دریافت و توزین تکمیل شد",detail:supplier+" · "+baskets.length+" ظرف"}]});setStage("done")}} className="bg-[#176b50] text-white rounded-lg px-5 py-2 text-[11px] font-bold">تکمیل محموله و ایجاد وظیفه انتقال</button></div>}
+    {stage==="review"&&<div className="mt-4 bg-[#fff8e3] border border-[#ead995] rounded-xl p-4 flex items-center gap-3"><div className="ml-auto"><h4 className="font-bold text-[13px]">کنترل نهایی</h4><p className="text-[11px] text-[#6e654a]">{baskets.length<expected?"تعداد ثبت‌شده کمتر از انتظار است؛ برای ادامه می‌توانید برگردید یا اختلاف را آگاهانه ثبت کنید.":"تعداد ظروف با انتظار محموله مطابقت دارد."}</p></div><button onClick={()=>setStage("capture")} className="bg-white rounded-lg px-4 py-2 text-[11px]">افزودن/اصلاح ظروف</button><button onClick={()=>{const id="RCV-"+String(Date.now()).slice(-8);writePrototypeBatch({id,supplier,reference,createdAt:new Date().toLocaleTimeString("fa-IR"),status:"در انتظار اسکن سردخانه",destination:"COLD_ROOM_DIRTY",baskets:baskets.map(b=>({...b,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:"COLD_ROOM_DIRTY",nextAction:"اسکن ورود سردخانه"})),events:[{time:new Date().toLocaleTimeString("fa-IR"),title:"دریافت و توزین تکمیل شد",detail:supplier+" · "+baskets.length+" ظرف · مقصد سردخانه کثیف"}]});setStage("done")}} className="bg-[#176b50] text-white rounded-lg px-5 py-2 text-[11px] font-bold">تکمیل دریافت و آماده اسکن سردخانه</button></div>}
 
-    {scanOpen&&<div className="fixed inset-0 z-50 bg-[#09231dcc] flex items-center justify-center"><div className="bg-white rounded-2xl p-6 w-[480px] relative"><button onClick={()=>setScanOpen(false)} className="absolute left-4 top-3 text-[22px]">×</button><div className="h-56 border-2 border-dashed border-[#29a574] rounded-xl flex flex-col items-center justify-center text-[54px]">⌗<span className="text-[12px] text-[#668078]">QR را مقابل دوربین یا اسکنر بگیرید</span></div><button onClick={()=>{setContainerCode("BSK-"+String(baskets.length+1).padStart(4,"0"));setGross(24.68);setScanOpen(false)}} className="w-full mt-4 bg-[#176b50] text-white rounded-lg py-3 text-[12px] font-bold">شبیه‌سازی اسکن موفق</button></div></div>}
+    <ScanSimulator open={scanOpen} title="اسکن سبد دریافت" suggestedCode={"BSK-"+String(baskets.length+1).padStart(4,"0")} onClose={()=>setScanOpen(false)} onScan={acceptContainerScan}/>
     {createOpen&&<div className="fixed inset-0 z-50 bg-[#09231dcc] flex items-center justify-center"><div className="bg-white rounded-2xl p-6 w-[560px] relative"><button onClick={()=>{setCreateOpen(false);setGeneratedCode("")}} className="absolute left-4 top-3 text-[22px]">×</button><h3 className="font-bold text-[#18302a] mb-4">ساخت ظرف یک‌بارمصرف و چاپ QR</h3>{!generatedCode?<><div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-bold">نوع ظرف<select className={selectClass}><option>کارتن تأمین‌کننده</option><option>سبد تأمین‌کننده</option></select></label><label className="text-[11px] font-bold">وزن خالی (kg)<input type="number" className={selectClass} value={tare} onChange={e=>setTare(Number(e.target.value))}/></label></div><div className="bg-[#fff8e3] rounded-lg p-3 text-[11px] text-[#765b15] my-4">برای ظرف یک شناسه موقت یکتا ساخته و QR آن برای چاپ آماده می‌شود.</div><button onClick={()=>setGeneratedCode("TMP-"+String(Date.now()).slice(-7))} className="w-full bg-[#176b50] text-white rounded-lg px-5 py-3 text-[12px] font-bold">ایجاد شناسه و چاپ QR</button></>:<><div className="border border-[#b9ddce] bg-[#edf8f3] rounded-xl p-5 text-center"><div className="w-32 h-32 mx-auto bg-white border-4 border-[#18302a] grid place-items-center text-[58px] mb-3">⌗</div><small className="block text-[#4d6b60]">شناسه ظرف ایجاد شد</small><b className="block font-mono text-[22px] text-[#133a31] my-1">{generatedCode}</b><span className="inline-block mt-2 bg-[#d9f3e7] text-[#176b50] rounded-full px-3 py-1 text-[10px] font-bold">✓ QR برای چاپ آماده شد</span></div><div className="flex gap-2 mt-4"><button onClick={()=>setGeneratedCode("")} className="flex-1 bg-[#edf2ef] rounded-lg py-3 text-[11px]">ساخت مجدد</button><button onClick={()=>{setContainerCode(generatedCode);setGross(24.68);setCreateOpen(false);setGeneratedCode("")}} className="flex-[2] bg-[#176b50] text-white rounded-lg py-3 text-[12px] font-bold">استفاده از این کد در دریافت</button></div></>}</div></div>}
   </div>;
 }
 
 function ContainersScreen(){const STORE="storemesh.prototype.containers";const inputClass="w-full h-11 rounded-lg border border-[#d9e3de] bg-white px-3 text-[12px] text-[#18302a] outline-none focus:border-[#176b50]";const batch=readPrototypeBatch();const zones=[{id:"RECEIVING",label:"دریافت"},{id:"COLD_STORAGE",label:"سردخانه"},{id:"SORTING",label:"سورتینگ"},{id:"WASHING",label:"شست‌وشو"},{id:"SLICING",label:"اسلایس"},{id:"FREEZING",label:"فریز"},{id:"DRYING",label:"خشک‌کن"},{id:"PACKAGING",label:"بسته‌بندی"},{id:"SHIPPING",label:"ارسال"}];const seed=[{qr:"CTR-001",type:"سبد پلاستیکی",tare:1.28,capacity:25,zones:["RECEIVING","COLD_STORAGE","SORTING"],last:"امروز ۰۹:۳۰",status:"فعال"},{qr:"CTR-002",type:"سبد پلاستیکی",tare:1.3,capacity:25,zones:["RECEIVING"],last:"دیروز ۱۵:۱۰",status:"خراب",damageReason:"ترک بدنه",transferredTo:"CTR-003"},{qr:"CTR-003",type:"سبد پلاستیکی",tare:1.28,capacity:25,zones:["SORTING","WASHING","COLD_STORAGE"],last:"امروز ۱۱:۰۰",status:"فعال"}];const [rows,setRows]=useState<any[]>(()=>{try{return JSON.parse(localStorage.getItem(STORE)||"null")||seed}catch{return seed}});const [tab,setTab]=useState<"ACTIVE"|"DAMAGED"|"SINGLE_USE">("ACTIVE");const [modal,setModal]=useState<""|"CREATE"|"EDIT"|"DAMAGE">("");const [selectedRow,setSelectedRow]=useState<any>(null);const [created,setCreated]=useState("");const [damageReason,setDamageReason]=useState("");const [target,setTarget]=useState("");const blank={type:"سبد پلاستیکی",tare:1.28,capacity:25,zones:["RECEIVING","COLD_STORAGE","SORTING"]};const [form,setForm]=useState<any>(blank);const persist=(next:any[])=>{setRows(next);localStorage.setItem(STORE,JSON.stringify(next));window.dispatchEvent(new Event("storemesh-data"))};const toggle=(z:string)=>setForm((f:any)=>({...f,zones:f.zones.includes(z)?f.zones.filter((x:string)=>x!==z):[...f.zones,z]}));const prefix=(type:string)=>type==="سینی فرایندی"?"TRY":type==="کانتینر عمومی"?"CTR":"BSK";const create=()=>{if(form.tare<0||form.capacity<=form.tare||!form.zones.length)return;const p=prefix(form.type),n=rows.filter(r=>String(r.qr).startsWith(p+"-")).length+1,qr=p+"-"+String(n).padStart(4,"0");persist([...rows,{...form,qr,last:"استفاده نشده",status:"فعال",singleUse:false}]);setCreated(qr)};const openEdit=(r:any)=>{setSelectedRow(r);setForm({type:r.type,tare:r.tare,capacity:r.capacity,zones:[...r.zones]});setModal("EDIT")};const saveEdit=()=>{if(!selectedRow||form.tare<0||form.capacity<=form.tare||!form.zones.length)return;persist(rows.map(r=>r.qr===selectedRow.qr?{...r,tare:form.tare,capacity:form.capacity,zones:form.zones}:r));setModal("")};const markDamaged=()=>{if(!selectedRow||!damageReason.trim())return;persist(rows.map(r=>r.qr===selectedRow.qr?{...r,status:"خراب",damageReason,transferredTo:target||null,last:"امروز · گزارش خرابی"}:r));setModal("");setTab("DAMAGED")};const singles=batch.baskets.filter(b=>b.code.startsWith("TMP-")).map(b=>({qr:b.code,type:"ظرف یک‌بارمصرف تأمین‌کننده",tare:null,capacity:b.gross,zones:[b.zone||"RECEIVING"],last:batch.createdAt,status:"درحال‌استفاده",singleUse:true}));const shown=tab==="SINGLE_USE"?singles:rows.filter(r=>tab==="ACTIVE"?r.status==="فعال":r.status==="خراب");const zoneNames=(r:any)=>r.zones.map((z:string)=>zones.find(x=>x.id===z)?.label||z).join("، ");return <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl"><div className="flex items-start justify-between mb-4"><div><h2 className="font-bold text-[#18302a] text-[22px]">کانتینرها</h2><p className="text-[#718079] text-[13px]">چرخه عمر سبدهای دائمی و نمایش جداگانه ظروف یک‌بارمصرف</p></div><div className="flex gap-2 items-center"><Badge text="سایت ایران" color="#176b50" bg="#e1f2eb"/><button onClick={()=>{setForm(blank);setCreated("");setModal("CREATE")}} className="bg-[#176b50] text-white rounded-lg px-5 py-2 text-[12px] font-bold">+ سبد جدید</button></div></div><div className="grid grid-cols-3 gap-2 mb-4 max-w-2xl">{[{id:"ACTIVE",label:"سبدهای فعال",count:rows.filter(r=>r.status==="فعال").length},{id:"DAMAGED",label:"خراب / از رده خارج",count:rows.filter(r=>r.status==="خراب").length},{id:"SINGLE_USE",label:"ظروف یک‌بارمصرف",count:singles.length}].map(x=><button onClick={()=>setTab(x.id as any)} className={"rounded-xl border p-3 text-right "+(tab===x.id?"bg-[#176b50] text-white border-[#176b50]":"bg-white border-[#d8e4df]")}><b className="block text-[12px]">{x.label}</b><small>{x.count} مورد</small></button>)}</div><Card className="overflow-hidden"><div className="grid grid-cols-[.8fr_1fr_.7fr_.7fr_1.1fr_1.6fr_.8fr_1fr] gap-2 bg-[#eef3f0] px-3 py-2 text-[10px] text-[#718079]"><span>وضعیت</span><span>آخرین استفاده</span><span>ظرفیت</span><span>وزن خالی</span><span>نوع</span><span>زون‌های مجاز</span><span>کد QR</span><span>عملیات</span></div>{!shown.length?<div className="p-8 text-center text-[#718079] text-[12px]">موردی در این گروه وجود ندارد.</div>:shown.map((r:any)=><div key={r.qr} className="grid grid-cols-[.8fr_1fr_.7fr_.7fr_1.1fr_1.6fr_.8fr_1fr] gap-2 px-3 py-3 border-t text-[11px] items-center"><Badge text={r.status} color={r.status==="فعال"?"#16825b":r.status==="خراب"?"#b84242":"#9a6420"} bg={r.status==="فعال"?"#dff3e9":r.status==="خراب"?"#fbe6e6":"#fff0dc"}/><span>{r.last}</span><b>{r.capacity} kg</b><span>{r.singleUse?"—":r.tare+" kg"}</span><span>{r.type}</span><span>{zoneNames(r)}</span><b className="font-mono">{r.qr}</b><div className="flex gap-2">{tab==="ACTIVE"&&<><button onClick={()=>openEdit(r)} className="text-[#176b50] font-bold">ویرایش</button><button onClick={()=>{setSelectedRow(r);setDamageReason("");setTarget("");setModal("DAMAGE")}} className="text-[#b84242] font-bold">خرابی</button></>}{tab==="DAMAGED"&&<span className="text-[#718079]">کد قفل است</span>}{tab==="SINGLE_USE"&&<span className="text-[#718079]">غیرقابل استفاده مجدد</span>}</div></div>)}</Card>{tab==="SINGLE_USE"&&<div className="mt-3 bg-[#fff8e3] text-[#765b15] rounded-lg p-3 text-[11px]">ظروف یک‌بارمصرف در رهگیری باقی می‌مانند، اما وارد ناوگان سبدهای دائمی و انتخاب سورتینگ نمی‌شوند.</div>}{modal&&<div className="fixed inset-0 z-50 bg-[#09231dcc] flex items-center justify-center"><div className="bg-white rounded-2xl p-6 w-[720px] max-h-[90vh] overflow-auto relative"><button onClick={()=>setModal("")} className="absolute left-4 top-3 text-[22px]">×</button>{modal==="DAMAGE"?<><h3 className="font-bold text-[#18302a] text-[18px]">گزارش خرابی {selectedRow?.qr}</h3><p className="text-[#718079] text-[11px] mt-1">کد این سبد برای همیشه حفظ و قفل می‌شود و هرگز به سبد دیگری اختصاص نمی‌یابد.</p><label className="block text-[11px] font-bold mt-4">سبد سالم مقصد (در صورت وجود محصول)<select className={inputClass} value={target} onChange={e=>setTarget(e.target.value)}><option value="">سبد خالی است / انتقال لازم نیست</option>{rows.filter(r=>r.status==="فعال"&&r.qr!==selectedRow?.qr).map(r=><option value={r.qr}>{r.qr}</option>)}</select></label><label className="block text-[11px] font-bold mt-3">علت خرابی<textarea className="w-full border rounded-lg p-3 mt-1" value={damageReason} onChange={e=>setDamageReason(e.target.value)} placeholder="مثلاً شکستگی بدنه یا دسته"/></label><div className="bg-[#fbe6e6] text-[#9f3535] rounded-lg p-3 text-[11px] mt-3">این عملیات حذف نیست؛ سابقه سبد حفظ می‌شود و QR آن دیگر قابل استفاده نخواهد بود.</div><button disabled={!damageReason.trim()} onClick={markDamaged} className="w-full mt-4 bg-[#b84242] disabled:opacity-40 text-white rounded-lg py-3 text-[12px] font-bold">ثبت خرابی و قفل دائمی کد</button></>:!created?<><h3 className="font-bold text-[#18302a] text-[18px]">{modal==="CREATE"?"ساخت سبد جدید":"ویرایش سبد "+selectedRow?.qr}</h3><p className="text-[#718079] text-[11px] mt-1">مالکیت سبدهای دائمی همیشه «مجموعه» است. فقط وزن خالی، ظرفیت و زون‌های مجاز قابل اصلاح‌اند.</p><div className="grid grid-cols-3 gap-3 mt-4"><label className="text-[11px] font-bold">نوع سبد<select disabled={modal==="EDIT"} className={inputClass} value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option>سبد پلاستیکی</option><option>سبد استیل</option><option>سینی فرایندی</option><option>کانتینر عمومی</option></select></label><label className="text-[11px] font-bold">وزن خالی / Tare (kg)<input type="number" step="0.01" className={inputClass} value={form.tare} onChange={e=>setForm({...form,tare:Number(e.target.value)})}/></label><label className="text-[11px] font-bold">ظرفیت مجاز (kg)<input type="number" className={inputClass} value={form.capacity} onChange={e=>setForm({...form,capacity:Number(e.target.value)})}/></label></div><h4 className="font-bold text-[12px] mt-5 mb-2">زون‌های مجاز (حداقل یک مورد)</h4><div className="grid grid-cols-3 gap-2">{zones.map(z=><button onClick={()=>toggle(z.id)} className={"rounded-lg border px-3 py-2 text-[11px] text-right "+(form.zones.includes(z.id)?"bg-[#e1f2eb] border-[#176b50] text-[#176b50]":"border-[#d8e4df]")}>{form.zones.includes(z.id)?"✓ ":""}{z.label}</button>)}</div><div className="bg-[#eef3f0] rounded-lg p-3 text-[11px] mt-4">پیشوند خودکار نوع: <b className="font-mono">{prefix(form.type)}-</b> · مالکیت: <b>مجموعه</b> · تاریخچه جداگانه کالیبراسیون ثبت نمی‌شود.</div><button disabled={!form.zones.length||form.tare<0||form.capacity<=form.tare} onClick={modal==="CREATE"?create:saveEdit} className="w-full mt-4 bg-[#176b50] disabled:opacity-40 text-white rounded-lg py-3 text-[12px] font-bold">{modal==="CREATE"?"ایجاد شناسه دائمی و QR":"ذخیره اصلاح وزن و زون‌ها"}</button></>:<div className="text-center"><div className="w-36 h-36 mx-auto border-4 border-[#18302a] grid place-items-center text-[64px]">⌗</div><small className="block mt-3 text-[#718079]">سبد مجموعه با موفقیت ساخته شد</small><b className="block font-mono text-[24px] text-[#133a31]">{created}</b><span className="inline-block mt-2 bg-[#dff3e9] text-[#176b50] rounded-full px-3 py-1 text-[10px]">QR آماده چاپ · کد دائمی و غیرقابل بازیافت</span><button onClick={()=>setModal("")} className="w-full mt-5 bg-[#176b50] text-white rounded-lg py-3 text-[12px] font-bold">بستن و مشاهده در فهرست</button></div>}</div></div>}</div>}function ReceivingInventoryScreen(){
- const [view,setView]=useState<"batches"|"containers">("batches"); const [query,setQuery]=useState(""); const [trace,setTrace]=useState<PrototypeBasket|null>(null); const receipt=readPrototypeBatch(); const consumed=readProductionLedger().consumedInputs; const batch={...receipt,baskets:receipt.baskets.filter(b=>!consumed.includes(receipt.id+":"+b.code))}; const total=batch.baskets.reduce((s,b)=>s+b.gross-b.tare,0);
+ const [view,setView]=useState<"batches"|"containers">("batches"); const [query,setQuery]=useState(""); const [trace,setTrace]=useState<PrototypeBasket|null>(null); const [scanOpen,setScanOpen]=useState(false); const [error,setError]=useState(""); const [revision,setRevision]=useState(0); const receipt=readPrototypeBatch(); const consumed=readProductionLedger().consumedInputs; const batch={...receipt,baskets:receipt.baskets.filter(b=>!consumed.includes(receipt.id+":"+b.code))}; const total=batch.baskets.reduce((s,b)=>s+b.gross-b.tare,0); const pending=batch.baskets.find(b=>b.destination==="COLD_ROOM_DIRTY"); const scanGate=(code:string)=>{try{writePrototypeBatch(applyReceiptWorkflowScan(readPrototypeBatch(),code,"COLD_ROOM_DIRTY"));setError("");setRevision(revision+1)}catch(failure:any){setError(failure.message)}};
  const rows=batch.baskets.filter(b=>[b.code,b.product,b.grade,batch.id].join(" ").includes(query));
  return <div className="shrink-0 bg-[#f4f7f5] p-4 overflow-visible" dir="rtl"><div className="flex justify-between mb-3"><div><h2 className="font-bold text-[#18302a] text-[20px]">موجودی و رهگیری</h2><p className="text-[#718079] text-[12px]">نمای سلسله‌مراتبی بچ، ظروف و زنجیره رویداد</p></div><Badge text="همگام با داده همین نشست" color="#176b50" bg="#e1f2eb"/></div>
  <div className="grid grid-cols-4 gap-3 mb-3"><StatCard label="بچ فعال" value={batch.baskets.length?"۱":"۰"}/><StatCard label="ظروف بچ" value={String(batch.baskets.length)}/><StatCard label="وزن خالص" value={total.toFixed(2)+"kg"}/><StatCard label="وضعیت" value={batch.status}/></div>
+ {error&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mb-3 text-[12px]">{error}</p>}{pending&&<div className="bg-white border border-[#c9ddd5] rounded-xl p-3 mb-3 flex items-center gap-3"><div className="ml-auto"><b className="text-[12px]">اقدام بعدی: {pending.nextAction}</b><p className="text-[11px] text-[#718079]">{pending.code} · {pending.currentLocation} ← {pending.destination}</p></div><button onClick={()=>setScanOpen(true)} className="bg-[#176b50] text-white rounded-lg px-4 py-2 text-[12px] font-bold">⌗ اسکن گذرگاه</button></div>}
  <Card><div className="p-3 flex justify-between border-b"><div className="flex gap-2"><button onClick={()=>setView("batches")} className={(view==="batches"?"bg-[#176b50] text-white":"bg-[#edf2ef]")+" px-4 h-9 rounded-lg text-[12px]"}>نمای بچ‌ها</button><button onClick={()=>setView("containers")} className={(view==="containers"?"bg-[#176b50] text-white":"bg-[#edf2ef]")+" px-4 h-9 rounded-lg text-[12px]"}>نمای ظروف</button></div><input value={query} onChange={e=>setQuery(e.target.value)} className="border rounded-lg px-3 h-9 text-[12px]" placeholder="جست‌وجوی بچ، QR یا محصول..."/></div>
  {view==="batches"?<div className="p-3 overflow-visible"><div className="grid grid-cols-7 gap-3 text-[11px] text-[#718079] pb-2"><span>عملیات</span><span>وضعیت</span><span>مقصد</span><span>وزن خالص</span><span>تعداد ظروف</span><span>تأمین‌کننده</span><span>سریال بچ</span></div><div className="grid grid-cols-7 gap-3 items-center border-t py-3 text-[12px] overflow-visible"><button onClick={()=>setView("containers")} className="text-[#176b50] font-bold">بازکردن بچ ←</button><Badge text={batch.status} color="#176b50" bg="#dff3e9"/><span>{batch.destination||"در انتظار تخصیص"}</span><b>{total.toFixed(2)} kg</b><span>{batch.baskets.length} ظرف</span><span>{batch.supplier}</span><div className="flex items-center gap-2 font-mono"><span>{batch.id}</span><div className="relative group"><button aria-label="جزئیات ظروف بچ" className="w-5 h-5 rounded-full bg-[#dcebe5] text-[#176b50] font-bold">ⓘ</button><div className="hidden group-hover:block absolute z-[80] bottom-7 left-0 w-[420px] bg-[#133a31] text-white rounded-xl shadow-2xl p-4 font-sans pointer-events-none"><b className="block mb-2">ظروف عضو بچ · {batch.baskets.length} عدد</b>{batch.baskets.map(b=><div key={b.code} className="grid grid-cols-4 gap-2 py-2 border-t border-white/15 text-[11px]"><span>{(b.gross-b.tare).toFixed(2)} خالص</span><span>{b.tare.toFixed(2)} ظرف</span><span>{b.gross.toFixed(2)} ناخالص</span><span className="font-mono">{b.code}</span></div>)}</div></div></div></div></div>:<div><div className="grid grid-cols-8 gap-2 px-3 py-2 bg-[#f7faf8] text-[11px] text-[#718079]"><span>عملیات</span><span>وضعیت</span><span>موقعیت</span><span>خالص</span><span>گرید اولیه</span><span>محصول</span><span>بچ والد</span><span>ظرف</span></div>{rows.map(b=><div className="grid grid-cols-8 gap-2 px-3 py-3 border-t text-[11px] items-center"><button onClick={()=>setTrace(b)} className="text-[#176b50] font-bold">رهگیری ←</button><Badge text={b.status||batch.status} color="#176b50" bg="#dff3e9"/><span>{b.zone||batch.destination||"دریافت"}</span><b>{(b.gross-b.tare).toFixed(2)} kg</b><span>{b.grade}</span><span>{b.product}</span><span className="font-mono">{batch.id}</span><span className="font-mono">{b.code}</span></div>)}</div>}</Card>
- {trace&&<div className="fixed inset-0 bg-black/40 z-[90] flex items-center justify-center" onClick={()=>setTrace(null)}><div className="bg-white rounded-2xl w-[700px] overflow-hidden" onClick={e=>e.stopPropagation()}><div className="bg-[#133a31] text-white p-5 flex justify-between"><div><h3 className="font-bold">رهگیری ظرف {trace.code}</h3><p className="text-[11px] text-[#bcd4cc]">بچ والد {batch.id}</p></div><button onClick={()=>setTrace(null)}>×</button></div><div className="p-6"><div className="grid grid-cols-4 gap-2 mb-5">{[["ناخالص",trace.gross.toFixed(2)],["وزن ظرف",trace.tare.toFixed(2)],["خالص",(trace.gross-trace.tare).toFixed(2)],["موقعیت",trace.zone||batch.destination||"دریافت"]].map(x=><div className="bg-[#f1f6f3] p-3 rounded-xl"><small className="block text-[#718079]">{x[0]}</small><b>{x[1]}</b></div>)}</div><div className="border-r-2 border-[#b9d4ca] pr-5 space-y-4">{batch.events.slice().reverse().map(e=><div><b className="text-[12px] text-[#176b50]">{e.time} · {e.title}</b><p className="text-[11px] text-[#718079]">{e.detail}</p></div>)}</div></div></div></div>}</div>
+ {trace&&<div className="fixed inset-0 bg-black/40 z-[90] flex items-center justify-center" onClick={()=>setTrace(null)}><div className="bg-white rounded-2xl w-[700px] overflow-hidden" onClick={e=>e.stopPropagation()}><div className="bg-[#133a31] text-white p-5 flex justify-between"><div><h3 className="font-bold">رهگیری ظرف {trace.code}</h3><p className="text-[11px] text-[#bcd4cc]">بچ والد {batch.id}</p></div><button onClick={()=>setTrace(null)}>×</button></div><div className="p-6"><div className="grid grid-cols-4 gap-2 mb-5">{[["ناخالص",trace.gross.toFixed(2)],["وزن ظرف",trace.tare.toFixed(2)],["خالص",(trace.gross-trace.tare).toFixed(2)],["موقعیت",trace.currentLocation||trace.zone||"دریافت"]].map(x=><div className="bg-[#f1f6f3] p-3 rounded-xl"><small className="block text-[#718079]">{x[0]}</small><b>{x[1]}</b></div>)}</div><div className="bg-[#edf8f3] rounded-lg p-3 mb-4 text-[11px]"><b>اقدام بعدی:</b> {trace.nextAction} · <b>مقصد:</b> {trace.destination||"فعلاً حرکت لازم نیست"}</div><div className="border-r-2 border-[#b9d4ca] pr-5 space-y-4">{batch.events.slice().reverse().map(e=><div><b className="text-[12px] text-[#176b50]">{e.time} · {e.title}</b><p className="text-[11px] text-[#718079]">{e.detail}</p></div>)}</div></div></div></div>}<ScanSimulator open={scanOpen} title="اسکن ورود به سردخانه" suggestedCode={pending?.code||""} onClose={()=>setScanOpen(false)} onScan={scanGate}/></div>
 }
 // BEGIN PRODUCTION WORKSPACE
 // UI-only Figma Make simulation. Paste into WebApp.tsx; useState and SortingScreen are supplied there.
@@ -431,6 +445,8 @@ const pwEmpty = (): PWLedger => ({
   consumedInputs: [],
   machines: { ...PW_DEFAULT_MACHINES },
 })
+function pwNormalizeItem(item:PWItem):PWItem{const currentLocation=item.currentLocation||item.zone||"SORTING",currentState=item.currentState||item.stage||"READY",destination=item.nextZone||item.destination||null,nextAction=item.nextAction||(destination&&destination!==currentLocation?`اسکن ورود به ${PW_ZONES[destination]||destination}`:"انجام عملیات جاری");return {...item,zone:currentLocation,currentLocation,currentState,destination:item.destination??null,nextAction}}
+function pwAssertWashCompatibility(session:any,item:PWItem){if(session&&(session.grade!==item.grade||session.size!==item.size))throw Error(`نشست فعال شست‌وشو شامل گرید ${session.grade} / اندازه ${session.size} است. ابتدا تمام محصول را در سبدهای خروجی ثبت و واحد را خالی و تکمیل کنید.`);return true}
 function ScanOptionalWeighTransition({
   scan,
   setScan,
@@ -443,13 +459,14 @@ function ScanOptionalWeighTransition({
 }: {
   scan: string
   setScan: (value: string) => void
-  onScan: () => void
+  onScan: (code?: string) => void
   lastWeight?: number
   weight: string
   setWeight: (value: string) => void
   action?: string
   disabled?: boolean
 }) {
+  const [simulatorOpen, setSimulatorOpen] = useState(false)
   const next = weight === "" ? null : Number(weight),
     delta =
       next === null || lastWeight === undefined
@@ -466,7 +483,7 @@ function ScanOptionalWeighTransition({
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault()
-              onScan()
+              onScan(scan)
             }
           }}
           placeholder="اسکنر سخت‌افزاری یا ورود کد"
@@ -511,9 +528,8 @@ function ScanOptionalWeighTransition({
           </b>
         </div>
       )}
-      <PWButton disabled={disabled || !scan.trim()} onClick={onScan}>
-        {action}
-      </PWButton>
+      <div style={{display:"flex",gap:8}}><PWButton disabled={disabled || !scan.trim()} onClick={()=>onScan(scan)}>{action}</PWButton><PWButton secondary disabled={disabled} onClick={()=>setSimulatorOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton></div>
+      <ScanSimulator open={simulatorOpen} title={action} suggestedCode={scan} onClose={()=>setSimulatorOpen(false)} onScan={(code)=>{setScan(code);onScan(code)}}/>
     </div>
   )
 }
@@ -560,6 +576,7 @@ function readProductionLedger(): PWLedger {
       ...pwEmpty(),
       ...value,
       machines: { ...PW_DEFAULT_MACHINES, ...(value.machines || {}) },
+      items: value.items.map(pwNormalizeItem),
       events: [...value.events].sort((a, b) => a.seq - b.seq),
     }
   } catch (error: any) {
@@ -571,7 +588,7 @@ function readProductionLedger(): PWLedger {
 }
 function saveProductionLedger(ledger: PWLedger) {
   if (ledger.storageError) throw Error(ledger.storageError)
-  localStorage.setItem(PW_STORAGE, JSON.stringify(ledger))
+  localStorage.setItem(PW_STORAGE, JSON.stringify({...ledger,items:ledger.items.map(pwNormalizeItem)}))
 }
 function pwEvent(
   ledger: PWLedger,
@@ -957,6 +974,7 @@ function WashingSessionScreen({
     [outputWeight, setOutputWeight] = useState(""),
     [lossReason, setLossReason] = useState(""),
     [empty, setEmpty] = useState(false),
+    [outputScanOpen, setOutputScanOpen] = useState(false),
     [error, setError] = useState("")
   const active = ledger.washSessions.find(
       (session) => session.status === "ACTIVE",
@@ -982,24 +1000,18 @@ function WashingSessionScreen({
       ),
     ),
     loss = pwNumber(inputTotal - outputTotal)
-  const addInput = () => {
+  const addInput = (rawCode = scan) => {
     setError("")
     try {
       const next = readProductionLedger(),
         item = next.items.find(
-          (row) => row.containerCode === pwCode(scan) && !row.consumed,
+          (row) => row.containerCode === pwCode(rawCode) && !row.consumed,
         )
       pwUsable(next, item)
       if (item.stage !== "SORTED" || item.zone !== "WASHING")
         throw Error("سبد اسکن‌شده برای ورود به شست‌وشو واجد شرایط نیست.")
       let session = next.washSessions.find((row) => row.status === "ACTIVE")
-      if (
-        session &&
-        (session.grade !== item.grade || session.size !== item.size)
-      )
-        throw Error(
-          `نشست فعال شست‌وشو شامل گرید ${session.grade} / اندازه ${session.size} است. ابتدا تمام محصول را در سبدهای خروجی ثبت و واحد را خالی و تکمیل کنید.`,
-        )
+      pwAssertWashCompatibility(session,item)
       if (session?.inputIds.includes(item.id))
         throw Error("این سبد قبلاً در نشست فعال ثبت شده است.")
       if (!session) {
@@ -1254,12 +1266,7 @@ function WashingSessionScreen({
         ) : (
           <>
             <PWField label="اسکن سبد خالی خروجی">
-              <input
-                value={outputCode}
-                onChange={(event) => setOutputCode(event.target.value)}
-                style={pwInput}
-                placeholder="سبد جدید؛ مستقل از ورودی‌ها"
-              />
+              <div style={{display:"flex",gap:8}}><input value={outputCode} onChange={(event) => setOutputCode(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();addOutput()}}} style={pwInput} placeholder="سبد جدید؛ مستقل از ورودی‌ها"/><PWButton secondary onClick={()=>setOutputScanOpen(true)}>⌗ اسکن</PWButton></div>
             </PWField>
             <PWField label="وزن خالص خروجی (kg)">
               <input
@@ -1277,6 +1284,7 @@ function WashingSessionScreen({
             >
               ثبت این خروجی
             </PWButton>
+            <ScanSimulator open={outputScanOpen} title="اسکن سبد خروجی شست‌وشو" suggestedCode={outputCode||"CTR-003"} onClose={()=>setOutputScanOpen(false)} onScan={code=>setOutputCode(code)}/>
             <div style={{ margin: "15px 0" }}>
               {active.outputs.map((row: any, index: number) => (
                 <p key={row.containerCode}>
@@ -1339,7 +1347,8 @@ function ProductionScreen(props: any) {
     [ledger, setLedger] = useState<PWLedger>(() => readProductionLedger()),
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
-    [chosen, setChosen] = useState("")
+    [chosen, setChosen] = useState(""),
+    [moveItem, setMoveItem] = useState<PWItem | null>(null)
   const tabs = [
     ["overview", "صف کار و مسیر"],
     ["sorting", "سورتینگ"],
@@ -1404,15 +1413,20 @@ function ProductionScreen(props: any) {
       {pwBusy(ledger, item) ? " · قفل چرخه" : ""}
     </PWNotice>
   )
-  const move = (id: string) =>
+  const move = (id: string, rawCode: string) =>
     execute("انتقال فیزیکی ثبت شد.", (next) => {
       const item = next.items.find((x) => x.id === id)
       pwUsable(next, item)
+      const scan = pwCode(rawCode), validCodes = [item.containerCode,...item.trays.map((tray:any)=>tray.code)].filter(Boolean).map(pwCode)
+      if(!scan || !validCodes.includes(scan)) throw Error("QR اسکن‌شده با ظرف یا سینی‌های همین بچ تطبیق ندارد.")
       const destination = item.nextZone || item.destination
       if (!destination) throw Error("برای این بچ مسیر عملیاتی مشخص نشده است.")
       if (destination === item.zone) throw Error("بچ از قبل در محل مقصد است.")
       const before = item.zone
       item.zone = destination
+      item.currentLocation = destination
+      item.currentState = "IN_PROCESS"
+      item.nextAction = destination === item.destination ? "انجام عملیات مقصد" : `اسکن ورود به ${item.nextZone || item.destination}`
       pwEvent(next, "انتقال فیزیکی", item.code, {
         from: before,
         to: destination,
@@ -2018,7 +2032,7 @@ function ProductionScreen(props: any) {
                           item.nextZone === "FREEZING" &&
                           !item.allocated)
                       }
-                      onClick={() => move(item.id)}
+                      onClick={() => setMoveItem(item)}
                     >
                       تأیید انتقال فیزیکی
                     </PWButton>
@@ -2027,6 +2041,7 @@ function ProductionScreen(props: any) {
               ))}
             </div>
           )}
+          <ScanSimulator open={!!moveItem} title="اسکن تأیید گذرگاه عملیاتی" suggestedCode={moveItem?.containerCode||moveItem?.trays?.[0]?.code||""} onClose={()=>setMoveItem(null)} onScan={(code)=>{if(moveItem)move(moveItem.id,code);setMoveItem(null)}}/>
         </>
       )}
       {tab === "slice" && (
@@ -2612,8 +2627,8 @@ function SortingScreen() {
   const productGrades = readMasterData().products.find(
     (item) => item.name === sources[0]?.product,
   )?.grades || ["A", "B", "C"]
-  function scanInput() {
-    const code = pwCode(scanCode),
+  function scanInput(rawCode = scanCode) {
+    const code = pwCode(rawCode),
       source = batch.baskets.find((b: any) => pwCode(b.code) === code)
     if (!source || blocked(source))
       return setError("سبد اسکن‌شده برای این نوبت سورت واجد شرایط نیست.")
@@ -2629,6 +2644,7 @@ function SortingScreen() {
       weight = entryWeight === "" ? undefined : Number(entryWeight)
     if (weight !== undefined && (!Number.isFinite(weight) || weight <= 0))
       return setError("وزن ورود باید مثبت باشد.")
+    try{writePrototypeBatch(applyReceiptWorkflowScan(readPrototypeBatch(),source.code,"SORTING"))}catch(failure:any){return setError(failure.message)}
     setInputCodes([...inputCodes, source.code])
     if (weight !== undefined)
       setEntryWeights({ ...entryWeights, [pwCode(source.code)]: weight })
@@ -3191,6 +3207,8 @@ function QualityScreen() {
 }
 
 function PackagingScreen() {
+  const [scanOpen,setScanOpen]=useState(false),[scanned,setScanned]=useState(""),[scanError,setScanError]=useState("");
+  const handleScan=(raw:string)=>{const code=raw.trim().toUpperCase();try{const ledger=readProductionLedger(),item=ledger.items.find(row=>!row.consumed&&[row.containerCode,...(row.trays||[]).map((tray:any)=>tray.code)].map(pwCode).includes(code));if(!item||item.zone!=="PACKAGING")throw Error("این کد برای ورود به بسته‌بندی واجد شرایط نیست.");item.currentLocation="PACKAGING";item.currentState="PACKAGING_INPUT_CONFIRMED";item.nextAction="شروع دستور بسته‌بندی";pwEvent(ledger,"اسکن ورود بسته‌بندی",item.code,{scan:code,location:"PACKAGING"});saveProductionLedger(ledger);setScanned(code);setScanError("")}catch(failure:any){setScanError(failure.message)}};
   return (
     <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl">
       <div className="flex items-start justify-between mb-4">
@@ -3206,6 +3224,7 @@ function PackagingScreen() {
         <StatCard label="بسته‌بندی امروز" value="۶۸,۴۰۰" />
         <StatCard label="نرخ بهره‌وری" value="۸۸%" />
       </div>
+      {scanError&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mb-3 text-[12px]">{scanError}</p>}<div className="bg-white border border-[#c9ddd5] rounded-xl p-3 mb-4 flex items-center gap-3"><div className="ml-auto"><b className="text-[12px]">ورود بچ به بسته‌بندی با اسکن</b><p className="text-[11px] text-[#718079]">{scanned?`تأیید شد: ${scanned}`:"ظرف یا سینی واجد شرایط را اسکن کنید."}</p></div><button onClick={()=>setScanOpen(true)} className="bg-[#176b50] text-white rounded-lg px-4 py-2 text-[12px] font-bold">⌗ اسکن</button></div>
 
       <div className="grid grid-cols-2 gap-4">
         <Card className="p-4">
@@ -3234,6 +3253,7 @@ function PackagingScreen() {
           ))}
         </Card>
       </div>
+      <ScanSimulator open={scanOpen} title="اسکن ورود بسته‌بندی" suggestedCode={scanned} onClose={()=>setScanOpen(false)} onScan={handleScan}/>
     </div>
   );
 }
@@ -3275,6 +3295,8 @@ function ConsumablesScreen() {
 }
 
 function ShipmentsScreen() {
+  const [scanOpen,setScanOpen]=useState(false),[scanned,setScanned]=useState(""),[scanError,setScanError]=useState("");
+  const handleScan=(raw:string)=>{const code=raw.trim().toUpperCase();try{const ledger=readProductionLedger(),item=ledger.items.find(row=>!row.consumed&&[row.containerCode,...(row.trays||[]).map((tray:any)=>tray.code)].map(pwCode).includes(code));if(!item||item.zone!=="PACKAGING")throw Error("فقط موجودی تکمیل‌شده بسته‌بندی برای ارسال پذیرفته می‌شود.");item.zone="SHIPPING";item.currentLocation="SHIPPING";item.currentState="OUTBOUND_STAGED";item.destination=null;item.nextAction="افزودن به محموله خروجی";pwEvent(ledger,"اسکن ورود ارسال",item.code,{scan:code,from:"PACKAGING",to:"SHIPPING"});saveProductionLedger(ledger);setScanned(code);setScanError("")}catch(failure:any){setScanError(failure.message)}};
   return (
     <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl">
       <div className="flex items-start justify-between mb-4">
@@ -3295,6 +3317,7 @@ function ShipmentsScreen() {
         <StatCard label="تحویل داده شده" value="۱۲۴" />
         <StatCard label="برگشتی" value="۲" />
       </div>
+      {scanError&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mb-3 text-[12px]">{scanError}</p>}<div className="bg-white border border-[#c9ddd5] rounded-xl p-3 mb-3 flex items-center gap-3"><div className="ml-auto"><b className="text-[12px]">اسکن خروج واقعی</b><p className="text-[11px] text-[#718079]">{scanned?`در محوطه ارسال ثبت شد: ${scanned}`:"این بخش فقط ارسال بیرونی است؛ جابه‌جایی داخلی از مسیر عملیات انجام می‌شود."}</p></div><button onClick={()=>setScanOpen(true)} className="bg-[#176b50] text-white rounded-lg px-4 py-2 text-[12px] font-bold">⌗ اسکن بسته خروجی</button></div>
 
       <div className="flex gap-2 mb-3">
         {["همه", "آماده", "در حال ارسال", "تحویل داده شده", "برگشتی"].map((f, i) => (
@@ -3315,6 +3338,7 @@ function ShipmentsScreen() {
           <TableRow key={i} cells={[row.status, row.weight, row.dest, row.product, row.id]} badge={{ text: row.status, color: row.sc, bg: row.sb }} />
         ))}
       </Card>
+      <ScanSimulator open={scanOpen} title="اسکن بسته خروجی برای ارسال" suggestedCode={scanned} onClose={()=>setScanOpen(false)} onScan={handleScan}/>
     </div>
   );
 }
@@ -3330,7 +3354,7 @@ function InventoryMovementScreen({navigate}:{navigate:(s:WebScreen)=>void}){
   const receipt=readPrototypeBatch(),master=readMasterData();
   const locations=["سردخانه ۱", "سردخانه ۲", ...master.warehouses.filter(x=>x.active).map(x=>x.name)];
   const [code,setCode]=useState(""),[from,setFrom]=useState(""),[to,setTo]=useState(""),[reason,setReason]=useState(""),[done,setDone]=useState(false),[error,setError]=useState("");
-  const move=()=>{const basket=receipt.baskets.find(item=>item.code===code.trim());if(!basket)return setError("کد اسکن‌شده در موجودی جاری پیدا نشد.");if(!from||!to||from===to||!reason.trim())return setError("مبدأ، مقصد متفاوت و علت جابجایی استثنایی الزامی است.");const at=new Date().toLocaleTimeString("fa-IR");writePrototypeBatch({...receipt,baskets:receipt.baskets.map(item=>item.code===basket.code?{...item,zone:to}:item),events:[...receipt.events,{time:at,title:"جابجایی استثنایی موجودی",detail:`${basket.code} · ${from} ← ${to} · ${reason}`} ]});setDone(true);setError("")};
+  const move=()=>{const basket=receipt.baskets.find(item=>item.code===code.trim());if(!basket)return setError("کد اسکن‌شده در موجودی جاری پیدا نشد.");if(!from||!to||from===to||!reason.trim())return setError("مبدأ، مقصد متفاوت و علت جابجایی استثنایی الزامی است.");const at=new Date().toLocaleTimeString("fa-IR");writePrototypeBatch({...receipt,baskets:receipt.baskets.map(item=>item.code===basket.code?{...item,zone:to,status:"STORED",currentLocation:to,currentState:"STORED",destination:null,nextAction:"منتظر تخصیص برنامه تولید"}:item),events:[...receipt.events,{time:at,title:"جابجایی استثنایی موجودی",detail:`${basket.code} · ${from} ← ${to} · ${reason}`} ]});setDone(true);setError("")};
   if(done)return <div className="flex-1 bg-[#f4f7f5] p-8" dir="rtl"><Card className="max-w-2xl mx-auto p-8 text-center"><h2 className="text-xl font-bold text-[#176b50]">جابجایی موجودی ثبت شد</h2><p className="mt-3 text-[12px]">موقعیت جاری، سابقه حرکت و رهگیری هم‌زمان به‌روزرسانی شدند.</p><div className="flex gap-2 justify-center mt-5"><button className="bg-[#176b50] text-white rounded-lg px-5 py-3" onClick={()=>navigate("inventory")}>مشاهده موجودی</button><button className="border rounded-lg px-5 py-3" onClick={()=>{setDone(false);setCode("");setReason("")}}>جابجایی دیگر</button></div></Card></div>;
   return <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl"><div className="mb-4"><h2 className="font-bold text-[#18302a] text-[22px]">جابجایی استثنایی موجودی</h2><p className="text-[#718079] text-[13px]">فقط برای انتقال خارج از مسیر عادی؛ حرکت‌های دریافت و تولید با اسکن همان مرحله ثبت می‌شوند.</p></div>{error&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mb-3">{error}</p>}<Card className="p-5 max-w-3xl"><label className="text-[11px] font-bold">اسکن QR سبد<input value={code} onChange={e=>setCode(e.target.value)} placeholder="مثلاً BSK-0002" className="w-full h-12 border-2 border-dashed border-[#176b50] rounded-lg px-3 mt-1 font-mono"/></label><div className="grid grid-cols-2 gap-3 mt-4"><label className="text-[11px]">مبدأ<select value={from} onChange={e=>setFrom(e.target.value)} className="w-full h-11 border rounded-lg px-3 mt-1 bg-white"><option value="">انتخاب…</option>{locations.map(x=><option key={x}>{x}</option>)}</select></label><label className="text-[11px]">مقصد<select value={to} onChange={e=>setTo(e.target.value)} className="w-full h-11 border rounded-lg px-3 mt-1 bg-white"><option value="">انتخاب…</option>{locations.map(x=><option key={x}>{x}</option>)}</select></label></div><label className="block text-[11px] mt-3">علت<textarea value={reason} onChange={e=>setReason(e.target.value)} className="w-full border rounded-lg p-3 mt-1" placeholder="مثلاً جابه‌جایی ظرفیت سردخانه"/></label><button onClick={move} className="w-full mt-4 bg-[#176b50] text-white rounded-lg py-3 font-bold">تأیید جابجایی اسکن‌شده</button></Card></div>
 }
@@ -3540,42 +3564,26 @@ function MasterDataScreen(){
   return <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl"><div className="flex justify-between items-start mb-4"><div><h2 className="font-bold text-[#18302a] text-[22px]">داده‌های پایه</h2><p className="text-[#718079] text-[13px]">هر تب منبع داده، فرم ایجاد و ویرایش مستقل دارد.</p></div><GreenBtn onClick={()=>begin()}>+ افزودن {labels[tab]}</GreenBtn></div><div className="flex gap-2 mb-4">{(Object.keys(labels) as (keyof MasterDataState)[]).map(key=><button key={key} onClick={()=>choose(key)} className={(tab===key?"bg-[#176b50] text-white":"bg-[#e8efec] text-[#718079]")+" px-4 py-2 rounded-full text-[12px]"}>{labels[key]}</button>)}</div><Card className="overflow-hidden"><div className="grid grid-cols-[.75fr_1fr_1.2fr_1.3fr_1fr] gap-3 bg-[#eef3f0] p-3 text-[11px] text-[#718079]"><span>عملیات</span><span>وضعیت</span><span>{tab==="products"?"گریدهای محصول":tab==="warehouses"?"موقعیت":"تماس"}</span><span>نام</span><span>کد</span></div>{rows.map(row=><div key={row.id} className="grid grid-cols-[.75fr_1fr_1.2fr_1.3fr_1fr] gap-3 p-3 border-t items-center text-[12px]"><div className="flex gap-2"><button onClick={()=>begin(row)} className="text-[#176b50] font-bold">ویرایش</button><button onClick={()=>toggle(row)} className="text-[#8a611c]">{row.active?"غیرفعال":"فعال"}</button></div><Badge text={row.active?"فعال":"غیرفعال"} color={row.active?"#16825b":"#718079"} bg={row.active?"#dff3e9":"#e8efec"}/><span>{tab==="products"?row.grades.join("، "):tab==="warehouses"?row.location:row.contact}</span><b>{row.name}</b><span className="font-mono">{row.code}</span></div>)}</Card>{open&&<div className="fixed inset-0 z-50 bg-[#09231dcc] flex items-center justify-center"><div className="bg-white rounded-2xl p-6 w-[680px]" dir="rtl"><div className="flex justify-between"><h3 className="font-bold text-[18px]">{editing?"ویرایش":"افزودن"} {labels[tab]}</h3><button onClick={()=>setOpen(false)} className="text-xl">×</button></div>{error&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mt-3 text-[12px]">{error}</p>}<div className="grid grid-cols-2 gap-3 mt-4"><label className="text-[11px]">نام<input value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label><label className="text-[11px]">کد<input value={form.code||""} onChange={e=>setForm({...form,code:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>{tab==="products"?<><label className="text-[11px]">دسته‌بندی<input value={form.category||""} onChange={e=>setForm({...form,category:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label><label className="text-[11px]">گریدها (با ویرگول جدا کنید)<input value={form.grades||""} onChange={e=>setForm({...form,grades:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1" placeholder="A، B، C"/></label><label className="text-[11px] col-span-2">اندازه‌ها<input value={form.sizes||""} onChange={e=>setForm({...form,sizes:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1" placeholder="درشت، متوسط، ریز"/></label></>:tab==="warehouses"?<label className="text-[11px] col-span-2">موقعیت<input value={form.location||""} onChange={e=>setForm({...form,location:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>:<label className="text-[11px] col-span-2">شماره تماس<input value={form.contact||""} onChange={e=>setForm({...form,contact:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>}</div><label className="flex gap-2 mt-4 text-[12px]"><input type="checkbox" checked={form.active!==false} onChange={e=>setForm({...form,active:e.target.checked})}/>فعال و قابل انتخاب در عملیات جدید</label><button onClick={save} className="w-full mt-5 bg-[#176b50] text-white rounded-lg py-3 font-bold">ذخیره</button></div></div>}</div>
 }
 function UsersScreen() {
-  const [showNewUser, setShowNewUser] = useState(false);
+  const [users,setUsers]=useState<PrototypeUser[]>(()=>readPrototypeUsers()),[query,setQuery]=useState(""),[open,setOpen]=useState(false),[editing,setEditing]=useState<PrototypeUser|null>(null),[error,setError]=useState("");
+  const blank={name:"",username:"",phone:"",role:"",active:true};
+  const [form,setForm]=useState<any>(blank);
+  const begin=(user?:PrototypeUser)=>{setEditing(user||null);setForm(user?{...user}:blank);setError("");setOpen(true)};
+  const cancel=()=>{setOpen(false);setEditing(null);setForm(blank);setError("")};
+  const save=()=>{const failure=validatePrototypeUser(form,users,editing?.id);if(failure)return setError(failure);const row:PrototypeUser={id:editing?.id||`U-${Date.now()}`,name:form.name.trim(),username:form.username.trim().toLowerCase(),phone:form.phone.trim(),role:form.role,active:form.active!==false,last:editing?.last||"هنوز وارد نشده"};const next=editing?users.map(user=>user.id===editing.id?row:user):[...users,row];setUsers(next);writePrototypeUsers(next);cancel()};
+  const shown=users.filter(user=>[user.name,user.username,user.role,user.phone].join(" ").toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl">
       <h2 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[22px] mb-1">کاربران</h2>
       <p className="font-['Vazirmatn:Regular',sans-serif] text-[#718079] text-[13px] mb-4">مدیریت کاربران و سطوح دسترسی</p>
       <div className="flex justify-between items-center mb-4">
-        <input className="border border-[#d8e4df] rounded-lg px-3 py-1.5 text-[12px] font-['Vazirmatn:Regular',sans-serif] focus:outline-none w-64" placeholder="جستجو..." dir="rtl" />
-        <GreenBtn onClick={() => setShowNewUser((open) => !open)}>{showNewUser ? "فرم کاربر باز شد" : "+ کاربر جدید"}</GreenBtn>
+        <input value={query} onChange={e=>setQuery(e.target.value)} className="border border-[#d8e4df] rounded-lg px-3 py-1.5 text-[12px] font-['Vazirmatn:Regular',sans-serif] focus:outline-none w-64" placeholder="جستجو..." dir="rtl" />
+        <GreenBtn onClick={() => begin()}>+ کاربر جدید</GreenBtn>
       </div>
       <Card>
-        {showNewUser && (
-          <div className="m-4 p-4 rounded-xl border border-[#c9ddd5] bg-[#f7fbf9]">
-            <h3 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[15px] mb-3">افزودن کاربر جدید</h3>
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <input className="border border-[#d8e4df] rounded-lg px-3 py-2 text-[12px]" placeholder="نام و نام خانوادگی" />
-              <input className="border border-[#d8e4df] rounded-lg px-3 py-2 text-[12px]" placeholder="نام کاربری" />
-              <input className="border border-[#d8e4df] rounded-lg px-3 py-2 text-[12px]" placeholder="شماره تماس" />
-              <select className="border border-[#d8e4df] rounded-lg px-3 py-2 text-[12px] bg-white"><option>انتخاب نقش</option><option>مدیر انبار</option><option>اپراتور دریافت</option><option>مسئول QC</option></select>
-            </div>
-            <div className="flex gap-2">
-              <GreenBtn onClick={() => setShowNewUser(false)}>ذخیره کاربر</GreenBtn>
-              <button onClick={() => setShowNewUser(false)} className="px-4 py-2 rounded-lg border border-[#d8e4df] text-[#718079] text-[12px]">انصراف</button>
-            </div>
-          </div>
-        )}
-        <TableHeader cols={["وضعیت", "آخرین ورود", "نقش", "نام"]} />
-        {[
-          { name: "علی رضایی", role: "اپراتور دریافت", last: "امروز ۰۹:۳۰", status: "آنلاین", sc: "#16825b", sb: "#dff3e9" },
-          { name: "فاطمه محمدی", role: "مسئول QC", last: "امروز ۱۰:۱۵", status: "آنلاین", sc: "#16825b", sb: "#dff3e9" },
-          { name: "احمد کریمی", role: "اپراتور بسته‌بندی", last: "دیروز ۱۷:۰۰", status: "آفلاین", sc: "#718079", sb: "#e8efec" },
-          { name: "مریم حسینی", role: "مدیر انبار", last: "امروز ۰۸:۴۵", status: "آنلاین", sc: "#16825b", sb: "#dff3e9" },
-          { name: "حسن نصیری", role: "سرپرست ارسال", last: "امروز ۱۱:۳۰", status: "آنلاین", sc: "#16825b", sb: "#dff3e9" },
-        ].map((row, i) => (
-          <TableRow key={i} cells={[row.status, row.last, row.role, row.name]} badge={{ text: row.status, color: row.sc, bg: row.sb }} />
-        ))}
+        <div className="grid grid-cols-[.7fr_.8fr_1fr_1fr_1.2fr_1fr] gap-3 bg-[#eef3f0] p-3 text-[11px] text-[#718079]"><span>عملیات</span><span>وضعیت</span><span>آخرین ورود</span><span>نقش</span><span>نام</span><span>نام کاربری</span></div>
+        {shown.map(user=><div key={user.id} className="grid grid-cols-[.7fr_.8fr_1fr_1fr_1.2fr_1fr] gap-3 p-3 border-t text-[12px] items-center"><button onClick={()=>begin(user)} className="text-[#176b50] font-bold text-right">ویرایش</button><Badge text={user.active?"فعال":"غیرفعال"} color={user.active?"#16825b":"#718079"} bg={user.active?"#dff3e9":"#e8efec"}/><span>{user.last}</span><span>{user.role}</span><b>{user.name}</b><span className="font-mono">{user.username}</span></div>)}
       </Card>
+      {open&&<div className="fixed inset-0 z-[110] bg-[#09231dcc] flex items-center justify-center"><div className="bg-white rounded-2xl p-6 w-[680px]" dir="rtl"><div className="flex justify-between"><h3 className="font-bold text-[18px]">{editing?"ویرایش کاربر":"افزودن کاربر جدید"}</h3><button onClick={cancel} className="text-xl">×</button></div>{error&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mt-3 text-[12px]">{error}</p>}<div className="grid grid-cols-2 gap-3 mt-4"><label className="text-[11px]">نام و نام خانوادگی<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label><label className="text-[11px]">نام کاربری<input value={form.username} onChange={e=>setForm({...form,username:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1 font-mono"/></label><label className="text-[11px]">شماره تماس<input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label><label className="text-[11px]">نقش<select value={form.role} onChange={e=>setForm({...form,role:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1 bg-white"><option value="">انتخاب نقش…</option><option>مدیر انبار</option><option>اپراتور دریافت</option><option>اپراتور تولید</option><option>مسئول QC</option><option>سرپرست ارسال</option></select></label></div><label className="flex gap-2 mt-4 text-[12px]"><input type="checkbox" checked={form.active!==false} onChange={e=>setForm({...form,active:e.target.checked})}/>کاربر فعال باشد</label><div className="flex gap-2 mt-5"><button onClick={save} className="bg-[#176b50] text-white rounded-lg px-6 py-3 font-bold">ذخیره کاربر</button><button onClick={cancel} className="border rounded-lg px-5 py-3 text-[#718079]">انصراف</button></div></div></div>}
     </div>
   );
 }

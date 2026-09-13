@@ -98,8 +98,8 @@ function SortingScreen() {
   const productGrades = readMasterData().products.find(
     (item) => item.name === sources[0]?.product,
   )?.grades || ["A", "B", "C"]
-  function scanInput() {
-    const code = pwCode(scanCode),
+  function scanInput(rawCode = scanCode) {
+    const code = pwCode(rawCode),
       source = batch.baskets.find((b: any) => pwCode(b.code) === code)
     if (!source || blocked(source))
       return setError("سبد اسکن‌شده برای این نوبت سورت واجد شرایط نیست.")
@@ -115,6 +115,7 @@ function SortingScreen() {
       weight = entryWeight === "" ? undefined : Number(entryWeight)
     if (weight !== undefined && (!Number.isFinite(weight) || weight <= 0))
       return setError("وزن ورود باید مثبت باشد.")
+    try{writePrototypeBatch(applyReceiptWorkflowScan(readPrototypeBatch(),source.code,"SORTING"))}catch(failure:any){return setError(failure.message)}
     setInputCodes([...inputCodes, source.code])
     if (weight !== undefined)
       setEntryWeights({ ...entryWeights, [pwCode(source.code)]: weight })

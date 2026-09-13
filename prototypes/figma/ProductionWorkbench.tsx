@@ -86,6 +86,8 @@ const pwEmpty = (): PWLedger => ({
   consumedInputs: [],
   machines: { ...PW_DEFAULT_MACHINES },
 })
+function pwNormalizeItem(item:PWItem):PWItem{const currentLocation=item.currentLocation||item.zone||"SORTING",currentState=item.currentState||item.stage||"READY",destination=item.nextZone||item.destination||null,nextAction=item.nextAction||(destination&&destination!==currentLocation?`اسکن ورود به ${PW_ZONES[destination]||destination}`:"انجام عملیات جاری");return {...item,zone:currentLocation,currentLocation,currentState,destination:item.destination??null,nextAction}}
+function pwAssertWashCompatibility(session:any,item:PWItem){if(session&&(session.grade!==item.grade||session.size!==item.size))throw Error(`نشست فعال شست‌وشو شامل گرید ${session.grade} / اندازه ${session.size} است. ابتدا تمام محصول را در سبدهای خروجی ثبت و واحد را خالی و تکمیل کنید.`);return true}
 function ScanOptionalWeighTransition({
   scan,
   setScan,
@@ -98,13 +100,14 @@ function ScanOptionalWeighTransition({
 }: {
   scan: string
   setScan: (value: string) => void
-  onScan: () => void
+  onScan: (code?: string) => void
   lastWeight?: number
   weight: string
   setWeight: (value: string) => void
   action?: string
   disabled?: boolean
 }) {
+  const [simulatorOpen, setSimulatorOpen] = useState(false)
   const next = weight === "" ? null : Number(weight),
     delta =
       next === null || lastWeight === undefined
@@ -121,7 +124,7 @@ function ScanOptionalWeighTransition({
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault()
-              onScan()
+              onScan(scan)
             }
           }}
           placeholder="اسکنر سخت‌افزاری یا ورود کد"
@@ -166,9 +169,8 @@ function ScanOptionalWeighTransition({
           </b>
         </div>
       )}
-      <PWButton disabled={disabled || !scan.trim()} onClick={onScan}>
-        {action}
-      </PWButton>
+      <div style={{display:"flex",gap:8}}><PWButton disabled={disabled || !scan.trim()} onClick={()=>onScan(scan)}>{action}</PWButton><PWButton secondary disabled={disabled} onClick={()=>setSimulatorOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton></div>
+      <ScanSimulator open={simulatorOpen} title={action} suggestedCode={scan} onClose={()=>setSimulatorOpen(false)} onScan={(code)=>{setScan(code);onScan(code)}}/>
     </div>
   )
 }
@@ -215,6 +217,7 @@ function readProductionLedger(): PWLedger {
       ...pwEmpty(),
       ...value,
       machines: { ...PW_DEFAULT_MACHINES, ...(value.machines || {}) },
+      items: value.items.map(pwNormalizeItem),
       events: [...value.events].sort((a, b) => a.seq - b.seq),
     }
   } catch (error: any) {
@@ -226,7 +229,7 @@ function readProductionLedger(): PWLedger {
 }
 function saveProductionLedger(ledger: PWLedger) {
   if (ledger.storageError) throw Error(ledger.storageError)
-  localStorage.setItem(PW_STORAGE, JSON.stringify(ledger))
+  localStorage.setItem(PW_STORAGE, JSON.stringify({...ledger,items:ledger.items.map(pwNormalizeItem)}))
 }
 function pwEvent(
   ledger: PWLedger,
@@ -612,6 +615,7 @@ function WashingSessionScreen({
     [outputWeight, setOutputWeight] = useState(""),
     [lossReason, setLossReason] = useState(""),
     [empty, setEmpty] = useState(false),
+    [outputScanOpen, setOutputScanOpen] = useState(false),
     [error, setError] = useState("")
   const active = ledger.washSessions.find(
       (session) => session.status === "ACTIVE",
@@ -637,24 +641,18 @@ function WashingSessionScreen({
       ),
     ),
     loss = pwNumber(inputTotal - outputTotal)
-  const addInput = () => {
+  const addInput = (rawCode = scan) => {
     setError("")
     try {
       const next = readProductionLedger(),
         item = next.items.find(
-          (row) => row.containerCode === pwCode(scan) && !row.consumed,
+          (row) => row.containerCode === pwCode(rawCode) && !row.consumed,
         )
       pwUsable(next, item)
       if (item.stage !== "SORTED" || item.zone !== "WASHING")
         throw Error("سبد اسکن‌شده برای ورود به شست‌وشو واجد شرایط نیست.")
       let session = next.washSessions.find((row) => row.status === "ACTIVE")
-      if (
-        session &&
-        (session.grade !== item.grade || session.size !== item.size)
-      )
-        throw Error(
-          `نشست فعال شست‌وشو شامل گرید ${session.grade} / اندازه ${session.size} است. ابتدا تمام محصول را در سبدهای خروجی ثبت و واحد را خالی و تکمیل کنید.`,
-        )
+      pwAssertWashCompatibility(session,item)
       if (session?.inputIds.includes(item.id))
         throw Error("این سبد قبلاً در نشست فعال ثبت شده است.")
       if (!session) {
@@ -909,12 +907,7 @@ function WashingSessionScreen({
         ) : (
           <>
             <PWField label="اسکن سبد خالی خروجی">
-              <input
-                value={outputCode}
-                onChange={(event) => setOutputCode(event.target.value)}
-                style={pwInput}
-                placeholder="سبد جدید؛ مستقل از ورودی‌ها"
-              />
+              <div style={{display:"flex",gap:8}}><input value={outputCode} onChange={(event) => setOutputCode(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();addOutput()}}} style={pwInput} placeholder="سبد جدید؛ مستقل از ورودی‌ها"/><PWButton secondary onClick={()=>setOutputScanOpen(true)}>⌗ اسکن</PWButton></div>
             </PWField>
             <PWField label="وزن خالص خروجی (kg)">
               <input
@@ -932,6 +925,7 @@ function WashingSessionScreen({
             >
               ثبت این خروجی
             </PWButton>
+            <ScanSimulator open={outputScanOpen} title="اسکن سبد خروجی شست‌وشو" suggestedCode={outputCode||"CTR-003"} onClose={()=>setOutputScanOpen(false)} onScan={code=>setOutputCode(code)}/>
             <div style={{ margin: "15px 0" }}>
               {active.outputs.map((row: any, index: number) => (
                 <p key={row.containerCode}>
@@ -994,7 +988,8 @@ function ProductionScreen(props: any) {
     [ledger, setLedger] = useState<PWLedger>(() => readProductionLedger()),
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
-    [chosen, setChosen] = useState("")
+    [chosen, setChosen] = useState(""),
+    [moveItem, setMoveItem] = useState<PWItem | null>(null)
   const tabs = [
     ["overview", "صف کار و مسیر"],
     ["sorting", "سورتینگ"],
@@ -1059,15 +1054,20 @@ function ProductionScreen(props: any) {
       {pwBusy(ledger, item) ? " · قفل چرخه" : ""}
     </PWNotice>
   )
-  const move = (id: string) =>
+  const move = (id: string, rawCode: string) =>
     execute("انتقال فیزیکی ثبت شد.", (next) => {
       const item = next.items.find((x) => x.id === id)
       pwUsable(next, item)
+      const scan = pwCode(rawCode), validCodes = [item.containerCode,...item.trays.map((tray:any)=>tray.code)].filter(Boolean).map(pwCode)
+      if(!scan || !validCodes.includes(scan)) throw Error("QR اسکن‌شده با ظرف یا سینی‌های همین بچ تطبیق ندارد.")
       const destination = item.nextZone || item.destination
       if (!destination) throw Error("برای این بچ مسیر عملیاتی مشخص نشده است.")
       if (destination === item.zone) throw Error("بچ از قبل در محل مقصد است.")
       const before = item.zone
       item.zone = destination
+      item.currentLocation = destination
+      item.currentState = "IN_PROCESS"
+      item.nextAction = destination === item.destination ? "انجام عملیات مقصد" : `اسکن ورود به ${item.nextZone || item.destination}`
       pwEvent(next, "انتقال فیزیکی", item.code, {
         from: before,
         to: destination,
@@ -1673,7 +1673,7 @@ function ProductionScreen(props: any) {
                           item.nextZone === "FREEZING" &&
                           !item.allocated)
                       }
-                      onClick={() => move(item.id)}
+                      onClick={() => setMoveItem(item)}
                     >
                       تأیید انتقال فیزیکی
                     </PWButton>
@@ -1682,6 +1682,7 @@ function ProductionScreen(props: any) {
               ))}
             </div>
           )}
+          <ScanSimulator open={!!moveItem} title="اسکن تأیید گذرگاه عملیاتی" suggestedCode={moveItem?.containerCode||moveItem?.trays?.[0]?.code||""} onClose={()=>setMoveItem(null)} onScan={(code)=>{if(moveItem)move(moveItem.id,code);setMoveItem(null)}}/>
         </>
       )}
       {tab === "slice" && (

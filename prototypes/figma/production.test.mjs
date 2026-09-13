@@ -10,6 +10,9 @@ const helperSource = source.replace(/function ScanOptionalWeighTransition[\s\S]*
 const assembled = fs.readFileSync(new URL('./WebApp.tsx', import.meta.url), 'utf8');
 const hub = fs.readFileSync(new URL('./HubApp.tsx', import.meta.url), 'utf8');
 const js = ts.transpileModule(helperSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const modelSource = assembled.slice(assembled.indexOf('type PrototypeBasket'), assembled.indexOf('type MasterProduct')).replace(/function ScanSimulator[\s\S]*?(?=type PrototypeUser)/, '');
+const modelJs = ts.transpileModule(modelSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+function setupModels(){const data=new Map(),localStorage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v)};const window={dispatchEvent(){}};const ctx=vm.createContext({localStorage,window,Event:function(){},Date});vm.runInContext(modelJs+'\nthis.api={normalizePrototypeBatch,applyReceiptWorkflowScan,validatePrototypeUser,writePrototypeUsers,readPrototypeUsers};',ctx);return {...ctx.api,data}}
 function setup() {
   const data = new Map();
   const receipt = { id: 'R1', supplier: 'Test', baskets: [{ code: 'IN1', product: 'Apple', gross: 11, tare: 1, zone: 'COLD_ROOM_CLEAN' }] };
@@ -17,7 +20,7 @@ function setup() {
   data.set('storemesh.prototype.containers', JSON.stringify(carriers));
   const localStorage = { getItem: k => data.get(k) || null, setItem: (k,v) => data.set(k,v) };
   const ctx = vm.createContext({ localStorage, readPrototypeBatch: () => receipt });
-  vm.runInContext(js + '\nthis.api={recordSortingOutputs,readProductionLedger,saveProductionLedger,pwEvent,pwEmpty,pwFreeCarrier,pwUsable};',ctx);
+  vm.runInContext(js + '\nthis.api={recordSortingOutputs,readProductionLedger,saveProductionLedger,pwEvent,pwEmpty,pwFreeCarrier,pwUsable,pwAssertWashCompatibility};',ctx);
   const output = (code='OUT1',weight=10,destination='FRESH_EXPORT',parentContributions=[{batchId:'IN1',inputWeightKg:weight}]) => ({code,weight,grade:'A',size:'L',destination,parentContributions});
   return { ...ctx.api, data, receipt, carriers, output, localStorage };
 }
@@ -97,3 +100,8 @@ test('washing session enforces compatibility, multiple outputs, complete genealo
   assert.match(assembled, /واحد شست‌وشو کاملاً خالی است/);
   assert.match(assembled, /if \(!empty\)/);
 });
+test('washing compatibility accepts five same-grade/size inputs and blocks a different group',()=>{const s=setup(),session={grade:'A',size:'L'};for(let i=0;i<5;i++)assert.equal(s.pwAssertWashCompatibility(session,{grade:'A',size:'L'}),true);assert.throws(()=>s.pwAssertWashCompatibility(session,{grade:'B',size:'L'}),/ابتدا تمام محصول/);assert.throws(()=>s.pwAssertWashCompatibility(session,{grade:'A',size:'S'}),/واحد را خالی/)});
+test('receiving workflow scans always produce explicit location state destination and next action',()=>{const s=setupModels();const batch=s.normalizePrototypeBatch({id:'R',supplier:'S',reference:'X',createdAt:'now',status:'در انتظار',baskets:[{id:1,code:'B1',product:'Apple',grade:'A',size:'L',gross:11,tare:1,currentLocation:'RECEIVING',currentState:'AWAITING_GATE_SCAN',destination:'COLD_ROOM_DIRTY',nextAction:'scan'}],events:[]});const cold=s.applyReceiptWorkflowScan(batch,'B1','COLD_ROOM_DIRTY');assert.equal(cold.baskets[0].currentLocation,'COLD_ROOM_DIRTY');assert.equal(cold.baskets[0].currentState,'STORED');assert.equal(cold.baskets[0].destination,'SORTING');assert.ok(cold.baskets[0].nextAction);const sorting=s.applyReceiptWorkflowScan(cold,'B1','SORTING');assert.equal(sorting.baskets[0].currentLocation,'SORTING');assert.equal(sorting.baskets[0].currentState,'IN_PROCESS');assert.equal(sorting.baskets[0].destination,null);assert.ok(sorting.events.length===2);assert.throws(()=>s.applyReceiptWorkflowScan(sorting,'B1','WASHING'))});
+test('user create and edit model validates required and unique fields and persists',()=>{const s=setupModels(),users=[];assert.ok(s.validatePrototypeUser({},users));assert.equal(s.validatePrototypeUser({name:'Test',username:'operator.one',role:'اپراتور',phone:'09121234567'},users),'');const row={id:'U1',name:'Test',username:'operator.one',role:'اپراتور',phone:'09121234567',active:true,last:'never'};s.writePrototypeUsers([row]);assert.equal(s.readPrototypeUsers()[0].username,'operator.one');assert.ok(s.validatePrototypeUser({...row,id:'U2'},[row]));assert.equal(s.validatePrototypeUser({...row,name:'Edited'},[row],'U1'),'')});
+test('shared scan simulator is reused by receiving production packaging and shipping handlers',()=>{assert.match(assembled,/function ScanSimulator/);assert.match(assembled,/اسکن سبد دریافت/);assert.match(assembled,/اسکن تأیید گذرگاه عملیاتی/);assert.match(assembled,/اسکن سبد خروجی شست‌وشو/);assert.match(assembled,/اسکن ورود بسته‌بندی/);assert.match(assembled,/اسکن بسته خروجی برای ارسال/);assert.match(assembled,/اسکنر سخت‌افزاری و شبیه‌ساز از یک اعتبارسنجی استفاده می‌کنند/)});
+test('generic ready-for-transfer status is absent and movement records have explicit operator fields',()=>{assert.doesNotMatch(assembled,/Ready for Transfer|آماده انتقال/);assert.match(assembled,/currentLocation/);assert.match(assembled,/currentState/);assert.match(assembled,/nextAction/);assert.match(source,/pwNormalizeItem/)});

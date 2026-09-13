@@ -94,6 +94,17 @@ Status: UI correction finalized in the Figma Make prototype on 2026-09-08; no ba
 
 ## UI-only change record
 
+### 2026-09-13 — User management and scan-driven workflow-state completion
+
+Status: Figma Make Version 17 finalized; UI/prototype logic only. No backend, database, API route, request/response shape, or contract was changed.
+
+- Settings > Users now uses its own persisted collection and controlled form state, validates required/unique fields, and supports create, edit, cancel, search, and active status.
+- Receipt containers and production batches are normalized with current location, current state, explicit destination when movement is pending, and a clear next operator action. The old generic transfer-ready state is migrated away and is not produced by new operations.
+- The normal path `Receiving -> Cold Storage -> Sorting` is confirmed at the operational scan gate and records location/state/history/traceability updates. Exceptional manual relocation remains a separate Inventory Movement action.
+- A single scan-simulator component now feeds the same handlers used by typed/hardware scan input in receiving and production. It is reused for production gate movement, washing output registration, packaging entry, and outbound shipping entry.
+- Optional transition weighing and delta history remain shared for Sorting entry, Washing entry, and the existing washing/slicing transition points. Washing still enforces one Grade/Size group per active multi-input session and preserves all-parent to all-output genealogy.
+- Verification: 28 prototype tests passed, 0 failed, 0 skipped; TypeScript `--noEmit` passed; Vite production build passed with 19 transformed modules. No visual test was run, per Mohamad's standing instruction.
+
 ### 2026-09-13 — Master data, movement, sorting entry, and washing session prototype
 
 Status: Figma Make Version 16 finalized; UI/prototype logic only. No backend, database, API route, request/response shape, or contract was changed.
