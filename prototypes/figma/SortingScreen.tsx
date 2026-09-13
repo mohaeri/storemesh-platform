@@ -45,10 +45,7 @@ function SortingScreen() {
     (b: any) =>
       !blocked(b) &&
       !inputCodes.includes(b.code) &&
-      b.destination === "SORTING" &&
-      /سردخانه|COLD_ROOM|COLD_STORAGE/.test(
-        b.currentLocation || b.zone || "",
-      ),
+      pwColdStorageLocation(b.currentLocation || b.zone),
   )
   const sources = inputCodes
       .map((code) => batch.baskets.find((b: any) => b.code === code))
@@ -114,7 +111,7 @@ function SortingScreen() {
       return setError("سبد اسکن‌شده برای این نوبت سورت واجد شرایط نیست.")
     if (inputCodes.includes(source.code))
       return setError("این سبد قبلاً اسکن شده است.")
-    if (!/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""))
+    if (!pwColdStorageLocation(source.currentLocation || source.zone))
       return setError(
         "سبد باید ابتدا با اسکن گیت وارد سردخانه و سپس سورتینگ شود.",
       )
@@ -144,7 +141,7 @@ function SortingScreen() {
     if (
       sources.some(
         (source: any) =>
-          !/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""),
+          !pwColdStorageLocation(source.currentLocation || source.zone),
       )
     )
       return setError(
@@ -276,7 +273,7 @@ function SortingScreen() {
           <Card className="p-4">
             <h3 className="font-bold mb-3">۱. اسکن سبدهای ورودی</h3>
             {step === "input" && (
-              <><div aria-label="سبدهای شناسایی‌شده برای سورت" className="mb-3 rounded-lg bg-[#edf8f3] p-3 text-[11px] text-[#365c4f]"><b>{eligibleSources.length} سبد در سردخانه و آماده ورود به سورت شناسایی شد.</b>{eligibleSources.length>0?<span className="block mt-1 font-mono">سبد بعدی: {eligibleSources[0].code} · {eligibleSources[0].product}</span>:<span className="block mt-1">سبد آزادی با مقصد سورتینگ وجود ندارد.</span>}</div><ScanOptionalWeighTransition
+              <><div aria-label="سبدهای شناسایی‌شده برای سورت" className="mb-3 rounded-lg bg-[#edf8f3] p-3 text-[11px] text-[#365c4f]"><b>{eligibleSources.length} سبد موجود در سردخانه و آماده ورود به سورت شناسایی شد.</b>{eligibleSources.length>0?<span className="block mt-1 font-mono">سبد بعدی: {eligibleSources[0].code} · {eligibleSources[0].product}</span>:<span className="block mt-1">سبد آزاد و قابل‌استفاده‌ای در سردخانه وجود ندارد.</span>}</div><ScanOptionalWeighTransition
                 scan={scanCode}
                 setScan={setScanCode}
                 onScan={scanInput}

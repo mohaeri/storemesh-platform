@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 type PrototypeBasket={id:number;code:string;product:string;grade:string;size:string;gross:number;tare:number;zone?:string;status?:string;currentLocation?:string;currentState?:string;destination?:string|null;nextAction?:string};
 type PrototypeBatch={id:string;supplier:string;reference:string;createdAt:string;status:string;destination?:string;baskets:PrototypeBasket[];events:{time:string;title:string;detail:string}[]};
 const PROTOTYPE_KEY="storemesh.prototype.batch";
+function prototypeColdStorageLocation(value:string|undefined|null):boolean{const location=String(value||"").trim().toUpperCase().replace(/[\s_.-]+/g,"");return location.includes("سردخانه")||location.includes("COLDROOM")||location.includes("COLDSTORAGE")}
 function normalizePrototypeBasket(b:PrototypeBasket):PrototypeBasket{const legacyWaiting="آماده"+" انتقال",location=b.currentLocation||b.zone||"RECEIVING";const waiting=b.currentState==="AWAITING_GATE_SCAN"||b.status===legacyWaiting;const state=waiting?"AWAITING_GATE_SCAN":b.currentState||b.status||"RECEIVED";const destination=waiting?(b.destination||"COLD_ROOM_DIRTY"):b.destination===undefined?(location==="RECEIVING"?"COLD_ROOM_DIRTY":null):b.destination;const nextAction=b.nextAction||(destination?`اسکن ورود به ${destination}`:"منتظر تخصیص برنامه تولید");return {...b,zone:location,status:state,currentLocation:location,currentState:state,destination,nextAction}}
 function normalizePrototypeBatch(value:PrototypeBatch):PrototypeBatch{const legacyWaiting="آماده"+" انتقال",baskets=(value.baskets||[]).map(normalizePrototypeBasket),pending=baskets.filter(b=>b.currentState==="AWAITING_GATE_SCAN"),pendingDestination=pending[0]?.destination||value.destination;return {...value,status:pending.length?`در انتظار اسکن مقصد (${pending.length})`:value.status===legacyWaiting?"موجودی ثبت‌شده":value.status,destination:pendingDestination,baskets,events:value.events||[]}}
 function readPrototypeBatch():PrototypeBatch{try{const x=localStorage.getItem(PROTOTYPE_KEY);if(x)return normalizePrototypeBatch(JSON.parse(x))}catch{} return normalizePrototypeBatch({id:"RCV-1405-0928",supplier:"گلخانه نمونه",reference:"BL-1405-091",createdAt:"امروز ۱۴:۳۰",status:"در انتظار اسکن سردخانه",destination:"COLD_ROOM_DIRTY",baskets:[{id:1,code:"TMP-7862368",product:"گوجه فرنگی",grade:"A",size:"درشت",gross:20,tare:1.28,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:"COLD_ROOM_DIRTY",nextAction:"اسکن ورود سردخانه"},{id:2,code:"BSK-0002",product:"گوجه فرنگی",grade:"A",size:"درشت",gross:20.38,tare:1.28,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:"COLD_ROOM_DIRTY",nextAction:"اسکن ورود سردخانه"},{id:3,code:"BSK-0003",product:"گوجه فرنگی",grade:"B",size:"متوسط",gross:19.12,tare:1.28,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:"COLD_ROOM_DIRTY",nextAction:"اسکن ورود سردخانه"}],events:[{time:"۱۴:۳۰",title:"ثبت محموله",detail:"ایستگاه دریافت وب"}]})}
 function writePrototypeBatch(b:PrototypeBatch){localStorage.setItem(PROTOTYPE_KEY,JSON.stringify(normalizePrototypeBatch(b)));window.dispatchEvent(new Event("storemesh-data"))}
-function applyReceiptWorkflowScan(batch:PrototypeBatch,rawCode:string,target:string):PrototypeBatch{const code=String(rawCode||"").trim().toUpperCase();if(!code)throw Error("ابتدا QR سبد را اسکن کنید.");const source=normalizePrototypeBatch(batch),basket=source.baskets.find(item=>item.code.toUpperCase()===code);if(!basket)throw Error("سبد اسکن‌شده در موجودی جاری پیدا نشد.");if(basket.destination!==target)throw Error(`مقصد مجاز این سبد ${basket.destination||"تعیین نشده"} است.`);const nextState=target==="COLD_ROOM_DIRTY"?"STORED":"IN_PROCESS";const nextDestination=target==="COLD_ROOM_DIRTY"?"SORTING":null;const nextAction=target==="COLD_ROOM_DIRTY"?"اسکن ورود سورتینگ":"تکمیل عملیات جاری";const at=new Date().toLocaleTimeString("fa-IR");return normalizePrototypeBatch({...source,baskets:source.baskets.map(item=>item.code.toUpperCase()===code?{...item,zone:target,status:nextState,currentLocation:target,currentState:nextState,destination:nextDestination,nextAction}:item),events:[...source.events,{time:at,title:"اسکن گذرگاه عملیاتی",detail:`${code} · ${basket.currentLocation} ← ${target} · اقدام بعدی: ${nextAction}`}]})}
+function applyReceiptWorkflowScan(batch:PrototypeBatch,rawCode:string,target:string):PrototypeBatch{const code=String(rawCode||"").trim().toUpperCase();if(!code)throw Error("ابتدا QR سبد را اسکن کنید.");const source=normalizePrototypeBatch(batch),basket=source.baskets.find(item=>item.code.toUpperCase()===code);if(!basket)throw Error("سبد اسکن‌شده در موجودی جاری پیدا نشد.");const sortingEntry=target==="SORTING";if(sortingEntry&&!prototypeColdStorageLocation(basket.currentLocation||basket.zone))throw Error("سبد باید پیش از ورود به سورتینگ در سردخانه ثبت شده باشد.");if(!sortingEntry&&basket.destination!==target)throw Error(`مقصد مجاز این سبد ${basket.destination||"تعیین نشده"} است.`);const stored=target==="COLD_ROOM_DIRTY"||target==="COLD_ROOM_CLEAN"||prototypeColdStorageLocation(target),nextState=stored?"STORED":"IN_PROCESS",nextDestination=null,nextAction=stored?"منتظر انتخاب برای عملیات سورتینگ":"تکمیل عملیات جاری";const at=new Date().toLocaleTimeString("fa-IR");return normalizePrototypeBatch({...source,baskets:source.baskets.map(item=>item.code.toUpperCase()===code?{...item,zone:target,status:nextState,currentLocation:target,currentState:nextState,destination:nextDestination,nextAction}:item),events:[...source.events,{time:at,title:"اسکن گذرگاه عملیاتی",detail:`${code} · ${basket.currentLocation} ← ${target} · اقدام بعدی: ${nextAction}`}]})}
 
 function ScanSimulator({open,title,suggestedCode,onClose,onScan}:{open:boolean;title:string;suggestedCode:string;onClose:()=>void;onScan:(code:string)=>void}){const [code,setCode]=useState(suggestedCode);useEffect(()=>{if(open)setCode(suggestedCode)},[open,suggestedCode]);if(!open)return null;const submit=(value:string)=>{onScan(String(value||"").trim().toUpperCase());onClose()};return <div className="fixed inset-0 z-[120] bg-[#09231dcc] flex items-center justify-center"><div className="bg-white rounded-2xl p-6 w-[480px] relative" dir="rtl"><button onClick={onClose} className="absolute left-4 top-3 text-[22px]">×</button><h3 className="font-bold text-[#18302a] mb-4">{title}</h3><div className="h-40 border-2 border-dashed border-[#29a574] rounded-xl flex flex-col items-center justify-center text-[54px]">⌗<span className="text-[12px] text-[#668078]">اسکنر سخت‌افزاری و شبیه‌ساز از یک اعتبارسنجی استفاده می‌کنند</span></div><div className="mt-4 rounded-lg bg-[#edf8f3] px-3 py-2 text-[11px] text-[#176b50]">کد پیشنهادی آماده است: <b className="font-mono">{suggestedCode||"—"}</b></div><input autoFocus value={code} onChange={e=>setCode(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")submit(code)}} className="w-full h-11 border rounded-lg px-3 mt-2 font-mono"/><button onClick={()=>submit(code||suggestedCode)} className="w-full mt-3 bg-[#176b50] text-white rounded-lg py-3 text-[12px] font-bold">اسکن کد پیشنهادی</button></div></div>}
 
@@ -333,7 +334,7 @@ function ReceivingScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
   const total=baskets.reduce((sum,b)=>sum+b.gross-b.tare,0);
   const acceptContainerScan=(code:string)=>{if(!code)return;if(baskets.some(item=>item.code.toUpperCase()===code.toUpperCase()))return;setContainerCode(code.toUpperCase());setGross(24.68)};
   const addBasket=()=>{if(!containerCode||gross<=0)return;setBaskets([...baskets,{id:baskets.length+1,code:containerCode,product,grade,size,gross,tare}]);setContainerCode("");setGross(0);setTare(1.28)};
-  const destinationNames:Record<string,string>={COLD_ROOM_DIRTY:"سردخانه کثیف",QUARANTINE:"قرنطینه / QC",SORTING:"سورتینگ"};
+  const destinationNames:Record<string,string>={COLD_ROOM_DIRTY:"سردخانه کثیف",QUARANTINE:"قرنطینه / QC"};
   const makePendingBatch=(target:string):PrototypeBatch=>{const id="RCV-"+String(Date.now()).slice(-8),at=new Date().toLocaleTimeString("fa-IR");return normalizePrototypeBatch({id,supplier,reference,createdAt:at,status:`در انتظار اجرای مقصد ${destinationNames[target]}`,destination:target,baskets:baskets.map(b=>({...b,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:target,nextAction:`اسکن ورود به ${destinationNames[target]}`})),events:[{time:at,title:"دریافت و توزین تکمیل شد",detail:`${supplier} · ${baskets.length} ظرف · مقصد انتخابی ${destinationNames[target]}`}]})};
   const startDispatch=()=>{if(!destination)return;const pending=makePendingBatch(destination);setTransferError("");setTransferBatch(pending);if(moveMode==="batch"){let completed=pending;for(const basket of pending.baskets)completed=applyReceiptWorkflowScan(completed,basket.code,destination);completed={...completed,status:`تحویل‌شده به ${destinationNames[destination]}`,events:[...completed.events,{time:new Date().toLocaleTimeString("fa-IR"),title:"انتقال یکجای بچ",detail:`کل ${baskets.length} ظرف در مقصد ${destinationNames[destination]} ثبت شد`} ]};writePrototypeBatch(completed);setTransferBatch(completed);setMovedCodes(completed.baskets.map(item=>item.code));setStage("done");return}writePrototypeBatch(pending);setDispatchStarted(true)};
   const scanDestination=(code:string)=>{if(!transferBatch)return;try{const updated=applyReceiptWorkflowScan(transferBatch,code,destination),nextMoved=[...movedCodes,code.toUpperCase()];writePrototypeBatch(updated);setTransferBatch(updated);setMovedCodes(nextMoved);setTransferError("");if(nextMoved.length===baskets.length){const completed={...updated,status:`تحویل‌شده به ${destinationNames[destination]}`,events:[...updated.events,{time:new Date().toLocaleTimeString("fa-IR"),title:"انتقال اسکن‌شده کامل شد",detail:`هر ${baskets.length} ظرف در مقصد ${destinationNames[destination]} تأیید شد`} ]};writePrototypeBatch(completed);setTransferBatch(completed);setStage("done")}}catch(failure:any){setTransferError(failure.message)}};
@@ -406,6 +407,7 @@ type PWLedger = {
 }
 const PW_STORAGE = "storemesh.prototype.production.v1"
 const PW_ACTIVE = ["READY", "RUNNING", "IN_PROGRESS", "PAUSED", "COMPLETING"]
+function pwColdStorageLocation(value:string|undefined|null):boolean{const location=String(value||"").trim().toUpperCase().replace(/[\s_.-]+/g,"");return location.includes("سردخانه")||location.includes("COLDROOM")||location.includes("COLDSTORAGE")}
 const PW_ZONES: Record<string, string> = {
   SORTING: "سورتینگ",
   WASHING: "شست‌وشو",
@@ -2591,10 +2593,7 @@ function SortingScreen() {
     (b: any) =>
       !blocked(b) &&
       !inputCodes.includes(b.code) &&
-      b.destination === "SORTING" &&
-      /سردخانه|COLD_ROOM|COLD_STORAGE/.test(
-        b.currentLocation || b.zone || "",
-      ),
+      pwColdStorageLocation(b.currentLocation || b.zone),
   )
   const sources = inputCodes
       .map((code) => batch.baskets.find((b: any) => b.code === code))
@@ -2660,7 +2659,7 @@ function SortingScreen() {
       return setError("سبد اسکن‌شده برای این نوبت سورت واجد شرایط نیست.")
     if (inputCodes.includes(source.code))
       return setError("این سبد قبلاً اسکن شده است.")
-    if (!/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""))
+    if (!pwColdStorageLocation(source.currentLocation || source.zone))
       return setError(
         "سبد باید ابتدا با اسکن گیت وارد سردخانه و سپس سورتینگ شود.",
       )
@@ -2690,7 +2689,7 @@ function SortingScreen() {
     if (
       sources.some(
         (source: any) =>
-          !/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""),
+          !pwColdStorageLocation(source.currentLocation || source.zone),
       )
     )
       return setError(
@@ -2822,7 +2821,7 @@ function SortingScreen() {
           <Card className="p-4">
             <h3 className="font-bold mb-3">۱. اسکن سبدهای ورودی</h3>
             {step === "input" && (
-              <><div aria-label="سبدهای شناسایی‌شده برای سورت" className="mb-3 rounded-lg bg-[#edf8f3] p-3 text-[11px] text-[#365c4f]"><b>{eligibleSources.length} سبد در سردخانه و آماده ورود به سورت شناسایی شد.</b>{eligibleSources.length>0?<span className="block mt-1 font-mono">سبد بعدی: {eligibleSources[0].code} · {eligibleSources[0].product}</span>:<span className="block mt-1">سبد آزادی با مقصد سورتینگ وجود ندارد.</span>}</div><ScanOptionalWeighTransition
+              <><div aria-label="سبدهای شناسایی‌شده برای سورت" className="mb-3 rounded-lg bg-[#edf8f3] p-3 text-[11px] text-[#365c4f]"><b>{eligibleSources.length} سبد موجود در سردخانه و آماده ورود به سورت شناسایی شد.</b>{eligibleSources.length>0?<span className="block mt-1 font-mono">سبد بعدی: {eligibleSources[0].code} · {eligibleSources[0].product}</span>:<span className="block mt-1">سبد آزاد و قابل‌استفاده‌ای در سردخانه وجود ندارد.</span>}</div><ScanOptionalWeighTransition
                 scan={scanCode}
                 setScan={setScanCode}
                 onScan={scanInput}

@@ -16,7 +16,8 @@ Last updated: 2026-09-13
 
 ### 2026-09-13 — Receiving-to-Sorting discovery (UI only)
 
-- Sorting now derives its visible eligible-input queue from the same persisted receiving batch: the basket must be unconsumed, physically located in a cold-room zone, and have `SORTING` as its explicit next destination.
+- Correction: Sorting now derives its visible eligible-input queue from the same persisted receiving batch based on actual physical cold-room location, not a synthetic `SORTING` destination written by Receiving. Persian cold-room display names and canonical `COLD_ROOM`/`COLD_STORAGE` identifiers are normalized by the same predicate.
+- Receiving no longer offers Sorting as a destination. Once the cold-room handoff is complete, the basket is stored with no pending movement destination; entering Sorting is initiated and recorded by the Sorting scan itself.
 - The screen shows the number and next code of recognized baskets. Its shared scan simulator pre-fills that next eligible code and sends it through the same transition validator as hardware/manual scanning.
 - Backend/API/contract/database impact: none. No backend repository was changed.
 

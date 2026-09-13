@@ -32,6 +32,7 @@ type PWLedger = {
 }
 const PW_STORAGE = "storemesh.prototype.production.v1"
 const PW_ACTIVE = ["READY", "RUNNING", "IN_PROGRESS", "PAUSED", "COMPLETING"]
+function pwColdStorageLocation(value:string|undefined|null):boolean{const location=String(value||"").trim().toUpperCase().replace(/[\s_.-]+/g,"");return location.includes("سردخانه")||location.includes("COLDROOM")||location.includes("COLDSTORAGE")}
 const PW_ZONES: Record<string, string> = {
   SORTING: "سورتینگ",
   WASHING: "شست‌وشو",
@@ -383,7 +384,7 @@ function recordSortingOutputs(
   if (
     sources.some(
       (source: any) =>
-        !/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""),
+        !pwColdStorageLocation(source.currentLocation || source.zone),
     )
   )
     throw Error("همه ورودی‌ها باید در سردخانه باشند.")

@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source installed in Figma Make as Version 19 on 2026-09-13.
+This folder keeps the reproducible source installed in Figma Make as Version 20 on 2026-09-13.
 
 ## What is included
 
@@ -22,7 +22,7 @@ node --test prototypes/figma/production.test.mjs
 
 The assembled source must also pass the downloaded Figma project's TypeScript check and `pnpm build` before it is installed through the Figma Make code editor.
 
-Version 19 keeps the existing visual design and closes the Receiving-to-Sorting discovery gap. Sorting now explicitly lists eligible baskets whose current location is a cold room and whose next destination is Sorting, and its shared scan simulator automatically proposes the next eligible basket code. The same scan validation still performs the physical transition into Sorting. Version 18 receiving destination selection and same-page batch/per-basket handoff remains intact.
+Version 20 corrects the Receiving-to-Sorting boundary without redesigning the UI. Receiving can hand off only to storage/quarantine destinations and never offers Sorting as a receiving destination. Sorting discovers available baskets from their physical cold-room location, normalizing both Persian display names and canonical `COLD_ROOM`/`COLD_STORAGE` identifiers, and then performs the Sorting entry transition through the shared scan handler. Version 18 receiving destination selection and same-page batch/per-basket handoff remains intact.
 
 ## Scope boundary
 
