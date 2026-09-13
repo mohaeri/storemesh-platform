@@ -1,6 +1,6 @@
 # UI / Backend Change Control
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 ## Standing rule
 
@@ -13,6 +13,14 @@ Last updated: 2026-09-12
 - Finalized documentation changes must be committed and pushed. Unrelated local changes must not be included.
 
 ## Open UI/backend alignment notes
+
+### 2026-09-13 — Receiving destination and in-flow handoff (UI only)
+
+- Receiving now asks for the direct destination after shipment review and before completion.
+- The operator can confirm movement of the complete batch or scan baskets one by one in the same Receiving flow. The Inventory page is an optional trace view and is no longer required to complete normal movement.
+- Every completed basket records its location, state, destination/next route, operator action, and movement event immediately.
+- The shared scan simulator refreshes its suggested value on every open and pre-fills the next basket code; manual hardware-style entry and simulated scanning still invoke the same validation handler.
+- Backend/API/contract/database impact: none. This is browser-local prototype behavior only; no backend repository was changed.
 
 ### 2026-09-11 — Multi-input Sorting, operator routing, and exact genealogy
 

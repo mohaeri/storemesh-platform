@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source installed in Figma Make as Version 17 on 2026-09-13.
+This folder keeps the reproducible source installed in Figma Make as Version 18 on 2026-09-13.
 
 ## What is included
 
@@ -22,7 +22,7 @@ node --test prototypes/figma/production.test.mjs
 
 The assembled source must also pass the downloaded Figma project's TypeScript check and `pnpm build` before it is installed through the Figma Make code editor.
 
-Version 17 keeps the existing visual design and completes the shared interaction model. Users now has validated persisted create/edit/cancel behavior; receiving inventory uses explicit current location, state, destination, and next operator action; the receiving-to-cold-room-to-sorting path is confirmed by scan rather than a generic transfer state. One scan simulator is reused by receiving, production movement, washing output, packaging, and shipping, and simulator/hardware entry call the same validators. Production items are normalized on every read/write so movement metadata cannot silently disappear. Version 16 master-data, sorting, optional weighing, and multi-input/multi-output washing behavior remains intact.
+Version 18 keeps the existing visual design and corrects the receiving handoff. After review, the operator selects the destination and either moves the complete batch with one confirmation or scans every basket at the destination without leaving Receiving. Inventory remains an optional trace view rather than a required transfer step. The shared scan simulator refreshes and pre-fills its suggested basket code every time it opens, while hardware and simulator input still use the same handler. Version 17 users, master-data, production routing, optional weighing, and multi-input/multi-output washing behavior remains intact.
 
 ## Scope boundary
 
