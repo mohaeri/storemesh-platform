@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source installed in Figma Make as Version 15 on 2026-09-13.
+This folder keeps the reproducible source installed in Figma Make as Version 16 on 2026-09-13.
 
 ## What is included
 
@@ -22,10 +22,10 @@ node --test prototypes/figma/production.test.mjs
 
 The assembled source must also pass the downloaded Figma project's TypeScript check and `pnpm build` before it is installed through the Figma Make code editor.
 
-Version 15 removes the Control Tower screen, constrains every section sub-navigation to the main-content column, opens the receiving-batch detail popover upward, keeps the production-inventory region inside the viewport, and removes demo/reload/role controls from Production while preserving one continuous browser-session workflow.
+Version 16 adds independent persisted master-data collections and working create/edit/status controls, excludes inactive products from new receiving operations while retaining stored history, and drives grade/size choices from each product. It removes normal internal transfer from Shipping, adds an explicitly exceptional Inventory Movement workflow, makes sorting input scan-driven with optional transition weighing and weight-delta history, and models washing as a compatible multi-input/multi-output session with complete parent genealogy and an explicit empty-unit completion gate.
 
 ## Scope boundary
 
-This is a browser-local interactive prototype. Its production records are saved in `localStorage` under `storemesh.prototype.production.v1`. It neither calls StoreMesh APIs nor controls factory equipment. The behavior alignment and known differences from the current backend are recorded in `docs/ui-backend-change-control.md`.
+This is a browser-local interactive prototype. Its production records are saved in `localStorage` under `storemesh.prototype.production.v1`, and its independent master-data records under `storemesh.prototype.master-data.v1`. It neither calls StoreMesh APIs nor controls factory equipment. The behavior alignment and known differences from the current backend are recorded in `docs/ui-backend-change-control.md`.
 
 Figma Make file: https://www.figma.com/make/eOUgDgsvoVyRJn5ZB1SHqX/Interactive-Product-Prototype?p=f

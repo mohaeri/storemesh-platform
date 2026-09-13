@@ -5,12 +5,31 @@ const PROTOTYPE_KEY="storemesh.prototype.batch";
 function readPrototypeBatch():PrototypeBatch{try{const x=localStorage.getItem(PROTOTYPE_KEY);if(x)return JSON.parse(x)}catch{} return {id:"RCV-1405-0928",supplier:"گلخانه نمونه",reference:"BL-1405-091",createdAt:"امروز ۱۴:۳۰",status:"آماده انتقال",baskets:[{id:1,code:"TMP-7862368",product:"گوجه فرنگی",grade:"A",size:"درشت",gross:20,tare:1.28},{id:2,code:"BSK-0002",product:"گوجه فرنگی",grade:"A",size:"درشت",gross:20.38,tare:1.28},{id:3,code:"BSK-0003",product:"گوجه فرنگی",grade:"B",size:"متوسط",gross:19.12,tare:1.28}],events:[{time:"۱۴:۳۰",title:"ثبت محموله",detail:"ایستگاه دریافت وب"}]}}
 function writePrototypeBatch(b:PrototypeBatch){localStorage.setItem(PROTOTYPE_KEY,JSON.stringify(b));window.dispatchEvent(new Event("storemesh-data"))}
 
+type MasterProduct={id:string;code:string;name:string;category:string;grades:string[];sizes:string[];active:boolean};
+type MasterParty={id:string;code:string;name:string;contact:string;active:boolean};
+type MasterWarehouse={id:string;code:string;name:string;location:string;active:boolean};
+type MasterDataState={products:MasterProduct[];suppliers:MasterParty[];customers:MasterParty[];warehouses:MasterWarehouse[]};
+const MASTER_DATA_KEY="storemesh.prototype.master-data.v1";
+const MASTER_DATA_DEFAULT:MasterDataState={
+  products:[
+    {id:"P1",code:"PRD-001",name:"سیب قرمز",category:"میوه",grades:["ممتاز","درجه یک","درجه دو"],sizes:["۶۰–۷۰","۷۰–۸۰","۸۰+"],active:true},
+    {id:"P2",code:"PRD-002",name:"پرتقال تامسون",category:"میوه",grades:["صادراتی","درجه یک"],sizes:["متوسط","درشت"],active:true},
+    {id:"P3",code:"PRD-003",name:"کیوی هایوارد",category:"میوه",grades:["صادراتی","درجه یک"],sizes:["۲۷–۳۰","۳۰–۳۳","۳۳+"],active:true},
+    {id:"P4",code:"PRD-004",name:"بادمجان",category:"سبزیجات",grades:["A","B"],sizes:["درشت","متوسط"],active:false}
+  ],
+  suppliers:[{id:"S1",code:"SUP-001",name:"باغداری سبز شمال",contact:"۰۱۱-۳۳۴۴۵۵۶۶",active:true},{id:"S2",code:"SUP-002",name:"تعاونی کشاورزی دماوند",contact:"۰۲۱-۷۶۳۲۱۰۰۰",active:true}],
+  customers:[{id:"C1",code:"CUS-001",name:"فروشگاه زنجیره‌ای نمونه",contact:"۰۲۱-۸۸۸۸۰۰۰۰",active:true},{id:"C2",code:"CUS-002",name:"صادرات سبز",contact:"۰۲۱-۸۸۰۰۱۱۲۲",active:true}],
+  warehouses:[{id:"W1",code:"WH-001",name:"سردخانه مرکزی",location:"سایت ایران · سالن ۱",active:true},{id:"W2",code:"WH-002",name:"انبار محصول نهایی",location:"سایت ایران · سالن ۳",active:true}]
+};
+function readMasterData():MasterDataState{try{const raw=localStorage.getItem(MASTER_DATA_KEY);if(raw){const value=JSON.parse(raw);if(value&&Array.isArray(value.products)&&Array.isArray(value.suppliers)&&Array.isArray(value.customers)&&Array.isArray(value.warehouses))return value}}catch{}return MASTER_DATA_DEFAULT}
+function writeMasterData(value:MasterDataState){localStorage.setItem(MASTER_DATA_KEY,JSON.stringify(value));window.dispatchEvent(new Event("storemesh-master-data"))}
+
 
 type WebScreen =
   | "dashboard" | "receiving" | "containers"
   | "inventory" | "production" | "fresh-export"
   | "quality" | "packaging" | "consumables"
-  | "shipments" | "transfers" | "tasks"
+  | "shipments" | "inventory-movement" | "tasks"
   | "printing" | "trace" | "config"
   | "master-data" | "users" | "overrides"
   | "audit" | "cloud" | "system";
@@ -18,11 +37,11 @@ type WebScreen =
 const sidebarSections: { label: string; item: string; screens: WebScreen[] }[] = [
   { label: "داشبورد", item: "dashboard", screens: ["dashboard"] },
   { label: "دریافت", item: "receiving", screens: ["receiving", "containers"] },
-  { label: "موجودی", item: "inventory", screens: ["inventory"] },
+  { label: "موجودی", item: "inventory", screens: ["inventory", "inventory-movement"] },
   { label: "تولید", item: "production", screens: ["production", "fresh-export"] },
   { label: "کیفیت", item: "quality", screens: ["quality"] },
   { label: "بسته‌بندی", item: "packaging", screens: ["packaging", "consumables"] },
-  { label: "ارسال", item: "shipments", screens: ["shipments", "transfers"] },
+  { label: "ارسال", item: "shipments", screens: ["shipments"] },
   { label: "رهگیری", item: "trace", screens: ["trace", "tasks", "printing"] },
   { label: "تنظیمات", item: "config", screens: ["config", "master-data", "users", "overrides", "audit", "cloud", "system"] },
 ];
@@ -31,7 +50,7 @@ const subScreenLabels: Partial<Record<WebScreen, string>> = {
   receiving: "دریافت", containers: "کانتینرها",
   production: "تولید", "fresh-export": "صادرات تازه",
   packaging: "بسته‌بندی", consumables: "اقلام مصرفی",
-  shipments: "ارسال‌ها", transfers: "انتقال",
+  shipments: "ارسال‌ها", "inventory-movement": "جابجایی استثنایی",
   trace: "رهگیری", tasks: "کارها", printing: "چاپ و لیبل",
   config: "تنظیمات", "master-data": "داده‌های پایه", users: "کاربران",
   overrides: "لغو تصمیمات", audit: "حسابرسی", cloud: "ابری", system: "سیستم",
@@ -273,36 +292,35 @@ function DashboardScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
 type ReceivingBasket = { id:number; code:string; product:string; grade:string; size:string; gross:number; tare:number };
 
 function ReceivingScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
+  const master=readMasterData();
+  const activeProducts=master.products.filter(item=>item.active);
+  const options:Record<string,{grades:string[];sizes:string[]}>=Object.fromEntries(activeProducts.map(item=>[item.name,{grades:item.grades,sizes:item.sizes}]));
+  const initialProduct=activeProducts[0]?.name||"";
   const [stage,setStage]=useState<"setup"|"capture"|"review"|"done">("setup");
   const [supplier,setSupplier]=useState("");
   const [reference,setReference]=useState("");
   const [expected,setExpected]=useState(10);
   const [containerCode,setContainerCode]=useState("");
-  const [product,setProduct]=useState("سیب قرمز");
-  const [grade,setGrade]=useState("ممتاز");
-  const [size,setSize]=useState("۷۰–۸۰");
+  const [product,setProduct]=useState(initialProduct);
+  const [grade,setGrade]=useState(options[initialProduct]?.grades[0]||"");
+  const [size,setSize]=useState(options[initialProduct]?.sizes[0]||"");
   const [gross,setGross]=useState(24.68);
   const [tare,setTare]=useState(1.28);
   const [baskets,setBaskets]=useState<ReceivingBasket[]>([]);
   const [scanOpen,setScanOpen]=useState(false);
   const [createOpen,setCreateOpen]=useState(false);
   const [generatedCode,setGeneratedCode]=useState("");
-  const options:Record<string,{grades:string[];sizes:string[]}>= {
-    "سیب قرمز":{grades:["ممتاز","درجه یک","درجه دو"],sizes:["۶۰–۷۰","۷۰–۸۰","۸۰+"]},
-    "پرتقال تامسون":{grades:["صادراتی","درجه یک"],sizes:["متوسط","درشت"]},
-    "کیوی هایوارد":{grades:["صادراتی","درجه یک"],sizes:["۲۷–۳۰","۳۰–۳۳","۳۳+"]}
-  };
   const net=Math.max(0,gross-tare);
   const total=baskets.reduce((sum,b)=>sum+b.gross-b.tare,0);
   const addBasket=()=>{if(!containerCode||gross<=0)return;setBaskets([...baskets,{id:baskets.length+1,code:containerCode,product,grade,size,gross,tare}]);setContainerCode("");setGross(0);setTare(1.28)};
   const selectClass="w-full h-11 rounded-lg border border-[#d9e3de] bg-white px-3 text-[12px] text-[#18302a] outline-none focus:border-[#176b50]";
 
-  if(stage==="done") return <div className="flex-1 bg-[#f4f7f5] p-8 overflow-auto" dir="rtl"><Card className="max-w-3xl mx-auto mt-16 p-10 text-center"><div className="w-16 h-16 rounded-full bg-[#176b50] text-white text-[34px] flex items-center justify-center mx-auto mb-4">✓</div><h2 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[24px]">محموله تکمیل شد</h2><p className="text-[#718079] text-[13px] mt-2">بچ دریافت از داده‌های همین فرم ساخته شد و وظیفه انتقال داخلی در صف عملیات قرار گرفت.</p><div className="grid grid-cols-3 gap-3 my-7"><div className="bg-[#f1f6f3] rounded-xl p-4"><small className="block text-[#718079]">تعداد ظروف</small><b>{baskets.length}</b></div><div className="bg-[#f1f6f3] rounded-xl p-4"><small className="block text-[#718079]">وزن خالص</small><b>{total.toFixed(2)} kg</b></div><div className="bg-[#f1f6f3] rounded-xl p-4"><small className="block text-[#718079]">وضعیت</small><b className="text-[#176b50]">آماده انتقال</b></div></div><div className="flex justify-center gap-2"><button onClick={()=>navigate("transfers")} className="bg-[#176b50] text-white rounded-lg px-6 h-11 text-[12px] font-bold">باز کردن مرکز انتقال</button><button onClick={()=>{setStage("setup");setBaskets([])}} className="border border-[#d8e4df] rounded-lg px-5 h-11 text-[12px]">دریافت محموله جدید</button></div></Card></div>;
+  if(stage==="done") return <div className="flex-1 bg-[#f4f7f5] p-8 overflow-auto" dir="rtl"><Card className="max-w-3xl mx-auto mt-16 p-10 text-center"><div className="w-16 h-16 rounded-full bg-[#176b50] text-white text-[34px] flex items-center justify-center mx-auto mb-4">✓</div><h2 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[24px]">محموله تکمیل شد</h2><p className="text-[#718079] text-[13px] mt-2">سبدها در «دریافت» ثبت شدند. مقصد عملیاتی بعدی: سردخانه کثیف؛ اسکن گیت، موجودی و رهگیری را هم‌زمان به‌روزرسانی می‌کند.</p><div className="grid grid-cols-3 gap-3 my-7"><div className="bg-[#f1f6f3] rounded-xl p-4"><small className="block text-[#718079]">تعداد ظروف</small><b>{baskets.length}</b></div><div className="bg-[#f1f6f3] rounded-xl p-4"><small className="block text-[#718079]">وزن خالص</small><b>{total.toFixed(2)} kg</b></div><div className="bg-[#f1f6f3] rounded-xl p-4"><small className="block text-[#718079]">مرحله بعد</small><b className="text-[#176b50]">اسکن ورود سردخانه</b></div></div><div className="flex justify-center gap-2"><button onClick={()=>navigate("inventory")} className="bg-[#176b50] text-white rounded-lg px-6 h-11 text-[12px] font-bold">مشاهده موجودی و مسیر</button><button onClick={()=>{setStage("setup");setBaskets([])}} className="border border-[#d8e4df] rounded-lg px-5 h-11 text-[12px]">دریافت محموله جدید</button></div></Card></div>;
 
   return <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl">
     <div className="flex items-start justify-between mb-4"><div><p className="text-[#176b50] text-[11px] font-bold">دریافت · {stage==="setup"?"محموله جدید":reference||"محموله جاری"}</p><h2 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[22px]">{stage==="setup"?"تعریف محموله ورودی":stage==="review"?"بازبینی و تکمیل محموله":"ثبت و توزین ظروف"}</h2><p className="font-['Vazirmatn:Regular',sans-serif] text-[#718079] text-[13px]">{stage==="setup"?"اطلاعات بار را ثبت کنید؛ سپس ظروف را یکی‌یکی اسکن و توزین کنید.":supplier+" · پیشرفت "+baskets.length+" از "+expected+" ظرف"}</p></div><Badge text={stage==="setup"?"مرحله ۱ از ۳":stage==="capture"?"مرحله ۲ از ۳":"مرحله ۳ از ۳"} color="#176b50" bg="#e1f2eb" /></div>
 
-    {stage==="setup"&&<Card className="p-5"><h4 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[14px] mb-4">مشخصات محموله</h4><div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-bold text-[#435a52]">تأمین‌کننده<select className={selectClass} value={supplier} onChange={e=>setSupplier(e.target.value)}><option value="">انتخاب تأمین‌کننده…</option><option>باغداری سبز شمال</option><option>تعاونی کشاورزی دماوند</option><option>شرکت کشت البرز</option></select></label><label className="text-[11px] font-bold text-[#435a52]">شماره بارنامه / مرجع<input className={selectClass} value={reference} onChange={e=>setReference(e.target.value)} placeholder="مثلاً BL-1405-091" /></label><label className="text-[11px] font-bold text-[#435a52]">تعداد ظرف مورد انتظار<input type="number" className={selectClass} value={expected} onChange={e=>setExpected(Number(e.target.value))}/></label></div><div className="bg-[#edf8f3] rounded-xl p-4 mt-4 text-[12px] text-[#365c4f]"><b className="block mb-1">چرخه ثبت چندظرفی</b>برای هر ظرف، QR و وزن جداگانه ثبت می‌شود. «ثبت ظرف و ادامه» سطر جدید می‌سازد و فرم را برای ظرف بعدی آماده می‌کند.</div><div className="flex justify-end mt-4"><button disabled={!supplier} onClick={()=>setStage("capture")} className="bg-[#176b50] disabled:opacity-40 text-white rounded-lg px-6 h-11 text-[12px] font-bold">شروع ثبت ظروف ←</button></div></Card>}
+    {stage==="setup"&&<Card className="p-5"><h4 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[14px] mb-4">مشخصات محموله</h4><div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-bold text-[#435a52]">تأمین‌کننده<select className={selectClass} value={supplier} onChange={e=>setSupplier(e.target.value)}><option value="">انتخاب تأمین‌کننده…</option>{master.suppliers.filter(item=>item.active).map(item=><option key={item.id}>{item.name}</option>)}</select></label><label className="text-[11px] font-bold text-[#435a52]">شماره بارنامه / مرجع<input className={selectClass} value={reference} onChange={e=>setReference(e.target.value)} placeholder="مثلاً BL-1405-091" /></label><label className="text-[11px] font-bold text-[#435a52]">تعداد ظرف مورد انتظار<input type="number" className={selectClass} value={expected} onChange={e=>setExpected(Number(e.target.value))}/></label></div><div className="bg-[#edf8f3] rounded-xl p-4 mt-4 text-[12px] text-[#365c4f]"><b className="block mb-1">چرخه ثبت چندظرفی</b>برای هر ظرف، QR و وزن جداگانه ثبت می‌شود. «ثبت ظرف و ادامه» سطر جدید می‌سازد و فرم را برای ظرف بعدی آماده می‌کند.</div><div className="flex justify-end mt-4"><button disabled={!supplier||!activeProducts.length} onClick={()=>setStage("capture")} className="bg-[#176b50] disabled:opacity-40 text-white rounded-lg px-6 h-11 text-[12px] font-bold">شروع ثبت ظروف ←</button></div>{!activeProducts.length&&<p role="alert" className="mt-3 text-[#a43838] text-[11px]">هیچ محصول فعالی برای عملیات جدید وجود ندارد.</p>}</Card>}
 
     {stage==="capture"&&<><div className="grid grid-cols-[1.35fr_.65fr] gap-4"><Card className="p-4"><div className="flex items-center justify-between mb-3"><h4 className="font-bold text-[#18302a] text-[13px]">۱. شناسایی ظرف</h4><Badge text={(baskets.length+1)+" / "+expected} color="#176b50" bg="#e1f2eb" /></div><div className="flex gap-2"><input className={selectClass} value={containerCode} onChange={e=>setContainerCode(e.target.value)} placeholder="کد ظرف یا QR"/><button onClick={()=>setScanOpen(true)} className="shrink-0 bg-[#176b50] text-white rounded-lg px-4 text-[12px] font-bold">⌗ اسکن QR</button></div><button onClick={()=>setCreateOpen(true)} className="mt-2 border border-dashed border-[#42a981] text-[#176b50] rounded-lg px-3 py-2 text-[11px]">＋ ساخت ظرف یک‌بارمصرف و چاپ QR</button><h4 className="font-bold text-[#18302a] text-[13px] mt-5 mb-3">۲. مشخصات محصول</h4><div className="grid grid-cols-3 gap-2"><label className="text-[11px] font-bold">محصول<select className={selectClass} value={product} onChange={e=>{const v=e.target.value;setProduct(v);setGrade(options[v].grades[0]);setSize(options[v].sizes[0])}}>{Object.keys(options).map(v=><option key={v}>{v}</option>)}</select></label><label className="text-[11px] font-bold">گرید اظهارشده / اولیه<select className={selectClass} value={grade} onChange={e=>setGrade(e.target.value)}>{options[product].grades.map(v=><option key={v}>{v}</option>)}</select></label><label className="text-[11px] font-bold">اندازه اظهارشده / اولیه<select className={selectClass} value={size} onChange={e=>setSize(e.target.value)}>{options[product].sizes.map(v=><option key={v}>{v}</option>)}</select></label></div></Card><div className="rounded-2xl bg-[#102f29] text-white p-5 shadow-lg"><div className="flex justify-between text-[11px]"><span><i className="inline-block w-2 h-2 bg-[#55d69a] rounded-full ml-1"/>ترازوی ورودی ۰۱</span><b className="text-[#67e5a9]">متصل · پایدار</b></div><div className="text-center text-[34px] mt-4">⚖</div><small className="block text-center text-[#a8c2b8]">وزن ناخالص روی لودسل</small><strong className="block text-center text-[38px] font-mono my-1">{gross.toFixed(3)} <i className="text-[13px] not-italic">kg</i></strong><div className="border-y border-white/15 py-2 mt-3"><label className="flex items-center justify-between text-[11px]">وزن ظرف (Tare)<input type="number" step="0.01" value={tare} onChange={e=>setTare(Number(e.target.value))} className="w-24 bg-[#1a493d] border border-[#397064] rounded-md p-1 text-white"/></label><div className="flex justify-between text-[11px] mt-2"><span>وزن خالص</span><b>{net.toFixed(3)} kg</b></div></div><div className="text-[#67e5a9] text-[11px] text-center my-3">✓ قرائت پایدار · همین حالا</div><button onClick={()=>setGross(24.5+Math.random())} className="w-full bg-[#23594b] border border-[#4c796d] rounded-lg py-2 text-[11px]">↻ دریافت مجدد از لودسل</button></div></div><div className="bg-white rounded-xl border border-[#dce5e0] p-3 flex gap-2 mt-4"><button onClick={()=>setStage("setup")} className="bg-[#edf2ef] rounded-lg px-4 py-2 text-[11px]">بازگشت</button><button disabled={!containerCode||gross<=0} onClick={addBasket} className="bg-[#176b50] disabled:opacity-40 text-white rounded-lg px-5 py-2 text-[11px] font-bold">ثبت ظرف و ادامه</button><button disabled={!baskets.length} onClick={()=>setStage("review")} className="bg-[#133a31] disabled:opacity-40 text-white rounded-lg px-5 py-2 text-[11px] font-bold">بازبینی محموله</button></div></>}
 
@@ -326,309 +344,2749 @@ function ContainersScreen(){const STORE="storemesh.prototype.containers";const i
 }
 // BEGIN PRODUCTION WORKSPACE
 // UI-only Figma Make simulation. Paste into WebApp.tsx; useState and SortingScreen are supplied there.
-type PWItem = { id: string; code: string; parentId: string; inputCodes: string[]; product: string; grade: string; size: string; weightKg: number; stage: string; zone: string; destination: string | null; containerCode: string; trays: any[]; allocated: boolean; consumed: boolean; blocked: boolean; [key: string]: any };
-type PWLedger = { version: number; seq: number; idSeq: number; items: PWItem[]; cycles: any[]; events: any[]; consumedInputs: string[]; machines: Record<string, string[]>; storageError?: string };
-const PW_STORAGE = "storemesh.prototype.production.v1";
-const PW_ACTIVE = ["READY", "RUNNING", "IN_PROGRESS", "PAUSED", "COMPLETING"];
-const PW_ZONES: Record<string, string> = { SORTING: "سورتینگ", WASHING: "شست‌وشو", SLICING: "اسلایس", FREEZING: "فریز", FREEZE_DRYING: "فریزدرای", DRYING: "خشک‌کن", FRESH_EXPORT: "ارسال تازه", COLD_ROOM_CLEAN: "سردخانه تمیز", COLD_ROOM_DIRTY: "سردخانه کثیف", PACKAGING: "بسته‌بندی", QC: "کیفیت", WASTE: "ضایعات" };
-const PW_STAGES: Record<string, string> = { SORTED: "سورت‌شده", WASHED: "شسته‌شده", SLICED: "اسلایس‌شده", FROZEN: "منجمد", FREEZE_DRIED: "فریزدرای‌شده", DRIED: "خشک‌شده", CONSUMED: "مصرف‌شده", WASTED: "ضایعات", READY: "آماده", RUNNING: "در حال اجرا", IN_PROGRESS: "در حال اجرا", PAUSED: "مکث", COMPLETING: "آماده تخلیه", COMPLETED: "تکمیل", FAILED: "خرابی", CANCELLED: "لغوشده", SCRAPPED: "اسقاط" };
-const pwNumber = (n: any) => Number(Number(n || 0).toFixed(3));
-const pwCode = (value: any) => String(value ?? "").trim().toUpperCase();
-const PW_DEFAULT_MACHINES: Record<string, string[]> = { FREEZE: ["FRZ-01"], FREEZE_DRY: ["FD-01"], DRY: ["DRY-01"] };
-const pwEmpty = (): PWLedger => ({ version: 1, seq: 0, idSeq: 0, items: [], cycles: [], events: [], consumedInputs: [], machines: { ...PW_DEFAULT_MACHINES } });
+type PWItem = {
+  id: string
+  code: string
+  parentId: string
+  inputCodes: string[]
+  product: string
+  grade: string
+  size: string
+  weightKg: number
+  stage: string
+  zone: string
+  destination: string | null
+  containerCode: string
+  trays: any[]
+  allocated: boolean
+  consumed: boolean
+  blocked: boolean
+  [key: string]: any
+}
+type PWLedger = {
+  version: number
+  seq: number
+  idSeq: number
+  items: PWItem[]
+  cycles: any[]
+  washSessions: any[]
+  events: any[]
+  consumedInputs: string[]
+  machines: Record<string, string[]>
+  storageError?: string
+}
+const PW_STORAGE = "storemesh.prototype.production.v1"
+const PW_ACTIVE = ["READY", "RUNNING", "IN_PROGRESS", "PAUSED", "COMPLETING"]
+const PW_ZONES: Record<string, string> = {
+  SORTING: "سورتینگ",
+  WASHING: "شست‌وشو",
+  SLICING: "اسلایس",
+  FREEZING: "فریز",
+  FREEZE_DRYING: "فریزدرای",
+  DRYING: "خشک‌کن",
+  FRESH_EXPORT: "ارسال تازه",
+  COLD_ROOM_CLEAN: "سردخانه تمیز",
+  COLD_ROOM_DIRTY: "سردخانه کثیف",
+  PACKAGING: "بسته‌بندی",
+  QC: "کیفیت",
+  WASTE: "ضایعات",
+}
+const PW_STAGES: Record<string, string> = {
+  SORTED: "سورت‌شده",
+  WASHED: "شسته‌شده",
+  SLICED: "اسلایس‌شده",
+  FROZEN: "منجمد",
+  FREEZE_DRIED: "فریزدرای‌شده",
+  DRIED: "خشک‌شده",
+  CONSUMED: "مصرف‌شده",
+  WASTED: "ضایعات",
+  READY: "آماده",
+  RUNNING: "در حال اجرا",
+  IN_PROGRESS: "در حال اجرا",
+  PAUSED: "مکث",
+  COMPLETING: "آماده تخلیه",
+  COMPLETED: "تکمیل",
+  FAILED: "خرابی",
+  CANCELLED: "لغوشده",
+  SCRAPPED: "اسقاط",
+}
+const pwNumber = (n: any) => Number(Number(n || 0).toFixed(3))
+const pwCode = (value: any) =>
+  String(value ?? "")
+    .trim()
+    .toUpperCase()
+const PW_DEFAULT_MACHINES: Record<string, string[]> = {
+  FREEZE: ["FRZ-01"],
+  FREEZE_DRY: ["FD-01"],
+  DRY: ["DRY-01"],
+}
+const pwEmpty = (): PWLedger => ({
+  version: 1,
+  seq: 0,
+  idSeq: 0,
+  items: [],
+  cycles: [],
+  washSessions: [],
+  events: [],
+  consumedInputs: [],
+  machines: { ...PW_DEFAULT_MACHINES },
+})
+function ScanOptionalWeighTransition({
+  scan,
+  setScan,
+  onScan,
+  lastWeight,
+  weight,
+  setWeight,
+  action = "تأیید اسکن",
+  disabled = false,
+}: {
+  scan: string
+  setScan: (value: string) => void
+  onScan: () => void
+  lastWeight?: number
+  weight: string
+  setWeight: (value: string) => void
+  action?: string
+  disabled?: boolean
+}) {
+  const next = weight === "" ? null : Number(weight),
+    delta =
+      next === null || lastWeight === undefined
+        ? null
+        : pwNumber(next - lastWeight)
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <label style={{ display: "grid", gap: 5, fontSize: 12 }}>
+        اسکن QR
+        <input
+          aria-label="اسکن QR"
+          value={scan}
+          onChange={(event) => setScan(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault()
+              onScan()
+            }
+          }}
+          placeholder="اسکنر سخت‌افزاری یا ورود کد"
+          style={pwInput}
+        />
+      </label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div
+          style={{
+            background: "#eff8f5",
+            padding: 11,
+            borderRadius: 9,
+            fontSize: 12,
+          }}
+        >
+          آخرین وزن معتبر:{" "}
+          <b>
+            {lastWeight === undefined
+              ? "پس از اسکن"
+              : `${lastWeight.toFixed(3)} kg`}
+          </b>
+        </div>
+        <label style={{ fontSize: 12 }}>
+          وزن این انتقال (اختیاری)
+          <input
+            type="number"
+            min="0.001"
+            step="0.001"
+            value={weight}
+            onChange={(event) => setWeight(event.target.value)}
+            placeholder="بدون وزن ادامه می‌یابد"
+            style={pwInput}
+          />
+        </label>
+      </div>
+      {delta !== null && Number.isFinite(delta) && (
+        <div style={{ fontSize: 12, color: delta > 0 ? "#9a6420" : "#176b50" }}>
+          تغییر وزن:{" "}
+          <b>
+            {delta > 0 ? "+" : ""}
+            {delta.toFixed(3)} kg
+          </b>
+        </div>
+      )}
+      <PWButton disabled={disabled || !scan.trim()} onClick={onScan}>
+        {action}
+      </PWButton>
+    </div>
+  )
+}
+function pwTransitionWeight(
+  ledger: PWLedger,
+  item: PWItem,
+  transition: string,
+  value?: number,
+) {
+  const previous = pwNumber(item.weightKg)
+  if (value === undefined)
+    return pwEvent(ledger, "انتقال بدون توزین", item.code, {
+      transition,
+      previousWeightKg: previous,
+    })
+  if (!Number.isFinite(value) || value <= 0)
+    throw Error("وزن انتقال باید مثبت باشد.")
+  const next = pwNumber(value),
+    delta = pwNumber(next - previous)
+  item.weightKg = next
+  pwEvent(ledger, "توزین انتقال", item.code, {
+    transition,
+    previousWeightKg: previous,
+    weightKg: next,
+    newWeightKg: next,
+    deltaKg: delta,
+  })
+}
 function readProductionLedger(): PWLedger {
   try {
-    const raw = localStorage.getItem(PW_STORAGE);
-    if (!raw) return pwEmpty();
-    const value = JSON.parse(raw);
-    if (value.version !== 1 || !Array.isArray(value.items) || !Array.isArray(value.cycles) || !Array.isArray(value.events)) throw Error("ساختار دفتر تولید قابل خواندن نیست؛ داده را بازنویسی نکردیم.");
-    return { ...pwEmpty(), ...value, machines: { ...PW_DEFAULT_MACHINES, ...(value.machines || {}) }, events: [...value.events].sort((a, b) => a.seq - b.seq) };
-  } catch (error: any) { return { ...pwEmpty(), storageError: error.message || "دسترسی به حافظه مرورگر ممکن نیست." }; }
+    const raw = localStorage.getItem(PW_STORAGE)
+    if (!raw) return pwEmpty()
+    const value = JSON.parse(raw)
+    if (
+      value.version !== 1 ||
+      !Array.isArray(value.items) ||
+      !Array.isArray(value.cycles) ||
+      !Array.isArray(value.events)
+    )
+      throw Error(
+        "ساختار دفتر تولید قابل خواندن نیست؛ داده را بازنویسی نکردیم.",
+      )
+    return {
+      ...pwEmpty(),
+      ...value,
+      machines: { ...PW_DEFAULT_MACHINES, ...(value.machines || {}) },
+      events: [...value.events].sort((a, b) => a.seq - b.seq),
+    }
+  } catch (error: any) {
+    return {
+      ...pwEmpty(),
+      storageError: error.message || "دسترسی به حافظه مرورگر ممکن نیست.",
+    }
+  }
 }
 function saveProductionLedger(ledger: PWLedger) {
-  if (ledger.storageError) throw Error(ledger.storageError);
-  localStorage.setItem(PW_STORAGE, JSON.stringify(ledger));
+  if (ledger.storageError) throw Error(ledger.storageError)
+  localStorage.setItem(PW_STORAGE, JSON.stringify(ledger))
 }
-function pwEvent(ledger: PWLedger, action: string, entity: string, details: any = {}) {
-  ledger.seq = Math.max(ledger.seq || 0, ...ledger.events.map(x => Number(x.seq) || 0)) + 1;
-  ledger.events.push({ seq: ledger.seq, action, entity, details, at: new Date().toISOString() });
+function pwEvent(
+  ledger: PWLedger,
+  action: string,
+  entity: string,
+  details: any = {},
+) {
+  ledger.seq =
+    Math.max(ledger.seq || 0, ...ledger.events.map((x) => Number(x.seq) || 0)) +
+    1
+  ledger.events.push({
+    seq: ledger.seq,
+    action,
+    entity,
+    details,
+    at: new Date().toISOString(),
+  })
 }
-function pwId(ledger: PWLedger, prefix: string) { ledger.idSeq = (ledger.idSeq || 0) + 1; return `${prefix}-SIM-${String(ledger.idSeq).padStart(5, "0")}`; }
+function pwId(ledger: PWLedger, prefix: string) {
+  ledger.idSeq = (ledger.idSeq || 0) + 1
+  return `${prefix}-SIM-${String(ledger.idSeq).padStart(5, "0")}`
+}
 function pwCarriers() {
-  let value: any;
-  try { value = JSON.parse(localStorage.getItem("storemesh.prototype.containers") || "[]"); } catch { throw Error("فهرست کانتینرهای مرورگر قابل خواندن نیست."); }
-  return (Array.isArray(value) ? value : value.items || value.rows || []).map((row: any) => ({ ...row, code: pwCode(row.qr || row.code || row.id), capacityKg: Number(row.capacityKg ?? row.capacity ?? 999999), zones: row.designatedZones || row.zones || [], type: String(row.type || "") }));
+  let value: any
+  try {
+    value = JSON.parse(
+      localStorage.getItem("storemesh.prototype.containers") || "[]",
+    )
+  } catch {
+    throw Error("فهرست کانتینرهای مرورگر قابل خواندن نیست.")
+  }
+  return (Array.isArray(value) ? value : value.items || value.rows || []).map(
+    (row: any) => ({
+      ...row,
+      code: pwCode(row.qr || row.code || row.id),
+      capacityKg: Number(row.capacityKg ?? row.capacity ?? 999999),
+      zones: row.designatedZones || row.zones || [],
+      type: String(row.type || ""),
+    }),
+  )
 }
-function pwHealthy(carrier: any) { return !carrier.locked && !carrier.singleUse && !/DAMAGED|BROKEN|RETIRED|INACTIVE|SINGLE_USE|خراب|شکسته|غیرفعال|یکبار|یک‌بار/i.test(`${carrier.status || ""} ${carrier.type || ""}`); }
-function pwTray(carrier: any) { return /TRAY|سینی/i.test(carrier.type); }
+function pwHealthy(carrier: any) {
+  return (
+    !carrier.locked &&
+    !carrier.singleUse &&
+    !/DAMAGED|BROKEN|RETIRED|INACTIVE|SINGLE_USE|خراب|شکسته|غیرفعال|یکبار|یک‌بار/i.test(
+      `${carrier.status || ""} ${carrier.type || ""}`,
+    )
+  )
+}
+function pwTray(carrier: any) {
+  return /TRAY|سینی/i.test(carrier.type)
+}
 function pwCarrier(code: string, type: "tray" | "basket") {
-  const carrier = pwCarriers().find((x: any) => x.code === pwCode(code));
-  if (!carrier || !pwHealthy(carrier) || (type === "tray" ? !pwTray(carrier) : pwTray(carrier))) throw Error(type === "tray" ? "یک سینی سالم موجود در بخش کانتینرها را اسکن کنید." : "یک سبد یا کریت سالم موجود در بخش کانتینرها را اسکن کنید.");
-  return carrier;
+  const carrier = pwCarriers().find((x: any) => x.code === pwCode(code))
+  if (
+    !carrier ||
+    !pwHealthy(carrier) ||
+    (type === "tray" ? !pwTray(carrier) : pwTray(carrier))
+  )
+    throw Error(
+      type === "tray"
+        ? "یک سینی سالم موجود در بخش کانتینرها را اسکن کنید."
+        : "یک سبد یا کریت سالم موجود در بخش کانتینرها را اسکن کنید.",
+    )
+  return carrier
 }
-function pwBusy(ledger: PWLedger, item: PWItem) { return !!ledger.cycles.find(c => PW_ACTIVE.includes(c.status) && c.itemIds.includes(item.id)); }
-function pwUsable(ledger: PWLedger, item: PWItem | undefined): asserts item is PWItem {
-  if (!item || item.consumed || !(item.weightKg > 0)) throw Error("بچ ورودی موجود نیست یا قبلاً مصرف شده است.");
-  if (item.blocked || /QUARANTINE|QC|WASTE/.test(item.zone)) throw Error("بچ مسدود است؛ ابتدا وضعیت کیفیت یا مغایرت آن را تعیین تکلیف کنید.");
-  if (pwBusy(ledger, item)) throw Error("این بچ در یک چرخه فعال قفل است.");
+function pwBusy(ledger: PWLedger, item: PWItem) {
+  return !!ledger.cycles.find(
+    (c) => PW_ACTIVE.includes(c.status) && c.itemIds.includes(item.id),
+  )
+}
+function pwUsable(
+  ledger: PWLedger,
+  item: PWItem | undefined,
+): asserts item is PWItem {
+  if (!item || item.consumed || !(item.weightKg > 0))
+    throw Error("بچ ورودی موجود نیست یا قبلاً مصرف شده است.")
+  if (item.blocked || /QUARANTINE|QC|WASTE/.test(item.zone))
+    throw Error(
+      "بچ مسدود است؛ ابتدا وضعیت کیفیت یا مغایرت آن را تعیین تکلیف کنید.",
+    )
+  if (pwBusy(ledger, item)) throw Error("این بچ در یک چرخه فعال قفل است.")
 }
 function pwFreeCarrier(ledger: PWLedger, code: string, exceptId = "") {
-  if (ledger.items.some(item => item.id !== exceptId && !item.consumed && (item.containerCode === code || item.trays.some(t => t.code === code)))) throw Error("این ظرف هنوز به موجودی یا سینی‌های بچ دیگری اختصاص دارد.");
-  const receipt = readPrototypeBatch();
-  if (receipt.baskets.some(b => pwCode(b.code) === code && !ledger.consumedInputs.includes(`${receipt.id}:${b.code}`))) throw Error("این ظرف هنوز حاوی موجودی دریافت است.");
+  if (
+    ledger.items.some(
+      (item) =>
+        item.id !== exceptId &&
+        !item.consumed &&
+        (item.containerCode === code ||
+          item.trays.some((t) => t.code === code)),
+    )
+  )
+    throw Error("این ظرف هنوز به موجودی یا سینی‌های بچ دیگری اختصاص دارد.")
+  const receipt = readPrototypeBatch()
+  if (
+    receipt.baskets.some(
+      (b) =>
+        pwCode(b.code) === code &&
+        !ledger.consumedInputs.includes(`${receipt.id}:${b.code}`),
+    )
+  )
+    throw Error("این ظرف هنوز حاوی موجودی دریافت است.")
 }
-function recordSortingOutputs(batch: any, selected: string[], outputs: any[], lossReason: string) {
-  const ledger = readProductionLedger();
-  if (ledger.storageError) throw Error(ledger.storageError);
-  if (!selected.length || new Set(selected.map(pwCode)).size !== selected.length) throw Error("حداقل یک سبد ورودی غیرتکراری لازم است.");
-  const signatures = selected.map(code => `${batch.id}:${code}`);
-  if (signatures.some(signature => ledger.consumedInputs.some(key => pwCode(key) === pwCode(signature)))) throw Error("یکی از سبدهای ورودی قبلاً سورت شده است.");
-  const sources = (batch.baskets || []).filter((x: any) => selected.some(code => pwCode(code) === pwCode(x.code)));
-  if (sources.length !== selected.length) throw Error("یکی از سبدهای انتخابی در محموله پیدا نشد.");
-  if (new Set(sources.map((source: any) => source.product)).size !== 1) throw Error("همه ورودی‌های سورت باید یک محصول باشند.");
-  if (sources.some((source: any) => { const physical = pwCarriers().find((c: any) => c.code === pwCode(source.code)); return physical && !pwHealthy(physical) || /قرنطینه|در راه|خراب|QUARANTINE|BLOCKED|DAMAGED/.test(source.status || "") || /قرنطینه/.test(source.zone || ""); })) throw Error("یکی از ورودی‌ها مسدود یا ظرف آن آسیب‌دیده است.");
-  if (sources.some((source: any) => !/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""))) throw Error("همه ورودی‌ها باید در سردخانه باشند.");
-  const available = pwNumber(sources.reduce((sum: number, x: any) => sum + Number(x.gross) - Number(x.tare || 0), 0));
-  const total = pwNumber(outputs.reduce((sum, x) => sum + Number(x.weight), 0)), loss = pwNumber(available - total);
-  if (!(available > 0) || !outputs.length || !Number.isFinite(total) || loss < 0 || outputs.some(x => !(Number(x.weight) > 0) || !x.grade || !x.size || !x.destination)) throw Error("گرید، اندازه، وزن و مقصد معتبر همه خروجی‌ها و توازن وزن الزامی است.");
-  if (new Set(outputs.map(x => pwCode(x.code))).size !== outputs.length) throw Error("سبد خروجی تکراری است.");
-  if (loss > 0 && !["WASTE", "DAMAGE", "MOISTURE_LOSS", "RESIDUAL_MATERIAL", "MEASUREMENT_VARIANCE"].includes(lossReason)) throw Error("برای هر مقدار افت، یک علت طبقه‌بندی‌شده انتخاب کنید.");
-  outputs.forEach(output => {
-    const carrier = pwCarrier(output.code, "basket");
-    if (selected.some(code => pwCode(code) === carrier.code)) throw Error("سبد ورودی نمی‌تواند خروجی همان عملیات باشد.");
-    pwFreeCarrier(ledger, carrier.code);
-    if (Number(output.weight) > carrier.capacityKg) throw Error("وزن خروجی از ظرفیت سبد بیشتر است.");
-    const parentContributions = output.parentContributions || [];
-    if (!parentContributions.length || parentContributions.some((row: any) => !(Number(row.inputWeightKg) > 0) || !selected.some(code => pwCode(code) === pwCode(row.batchId))) || Math.abs(parentContributions.reduce((sum: number, row: any) => sum + Number(row.inputWeightKg), 0) - Number(output.weight)) > .001) throw Error("شجره وزنی هر خروجی باید دقیق و برابر وزن آن باشد.");
-  });
-  const children = outputs.map(output => {
-    const contributed = output.parentContributions.map((row: any) => pwCode(row.batchId)), processing = ["DRYING", "FREEZING", "FREEZE_DRYING"].includes(output.destination);
-    const code = pwId(ledger, "B"), item: PWItem = { id: code, code, parentId: contributed.join(","), parentIds: contributed, parentContributions: output.parentContributions.map((row: any) => ({ id: pwCode(row.batchId), weightKg: Number(row.inputWeightKg) })), inputCodes: contributed, supplier: batch.supplier, suppliers: [batch.supplier], supplierContributions: [{ supplier: batch.supplier, weightKg: pwNumber(output.weight) }], product: sources[0].product, grade: output.grade, size: output.size, weightKg: pwNumber(output.weight), stage: "SORTED", zone: "SORTING", destination: output.destination, nextZone: processing ? "WASHING" : output.destination, containerCode: pwCode(output.code), trays: [], allocated: false, consumed: false, blocked: false };
-    ledger.items.push(item); return item;
-  });
-  ledger.consumedInputs.push(...signatures);
-  outputs.filter(output => output.designationWarning).forEach(output => pwEvent(ledger, "هشدار زون تعیین‌شده", pwCode(output.code), { zone: "SORTING", severity: "WARNING" }));
-  pwEvent(ledger, "ثبت سورتینگ", String(batch.id), { inputCodes: selected, children: children.map(x => ({ code: x.code, destination: x.destination, parents: x.parentContributions })), inputWeightKg: available, outputWeightKg: total, lossKg: loss, lossReason: loss > 0 ? lossReason : null });
-  saveProductionLedger(ledger); return children;
+function recordSortingOutputs(
+  batch: any,
+  selected: string[],
+  outputs: any[],
+  lossReason: string,
+  entryWeights: Record<string, number> = {},
+) {
+  const ledger = readProductionLedger()
+  if (ledger.storageError) throw Error(ledger.storageError)
+  if (
+    !selected.length ||
+    new Set(selected.map(pwCode)).size !== selected.length
+  )
+    throw Error("حداقل یک سبد ورودی غیرتکراری لازم است.")
+  const signatures = selected.map((code) => `${batch.id}:${code}`)
+  if (
+    signatures.some((signature) =>
+      ledger.consumedInputs.some((key) => pwCode(key) === pwCode(signature)),
+    )
+  )
+    throw Error("یکی از سبدهای ورودی قبلاً سورت شده است.")
+  const sources = (batch.baskets || []).filter((x: any) =>
+    selected.some((code) => pwCode(code) === pwCode(x.code)),
+  )
+  if (sources.length !== selected.length)
+    throw Error("یکی از سبدهای انتخابی در محموله پیدا نشد.")
+  if (new Set(sources.map((source: any) => source.product)).size !== 1)
+    throw Error("همه ورودی‌های سورت باید یک محصول باشند.")
+  if (
+    sources.some((source: any) => {
+      const physical = pwCarriers().find(
+        (c: any) => c.code === pwCode(source.code),
+      )
+      return (
+        (physical && !pwHealthy(physical)) ||
+        /قرنطینه|در راه|خراب|QUARANTINE|BLOCKED|DAMAGED/.test(
+          source.status || "",
+        ) ||
+        /قرنطینه/.test(source.zone || "")
+      )
+    })
+  )
+    throw Error("یکی از ورودی‌ها مسدود یا ظرف آن آسیب‌دیده است.")
+  if (
+    sources.some(
+      (source: any) =>
+        !/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""),
+    )
+  )
+    throw Error("همه ورودی‌ها باید در سردخانه باشند.")
+  const available = pwNumber(
+    sources.reduce(
+      (sum: number, x: any) =>
+        sum +
+        (entryWeights[pwCode(x.code)] ?? Number(x.gross) - Number(x.tare || 0)),
+      0,
+    ),
+  )
+  const total = pwNumber(outputs.reduce((sum, x) => sum + Number(x.weight), 0)),
+    loss = pwNumber(available - total)
+  if (
+    !(available > 0) ||
+    !outputs.length ||
+    !Number.isFinite(total) ||
+    loss < 0 ||
+    outputs.some(
+      (x) => !(Number(x.weight) > 0) || !x.grade || !x.size || !x.destination,
+    )
+  )
+    throw Error(
+      "گرید، اندازه، وزن و مقصد معتبر همه خروجی‌ها و توازن وزن الزامی است.",
+    )
+  if (new Set(outputs.map((x) => pwCode(x.code))).size !== outputs.length)
+    throw Error("سبد خروجی تکراری است.")
+  if (
+    loss > 0 &&
+    ![
+      "WASTE",
+      "DAMAGE",
+      "MOISTURE_LOSS",
+      "RESIDUAL_MATERIAL",
+      "MEASUREMENT_VARIANCE",
+    ].includes(lossReason)
+  )
+    throw Error("برای هر مقدار افت، یک علت طبقه‌بندی‌شده انتخاب کنید.")
+  outputs.forEach((output) => {
+    const carrier = pwCarrier(output.code, "basket")
+    if (selected.some((code) => pwCode(code) === carrier.code))
+      throw Error("سبد ورودی نمی‌تواند خروجی همان عملیات باشد.")
+    pwFreeCarrier(ledger, carrier.code)
+    if (Number(output.weight) > carrier.capacityKg)
+      throw Error("وزن خروجی از ظرفیت سبد بیشتر است.")
+    const parentContributions = output.parentContributions || []
+    if (
+      !parentContributions.length ||
+      parentContributions.some(
+        (row: any) =>
+          !(Number(row.inputWeightKg) > 0) ||
+          !selected.some((code) => pwCode(code) === pwCode(row.batchId)),
+      ) ||
+      Math.abs(
+        parentContributions.reduce(
+          (sum: number, row: any) => sum + Number(row.inputWeightKg),
+          0,
+        ) - Number(output.weight),
+      ) > 0.001
+    )
+      throw Error("شجره وزنی هر خروجی باید دقیق و برابر وزن آن باشد.")
+  })
+  const children = outputs.map((output) => {
+    const contributed = output.parentContributions.map((row: any) =>
+        pwCode(row.batchId),
+      ),
+      processing = ["DRYING", "FREEZING", "FREEZE_DRYING"].includes(
+        output.destination,
+      )
+    const code = pwId(ledger, "B"),
+      item: PWItem = {
+        id: code,
+        code,
+        parentId: contributed.join(","),
+        parentIds: contributed,
+        parentContributions: output.parentContributions.map((row: any) => ({
+          id: pwCode(row.batchId),
+          weightKg: Number(row.inputWeightKg),
+        })),
+        inputCodes: contributed,
+        supplier: batch.supplier,
+        suppliers: [batch.supplier],
+        supplierContributions: [
+          { supplier: batch.supplier, weightKg: pwNumber(output.weight) },
+        ],
+        product: sources[0].product,
+        grade: output.grade,
+        size: output.size,
+        weightKg: pwNumber(output.weight),
+        stage: "SORTED",
+        zone: "SORTING",
+        destination: output.destination,
+        nextZone: processing ? "WASHING" : output.destination,
+        containerCode: pwCode(output.code),
+        trays: [],
+        allocated: false,
+        consumed: false,
+        blocked: false,
+      }
+    ledger.items.push(item)
+    return item
+  })
+  ledger.consumedInputs.push(...signatures)
+  outputs
+    .filter((output) => output.designationWarning)
+    .forEach((output) =>
+      pwEvent(ledger, "هشدار زون تعیین‌شده", pwCode(output.code), {
+        zone: "SORTING",
+        severity: "WARNING",
+      }),
+    )
+  sources.forEach((source: any) => {
+    const code = pwCode(source.code),
+      previous = pwNumber(Number(source.gross) - Number(source.tare || 0))
+    if (entryWeights[code] !== undefined)
+      pwEvent(ledger, "توزین ورود فرایند", code, {
+        transition: "SORTING_ENTRY",
+        previousWeightKg: previous,
+        weightKg: entryWeights[code],
+        deltaKg: pwNumber(entryWeights[code] - previous),
+      })
+    else
+      pwEvent(ledger, "ورود فرایند بدون توزین", code, {
+        transition: "SORTING_ENTRY",
+        previousWeightKg: previous,
+      })
+  })
+  pwEvent(ledger, "ثبت سورتینگ", String(batch.id), {
+    inputCodes: selected,
+    children: children.map((x) => ({
+      code: x.code,
+      destination: x.destination,
+      parents: x.parentContributions,
+    })),
+    inputWeightKg: available,
+    outputWeightKg: total,
+    lossKg: loss,
+    lossReason: loss > 0 ? lossReason : null,
+  })
+  saveProductionLedger(ledger)
+  return children
 }
-const pwBox = { background: "white", border: "1px solid #dce9e7", borderRadius: 16, padding: 20 };
-const pwInput = { width: "100%", border: "1px solid #cbd5e1", borderRadius: 8, padding: "10px 12px", color: "#163f3b", background: "white" };
-function PWButton({ children, secondary, ...props }: any) { return <button {...props} style={{ padding: "10px 15px", borderRadius: 9, border: secondary ? "1px solid #bdd5d1" : "none", color: secondary ? "#15685e" : "white", background: props.disabled ? "#b5c4c1" : secondary ? "white" : "#0d8071", cursor: props.disabled ? "not-allowed" : "pointer", fontWeight: 600 }}>{children}</button>; }
-function PWField({ label, children }: any) { return <label style={{ display: "grid", gap: 6, marginBottom: 14 }}><span style={{ fontSize: 13, color: "#42645f" }}>{label}</span>{children}</label>; }
-function PWNotice({ children }: any) { return <div style={{ background: "#eff8f5", color: "#315f54", border: "1px solid #c8e1d7", padding: 12, borderRadius: 10, fontSize: 13, lineHeight: 1.9, marginBottom: 16 }}>{children}</div>; }
-function PWEmpty({ children }: any) { return <div style={{ padding: 28, background: "#f8faf9", border: "1px dashed #cbd9d6", borderRadius: 12, color: "#60746f", textAlign: "center" }}>{children || "هنوز موردی ثبت نشده است."}</div>; }
-function ProductionScreen(props: any) {
-  const [tab, setTab] = useState("overview"), [ledger, setLedger] = useState<PWLedger>(() => readProductionLedger()), [notice, setNotice] = useState(""), [error, setError] = useState(""), [chosen, setChosen] = useState("");
-  const tabs = [["overview", "صف کار و مسیر"], ["sorting", "سورتینگ"], ["wash", "شست‌وشو"], ["slice", "اسلایس و سینی"], ["FREEZE", "فریز"], ["FREEZE_DRY", "فریزدرای"], ["DRY", "خشک‌کن"], ["merge", "ادغام فیزیکی"], ["results", "نتایج و رویدادها"]];
-  const allItems = ledger.items.filter(x => !x.demo), live = allItems.filter(x => !x.consumed), current = live.find(x => x.id === chosen);
-  const execute = (message: string, work: (next: PWLedger) => void) => {
-    setError(""); setNotice("");
-    try { const next = readProductionLedger(); if (next.storageError) throw Error(next.storageError); work(next); saveProductionLedger(next); setLedger(next); setNotice(message); }
-    catch (failure: any) { setError(failure.message || "ثبت عملیات انجام نشد."); }
-  };
-  const form = (event: any) => { event.preventDefault(); return new FormData(event.currentTarget); };
-  const switchTab = (value: string) => { setTab(value); setChosen(""); setError(""); setNotice(""); setLedger(readProductionLedger()); };
-  const batchPicker = (items: PWItem[]) => <PWField label="بچ ورودی"><select required value={chosen} onChange={e => setChosen(e.target.value)} style={pwInput}><option value="">انتخاب بچ…</option>{items.map(x => <option key={x.id} value={x.id}>{x.code} · {x.product} · {x.grade}/{x.size} · {x.weightKg} kg</option>)}</select></PWField>;
-  const summary = (item: PWItem) => <PWNotice>{item.code} · {PW_STAGES[item.stage] || item.stage} · وزن رسمی {item.weightKg} kg · ظرف {item.containerCode || "تخصیص به سینی"} · محل فعلی {PW_ZONES[item.zone] || item.zone}{pwBusy(ledger, item) ? " · قفل چرخه" : ""}</PWNotice>;
-  const move = (id: string) => execute("انتقال فیزیکی ثبت شد.", next => {
-    const item = next.items.find(x => x.id === id); pwUsable(next, item);
-    const destination = item.nextZone || item.destination;
-    if (!destination) throw Error("برای این بچ مسیر عملیاتی مشخص نشده است.");
-    if (destination === item.zone) throw Error("بچ از قبل در محل مقصد است.");
-    const before = item.zone; item.zone = destination; pwEvent(next, "انتقال فیزیکی", item.code, { from: before, to: destination, containerCode: item.containerCode });
-  });
-  const processBatch = (event: any, process: "WASH" | "SLICE") => {
-    const data = form(event);
-    execute(process === "WASH" ? "شست‌وشو ثبت شد؛ اکنون انتقال به اسلایس را ثبت کنید." : "اسلایس ثبت شد؛ مرحله بعد از روی مقصد نهایی تعیین شد.", next => {
-      const item = next.items.find(x => x.id === chosen); pwUsable(next, item);
-      const required = process === "WASH" ? "SORTED" : "WASHED", zone = process === "WASH" ? "WASHING" : "SLICING";
-      if (item.stage !== required || item.zone !== zone) throw Error(`بچ باید ${PW_STAGES[required]} و در ${PW_ZONES[zone]} باشد؛ انتقال فیزیکی را در صف کار ثبت کنید.`);
-      if (pwCode(data.get("scan")) !== item.containerCode || !item.containerCode) throw Error("QR اسکن‌شده با سبد همین بچ تطبیق ندارد.");
-      pwCarrier(item.containerCode, "basket");
-      const observed = String(data.get("observed") || "").trim();
-      if (observed && (!Number.isFinite(Number(observed)) || !(Number(observed) > 0))) throw Error("خوانش اطلاعاتی وزن باید مثبت باشد.");
-      item.stage = process === "WASH" ? "WASHED" : "SLICED"; item.nextZone = process === "WASH" ? "SLICING" : item.destination === "DRYING" ? "DRYING" : "FREEZING";
-      pwEvent(next, process === "WASH" ? "ثبت شست‌وشو" : "ثبت اسلایس", item.code, { observedWeightKg: observed ? Number(observed) : null, officialWeightKg: item.weightKg, nextZone: item.nextZone });
-    });
-  };
-  const allocate = (event: any) => {
-    const data = form(event);
-    execute("تخصیص سینی ثبت شد.", next => {
-      const item = next.items.find(x => x.id === chosen); pwUsable(next, item);
-      if (item.stage !== "SLICED" || item.allocated) throw Error("یک بچ اسلایس‌شده با تخصیص باز انتخاب کنید.");
-      const tray = pwCarrier(String(data.get("scan")), "tray"), sequence = Number(data.get("sequence")), raw = String(data.get("quantity") || ""), quantityKg = raw === "" ? null : Number(raw);
-      pwFreeCarrier(next, tray.code, item.id);
-      if (!Number.isInteger(sequence) || sequence < 1 || (quantityKg !== null && (!Number.isFinite(quantityKg) || quantityKg <= 0))) throw Error("ترتیب مثبت و مقدار معتبر وارد کنید.");
-      if (item.trays.some(t => t.code === tray.code || t.sequence === sequence)) throw Error("کد یا ترتیب سینی تکراری است.");
-      if (quantityKg !== null && quantityKg > tray.capacityKg) throw Error("مقدار از ظرفیت سینی بیشتر است.");
-      const allocated = pwNumber(item.trays.reduce((sum, t) => sum + Number(t.quantityKg || 0), 0) + Number(quantityKg || 0));
-      if (allocated > item.weightKg) throw Error("مجموع مقدار تخصیص‌یافته از وزن بچ بیشتر است.");
-      item.trays.push({ code: tray.code, quantityKg, sequence }); pwEvent(next, "تخصیص سینی", item.code, { tray: tray.code, quantityKg, sequence });
-    });
-  };
-  const finishAllocation = () => execute("تخصیص نهایی شد و سبد مبدا آزاد شد؛ بچ برای ساخت چرخه فریز آماده است.", next => {
-    const item = next.items.find(x => x.id === chosen); pwUsable(next, item);
-    if (item.stage !== "SLICED" || !item.trays.length || item.allocated) throw Error("تخصیص سینی باز و معتبر لازم است.");
-    if (item.trays.every(t => t.quantityKg !== null) && pwNumber(item.trays.reduce((sum, t) => sum + t.quantityKg, 0)) !== item.weightKg) throw Error("مجموع وزن سینی‌ها باید با کل وزن بچ برابر باشد.");
-    const released = item.containerCode; item.containerCode = ""; item.allocated = true; pwEvent(next, "تأیید پایان تخصیص", item.code, { releasedContainer: released, trays: item.trays.map(t => t.code) });
-  });
-  const createCycle = (event: any, type: string) => {
-    const data = form(event);
-    execute("چرخه آماده ایجاد شد؛ بچ‌ها تا پایان یا لغو چرخه قفل هستند.", next => {
-      const machineId = String(data.get("machine"));
-      if (!(next.machines[type] || []).includes(machineId)) throw Error("تجهیز انتخاب‌شده برای این فرآیند فعال نیست.");
-      if (next.cycles.some(c => c.machineId === machineId && PW_ACTIVE.includes(c.status))) throw Error("این ماشین در یک چرخه فعال مشغول است.");
-      const ids = data.getAll("items").map(String), items = ids.map(id => next.items.find(x => x.id === id));
-      if (!items.length) throw Error("حداقل یک بچ انتخاب کنید.");
-      const scans = String(data.get("trays") || "").split(/[\s,،]+/).filter(Boolean).map(pwCode);
-      const expectedStage = type === "FREEZE" ? "SLICED" : type === "FREEZE_DRY" ? "FROZEN" : "SLICED", expectedZone = type === "FREEZE" ? "FREEZING" : type === "FREEZE_DRY" ? "FREEZE_DRYING" : "DRYING";
-      items.forEach(item => { pwUsable(next, item); if (item.stage !== expectedStage || item.zone !== expectedZone) throw Error("مرحله یا محل فعلی یکی از بچ‌ها برای این چرخه مناسب نیست."); });
-      if (items.some(item => !!item!.demo !== !!items[0]!.demo)) throw Error("بچ آزمایشی و داده شما نباید در یک چرخه ترکیب شوند.");
-      const available = pwNumber(items.reduce((sum, item) => sum + item!.weightKg, 0));
-      const inputWeightKg = type === "FREEZE" ? available : Number(data.get("inputWeight"));
-      if (!(inputWeightKg > 0) || inputWeightKg > available) throw Error("وزن کل ورودی باید مثبت و حداکثر برابر موجودی انتخابی باشد.");
-      if (type === "FREEZE") {
-        const expected = items.flatMap(item => item!.trays.map(t => t.code));
-        if (items.some(item => !item!.allocated) || !expected.length || new Set(scans).size !== scans.length || expected.length !== scans.length || expected.some(code => !scans.includes(code))) throw Error("همه سینی‌های تخصیص‌یافته بچ‌های انتخابی را دقیقاً یک‌بار اسکن کنید.");
-        scans.forEach(code => pwCarrier(code, "tray"));
+const pwBox = {
+  background: "white",
+  border: "1px solid #dce9e7",
+  borderRadius: 16,
+  padding: 20,
+}
+const pwInput = {
+  width: "100%",
+  border: "1px solid #cbd5e1",
+  borderRadius: 8,
+  padding: "10px 12px",
+  color: "#163f3b",
+  background: "white",
+}
+function PWButton({ children, secondary, ...props }: any) {
+  return (
+    <button
+      {...props}
+      style={{
+        padding: "10px 15px",
+        borderRadius: 9,
+        border: secondary ? "1px solid #bdd5d1" : "none",
+        color: secondary ? "#15685e" : "white",
+        background: props.disabled
+          ? "#b5c4c1"
+          : secondary
+            ? "white"
+            : "#0d8071",
+        cursor: props.disabled ? "not-allowed" : "pointer",
+        fontWeight: 600,
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+function PWField({ label, children }: any) {
+  return (
+    <label style={{ display: "grid", gap: 6, marginBottom: 14 }}>
+      <span style={{ fontSize: 13, color: "#42645f" }}>{label}</span>
+      {children}
+    </label>
+  )
+}
+function PWNotice({ children }: any) {
+  return (
+    <div
+      style={{
+        background: "#eff8f5",
+        color: "#315f54",
+        border: "1px solid #c8e1d7",
+        padding: 12,
+        borderRadius: 10,
+        fontSize: 13,
+        lineHeight: 1.9,
+        marginBottom: 16,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+function PWEmpty({ children }: any) {
+  return (
+    <div
+      style={{
+        padding: 28,
+        background: "#f8faf9",
+        border: "1px dashed #cbd9d6",
+        borderRadius: 12,
+        color: "#60746f",
+        textAlign: "center",
+      }}
+    >
+      {children || "هنوز موردی ثبت نشده است."}
+    </div>
+  )
+}
+function WashingSessionScreen({
+  ledger,
+  onChange,
+}: {
+  ledger: PWLedger
+  onChange: (next: PWLedger, message: string) => void
+}) {
+  const [scan, setScan] = useState(""),
+    [entryWeight, setEntryWeight] = useState(""),
+    [outputCode, setOutputCode] = useState(""),
+    [outputWeight, setOutputWeight] = useState(""),
+    [lossReason, setLossReason] = useState(""),
+    [empty, setEmpty] = useState(false),
+    [error, setError] = useState("")
+  const active = ledger.washSessions.find(
+      (session) => session.status === "ACTIVE",
+    ),
+    sources = (active?.inputIds || [])
+      .map((id: string) => ledger.items.find((item) => item.id === id))
+      .filter(Boolean) as PWItem[]
+  const eligible = ledger.items.filter(
+    (item) =>
+      !item.consumed &&
+      !item.blocked &&
+      item.stage === "SORTED" &&
+      item.zone === "WASHING" &&
+      !active?.inputIds.includes(item.id),
+  )
+  const inputTotal = pwNumber(
+      sources.reduce((sum, item) => sum + item.weightKg, 0),
+    ),
+    outputTotal = pwNumber(
+      (active?.outputs || []).reduce(
+        (sum: number, row: any) => sum + row.weightKg,
+        0,
+      ),
+    ),
+    loss = pwNumber(inputTotal - outputTotal)
+  const addInput = () => {
+    setError("")
+    try {
+      const next = readProductionLedger(),
+        item = next.items.find(
+          (row) => row.containerCode === pwCode(scan) && !row.consumed,
+        )
+      pwUsable(next, item)
+      if (item.stage !== "SORTED" || item.zone !== "WASHING")
+        throw Error("سبد اسکن‌شده برای ورود به شست‌وشو واجد شرایط نیست.")
+      let session = next.washSessions.find((row) => row.status === "ACTIVE")
+      if (
+        session &&
+        (session.grade !== item.grade || session.size !== item.size)
+      )
+        throw Error(
+          `نشست فعال شست‌وشو شامل گرید ${session.grade} / اندازه ${session.size} است. ابتدا تمام محصول را در سبدهای خروجی ثبت و واحد را خالی و تکمیل کنید.`,
+        )
+      if (session?.inputIds.includes(item.id))
+        throw Error("این سبد قبلاً در نشست فعال ثبت شده است.")
+      if (!session) {
+        session = {
+          id: pwId(next, "WS"),
+          status: "ACTIVE",
+          grade: item.grade,
+          size: item.size,
+          inputIds: [],
+          outputs: [],
+          startedAt: new Date().toISOString(),
+        }
+        next.washSessions.push(session)
       }
-      const code = pwId(next, "CY"), cycle = { id: code, code, type, machineId, itemIds: ids, trayCodes: scans, inputWeightKg, status: "READY", createdAt: new Date().toISOString(), demo: !!items[0]!.demo };
-      next.cycles.push(cycle); pwEvent(next, "ساخت چرخه", code, { type, machineId, batches: ids, inputWeightKg });
-    });
-  };
-  const cycleAction = (event: any, id: string, action: string) => {
-    const data = form(event);
-    execute("وضعیت چرخه و موجودی به‌روزرسانی شد.", next => {
-      const cycle = next.cycles.find(c => c.id === id); if (!cycle) throw Error("چرخه پیدا نشد.");
-      const running = cycle.type === "DRY" ? "IN_PROGRESS" : "RUNNING", transitions: any = { READY: { START: running, CANCEL: "CANCELLED" }, RUNNING: { PAUSE: "PAUSED", COMPLETE: "COMPLETING", FAIL: "FAILED" }, IN_PROGRESS: { PAUSE: "PAUSED", COMPLETE: "COMPLETING", FAIL: "FAILED" }, PAUSED: { RESUME: running, CANCEL: "CANCELLED", FAIL: "FAILED" }, COMPLETING: { FINISH: "COMPLETED", FAIL: "FAILED" }, FAILED: { RESUME: running, RESTART: "READY", SCRAP: "SCRAPPED" } };
-      const target = transitions[cycle.status]?.[action], reason = String(data.get("reason") || "").trim(), items: PWItem[] = cycle.itemIds.map((itemId: string) => next.items.find(x => x.id === itemId)!);
-      if (!target) throw Error("این تغییر وضعیت مجاز نیست.");
-      if ((action === "FAIL" || cycle.status === "FAILED") && !reason) throw Error("علت خرابی یا تصمیم مدیر را وارد کنید.");
-      if (cycle.status === "FAILED" && items.some(item => item.consumed || item.weightKg <= 0 || pwBusy(next, item))) throw Error("بچ پس از خرابی مصرف شده یا در چرخه دیگری استفاده شده است.");
-      if (cycle.status === "FAILED") items.forEach(item => { if (item.cycleFailureId === cycle.id) { item.blocked = false; delete item.cycleFailureId; } });
-      if (action === "FAIL") items.forEach(item => { item.blocked = true; item.cycleFailureId = cycle.id; });
-      if (action === "FINISH") {
-        items.forEach(item => {
-          if (cycle.type === "FREEZE") { const freezeOnly = item.destination === "FREEZING"; item.stage = "FROZEN"; item.zone = freezeOnly ? "PACKAGING" : "FREEZE_DRYING"; item.nextZone = item.zone; }
-          else {
-            const measured = Number(data.get(`weight-${item.id}`));
-            if (!Number.isFinite(measured) || !(measured > 0) || measured > item.weightKg) throw Error(`وزن نهایی معتبر برای ${item.code} لازم است؛ حداکثر ${item.weightKg} kg.`);
-            item.beforeDryWeightKg = item.weightKg; item.weightKg = pwNumber(measured); item.yieldPercent = pwNumber(measured / item.beforeDryWeightKg * 100); item.stage = cycle.type === "DRY" ? "DRIED" : "FREEZE_DRIED"; item.zone = "PACKAGING"; item.nextZone = "PACKAGING"; item.containerCode = ""; item.trays = []; item.allocated = false;
-          }
-        });
-      }
-      if (action === "SCRAP") items.forEach(item => { item.weightKg = 0; item.stage = "WASTED"; item.zone = "WASTE"; item.consumed = true; item.containerCode = ""; item.trays = []; });
-      const from = cycle.status; cycle.status = target; if (action === "START") cycle.startedAt = new Date().toISOString(); if (["COMPLETED", "FAILED", "CANCELLED", "SCRAPPED"].includes(target)) cycle.endedAt = new Date().toISOString();
-      pwEvent(next, `چرخه: ${action}`, cycle.code, { from, to: target, reason: reason || null, weights: items.map(item => ({ code: item.code, weightKg: item.weightKg, stage: item.stage })) });
-    });
-  };
-  const merge = (event: any) => {
-    const data = form(event);
-    execute("ادغام فیزیکی ثبت شد؛ بچ جدید و شجره ورودی‌ها در نتایج قابل مشاهده است.", next => {
-      const ids = data.getAll("items").map(String), items = ids.map(id => next.items.find(x => x.id === id));
-      if (items.length < 2) throw Error("حداقل دو بچ انتخاب کنید.");
-      items.forEach(item => { pwUsable(next, item); if (item!.trays.length) throw Error("بچ تخصیص‌یافته به سینی ابتدا باید عملیات جاری خود را تکمیل کند."); });
-      if (items.some(item => !!item!.demo !== !!items[0]!.demo)) throw Error("بچ‌های آزمایشی را با داده خودتان ادغام نکنید.");
-      if (items.some(item => item!.product !== items[0]!.product)) throw Error("در این نمونه رابط، ادغام فقط برای یک محصول مشترک انجام می‌شود.");
-      const carrier = pwCarrier(String(data.get("scan")), "basket"); pwFreeCarrier(next, carrier.code);
-      if (data.get("staged") !== "on") throw Error("قرارگیری فیزیکی سبد خالی در سورتینگ را تأیید کنید.");
-      const weightKg = Number(data.get("weight")), sum = pwNumber(items.reduce((n, item) => n + item!.weightKg, 0));
-      if (!(weightKg > 0) || weightKg > sum || weightKg > carrier.capacityKg) throw Error("وزن خروجی باید مثبت و در محدوده وزن ورودی و ظرفیت سبد باشد.");
-      const grade = String(data.get("grade") || ""), size = String(data.get("size") || ""); if (!grade || !size) throw Error("گرید و اندازه خروجی لازم است.");
-      const code = pwId(next, "B"), child: PWItem = { id: code, code, parentId: ids.join(","), parentIds: ids, inputCodes: items.map(item => item!.containerCode), parentContributions: items.map(item => ({ id: item!.id, weightKg: item!.weightKg })), product: items[0]!.product, grade, size, weightKg: pwNumber(weightKg), stage: "SORTED", zone: "SORTING", destination: null, containerCode: carrier.code, trays: [], allocated: false, consumed: false, blocked: false, demo: !!items[0]!.demo };
-      items.forEach(item => { item!.consumed = true; item!.stage = "CONSUMED"; item!.weightKg = 0; item!.containerCode = ""; }); next.items.push(child);
-      pwEvent(next, "ادغام فیزیکی", code, { parents: ids, inputWeightKg: sum, outputWeightKg: weightKg, lossKg: pwNumber(sum - weightKg), container: carrier.code });
-    });
-  };
-  const cycleType = ["FREEZE", "FREEZE_DRY", "DRY"].includes(tab) ? tab : "";
-  const cycleEligible = live.filter(item => !pwBusy(ledger, item) && !item.blocked && (cycleType === "FREEZE" ? item.stage === "SLICED" && item.allocated && item.zone === "FREEZING" : cycleType === "FREEZE_DRY" ? item.stage === "FROZEN" && item.zone === "FREEZE_DRYING" : item.stage === "SLICED" && item.destination === "DRYING" && item.zone === "DRYING"));
-  return <div dir="rtl" style={{ padding: 24, color: "#183e38", background: "#f3f7f6", flex: 1, minHeight: 0, overflow: "auto", fontFamily: "inherit" }}>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 16 }}><div><h1 style={{ fontSize: 25, margin: 0 }}>میز کار تولید</h1><p style={{ color: "#6a817b", margin: "6px 0" }}>از سبد ورودی تا عملیات ماشین، خروجی و رهگیری با داده همین نشست</p></div></div>
-    <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 16 }}>{tabs.map(([id, name]) => <PWButton key={id} secondary={tab !== id} onClick={() => switchTab(id)}>{name}</PWButton>)}</div>
-    {(error || ledger.storageError) && <div role="alert" style={{ padding: 14, marginBottom: 16, color: "#9f2323", background: "#fff0f0", borderRadius: 10 }}>{error || ledger.storageError}</div>}
-    {notice && <div role="status"><PWNotice>{notice}</PWNotice></div>}
-    {tab === "sorting" && <SortingScreen {...props} />}
-    {tab === "overview" && <>
-      <PWNotice>مقصد نهایی هنگام توزین هر خروجی توسط کارشناس سورت تعیین می‌شود. خشک، فریز و فریزدرای همگی از شست‌وشو و اسلایس عبور می‌کنند؛ ارسال تازه هرگز شسته نمی‌شود. مدیر فقط بعداً با ثبت علت می‌تواند مقصد را اصلاح کند. مقصد کاری و انتقال فیزیکی همچنان دو ثبت جدا هستند.</PWNotice>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>{[["بچ جاری", live.length], ["چرخه فعال", ledger.cycles.filter(c => PW_ACTIVE.includes(c.status)).length], ["مسیر تعیین‌شده", live.filter(x => !!x.destination).length]].map(([title, count]) => <div key={String(title)} style={{ ...pwBox, flex: 1 }}><small>{title}</small><div style={{ fontSize: 28, marginTop: 8 }}>{count}</div></div>)}</div>
-      {!live.length ? <PWEmpty>ابتدا سبدهای همان محموله را در سورتینگ ثبت کنید؛ خروجی‌ها در همین صف نمایش داده می‌شوند.</PWEmpty> : <div style={{ display: "grid", gap: 12 }}>{live.map(item => <div key={item.id} style={pwBox}>
-        {summary(item)}<div style={{ fontSize: 13, marginBottom: 12 }}>محصول: {item.product} · گرید {item.grade} · اندازه {item.size} · مبدا {item.parentId} · سبد ورودی {item.inputCodes.join("، ") || "—"}{item.plannedRoute ? ` · مسیر پیشنهادی سورت: ${item.plannedRoute}` : ""}</div>
-        <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
-          {item.destination && item.stage === "SORTED" && <form onSubmit={event => { const data = form(event); execute("اصلاح مقصد ثبت شد؛ انتقال فیزیکی هنوز انجام نشده است.", next => { const row = next.items.find(x => x.id === item.id); pwUsable(next, row); const destination = String(data.get("destination")), reason = String(data.get("reason") || "").trim(); if (!reason) throw Error("علت اصلاح مقصد الزامی است."); if (row.destination === destination) throw Error("مقصد تغییری نکرده است."); const previous = row.destination; row.destination = destination; row.nextZone = ["DRYING", "FREEZING", "FREEZE_DRYING"].includes(destination) ? "WASHING" : destination; pwEvent(next, "اصلاح مقصد", row.code, { previous, destination, reason }); }); }} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <select name="destination" defaultValue={item.destination} style={{ ...pwInput, width: 180 }} required>{["FRESH_EXPORT", "DRYING", "FREEZING", "FREEZE_DRYING", "QC", "COLD_ROOM_CLEAN", "COLD_ROOM_DIRTY", "WASTE"].map(zone => <option key={zone} value={zone}>{PW_ZONES[zone]}</option>)}</select><input name="reason" required placeholder="علت اصلاح مقصد" style={{ ...pwInput, width: 190 }} /><PWButton disabled={pwBusy(ledger, item)}>اصلاح مقصد</PWButton>
-          </form>}
-          <span>مرحله بعد: {PW_ZONES[item.nextZone || item.destination || ""] || "مسیر نامشخص"}</span><PWButton secondary disabled={pwBusy(ledger, item) || !(item.nextZone || item.destination) || item.zone === (item.nextZone || item.destination) || (item.stage === "SLICED" && item.nextZone === "FREEZING" && !item.allocated)} onClick={() => move(item.id)}>تأیید انتقال فیزیکی</PWButton>
+      pwTransitionWeight(
+        next,
+        item,
+        "WASHING_ENTRY",
+        entryWeight === "" ? undefined : Number(entryWeight),
+      )
+      session.inputIds.push(item.id)
+      pwEvent(next, "اسکن ورودی شست‌وشو", session.id, {
+        itemId: item.id,
+        containerCode: item.containerCode,
+        grade: item.grade,
+        size: item.size,
+      })
+      saveProductionLedger(next)
+      setScan("")
+      setEntryWeight("")
+      onChange(next, "سبد به نشست فعال شست‌وشو افزوده شد.")
+    } catch (failure: any) {
+      setError(failure.message)
+    }
+  }
+  const addOutput = () => {
+    setError("")
+    try {
+      const next = readProductionLedger(),
+        session = next.washSessions.find((row) => row.status === "ACTIVE")
+      if (!session || !session.inputIds.length)
+        throw Error("ابتدا حداقل یک سبد ورودی اسکن کنید.")
+      const carrier = pwCarrier(outputCode, "basket")
+      pwFreeCarrier(next, carrier.code)
+      if (
+        session.inputIds.some(
+          (id: string) =>
+            next.items.find((item) => item.id === id)?.containerCode ===
+            carrier.code,
+        )
+      )
+        throw Error("سبد خروجی باید با سبدهای ورودی متفاوت و خالی باشد.")
+      const weight = pwNumber(outputWeight)
+      if (!(weight > 0) || weight > carrier.capacityKg)
+        throw Error("وزن خروجی باید مثبت و در محدوده ظرفیت سبد باشد.")
+      const available = pwNumber(
+        session.inputIds.reduce(
+          (sum: number, id: string) =>
+            sum + (next.items.find((item) => item.id === id)?.weightKg || 0),
+          0,
+        ),
+      )
+      const registered = pwNumber(
+        session.outputs.reduce(
+          (sum: number, row: any) => sum + row.weightKg,
+          0,
+        ),
+      )
+      if (registered + weight > available)
+        throw Error("مجموع وزن خروجی از وزن ورودی نشست بیشتر است.")
+      if (
+        session.outputs.some((row: any) => row.containerCode === carrier.code)
+      )
+        throw Error("این سبد خروجی قبلاً ثبت شده است.")
+      session.outputs.push({
+        containerCode: carrier.code,
+        weightKg: weight,
+        at: new Date().toISOString(),
+      })
+      pwEvent(next, "ثبت سبد خروجی شست‌وشو", session.id, {
+        containerCode: carrier.code,
+        weightKg: weight,
+      })
+      saveProductionLedger(next)
+      setOutputCode("")
+      setOutputWeight("")
+      onChange(next, "سبد خروجی ثبت شد؛ برای باقی محصول ادامه دهید.")
+    } catch (failure: any) {
+      setError(failure.message)
+    }
+  }
+  const complete = () => {
+    setError("")
+    try {
+      const next = readProductionLedger(),
+        session = next.washSessions.find((row) => row.status === "ACTIVE")
+      if (!session || !session.outputs.length)
+        throw Error("حداقل یک سبد خروجی وزن‌شده لازم است.")
+      if (!empty) throw Error("خالی بودن کامل واحد شست‌وشو را تأیید کنید.")
+      const parents = session.inputIds
+          .map((id: string) => next.items.find((item) => item.id === id))
+          .filter(Boolean) as PWItem[],
+        available = pwNumber(
+          parents.reduce((sum, item) => sum + item.weightKg, 0),
+        ),
+        total = pwNumber(
+          session.outputs.reduce(
+            (sum: number, row: any) => sum + row.weightKg,
+            0,
+          ),
+        ),
+        difference = pwNumber(available - total)
+      if (difference < 0) throw Error("وزن خروجی از ورودی بیشتر است.")
+      if (difference > 0 && !lossReason.trim())
+        throw Error("برای اختلاف وزن نشست، علت ثبت کنید.")
+      const destination = parents[0]?.destination || "SLICING"
+      const children = session.outputs.map((row: any) => {
+        const id = pwId(next, "B"),
+          contributions = parents.map((parent) => ({
+            id: parent.id,
+            weightKg: pwNumber(row.weightKg * (parent.weightKg / available)),
+          }))
+        const child: PWItem = {
+          id,
+          code: id,
+          parentId: parents.map((parent) => parent.id).join(","),
+          parentIds: parents.map((parent) => parent.id),
+          parentContributions: contributions,
+          inputCodes: parents.map((parent) => parent.containerCode),
+          product: parents[0].product,
+          grade: session.grade,
+          size: session.size,
+          weightKg: row.weightKg,
+          stage: "WASHED",
+          zone: "WASHING",
+          destination,
+          nextZone: "SLICING",
+          containerCode: row.containerCode,
+          trays: [],
+          allocated: false,
+          consumed: false,
+          blocked: false,
+        }
+        next.items.push(child)
+        return child
+      })
+      parents.forEach((parent) => {
+        parent.consumed = true
+        parent.stage = "CONSUMED"
+        parent.containerCode = ""
+        parent.weightKg = 0
+      })
+      session.status = "COMPLETED"
+      session.completedAt = new Date().toISOString()
+      session.childIds = children.map((child: PWItem) => child.id)
+      session.unitEmpty = true
+      pwEvent(next, "تکمیل نشست شست‌وشو", session.id, {
+        parents: session.inputIds,
+        children: children.map((child: PWItem) => ({
+          id: child.id,
+          containerCode: child.containerCode,
+        })),
+        inputWeightKg: available,
+        outputWeightKg: total,
+        deltaKg: pwNumber(total - available),
+        lossReason: lossReason || null,
+        unitEmpty: true,
+      })
+      saveProductionLedger(next)
+      setEmpty(false)
+      setLossReason("")
+      onChange(
+        next,
+        "نشست شست‌وشو تکمیل و واحد خالی شد؛ گروه گرید/اندازه بعدی اکنون مجاز است.",
+      )
+    } catch (failure: any) {
+      setError(failure.message)
+    }
+  }
+  const scanned = ledger.items.find(
+    (item) => item.containerCode === pwCode(scan),
+  )
+  return (
+    <div
+      style={{ display: "grid", gridTemplateColumns: "1.15fr .85fr", gap: 18 }}
+    >
+      <div style={pwBox}>
+        <h2>نشست شست‌وشوی چندسبدی</h2>
+        <PWNotice>
+          چند سبد هم‌گرید و هم‌اندازه وارد یک نشست می‌شوند. تا ثبت تمام خروجی‌ها و
+          خالی‌شدن واحد، گرید یا اندازه دیگر پذیرفته نمی‌شود.
+        </PWNotice>
+        {error && (
+          <div
+            role="alert"
+            style={{
+              background: "#fff0f0",
+              color: "#9f2323",
+              padding: 12,
+              borderRadius: 9,
+              marginBottom: 12,
+            }}
+          >
+            {error}
+          </div>
+        )}
+        <ScanOptionalWeighTransition
+          scan={scan}
+          setScan={setScan}
+          onScan={addInput}
+          lastWeight={scanned?.weightKg}
+          weight={entryWeight}
+          setWeight={setEntryWeight}
+          action="ثبت سبد در نشست شست‌وشو"
+        />
+        <div style={{ marginTop: 16 }}>
+          {sources.map((item) => (
+            <div
+              key={item.id}
+              style={{
+                padding: "10px 0",
+                borderTop: "1px solid #e1eae6",
+                fontSize: 13,
+              }}
+            >
+              <b>{item.containerCode}</b> · {item.code} · {item.grade}/
+              {item.size} · {item.weightKg} kg
+            </div>
+          ))}
         </div>
-      </div>)}</div>}
-    </>}
-    {(tab === "wash" || tab === "slice") && <div style={{ display: "grid", gridTemplateColumns: tab === "slice" ? "1fr 1fr" : "minmax(360px, 700px)", gap: 20 }}>
-      <div style={pwBox}><h2>{tab === "wash" ? "ثبت شست‌وشوی یک بچ کامل" : "ثبت اسلایس یک بچ کامل"}</h2><PWNotice>هویت، گرید، اندازه و وزن رسمی بچ ثابت می‌ماند. خوانش ترازو فقط اطلاعاتی است. برای شروع، انتقال فیزیکی از صف کار را ثبت کنید.</PWNotice>
-        <form onSubmit={event => processBatch(event, tab === "wash" ? "WASH" : "SLICE")}>{batchPicker(live.filter(x => x.stage === (tab === "wash" ? "SORTED" : "WASHED") && !pwBusy(ledger, x)))}{current && summary(current)}<PWField label="اسکن QR سبد همین بچ"><input name="scan" placeholder="اسکن یا ورود کد خوانده‌شده" required style={pwInput} /></PWField><PWField label="خوانش اطلاعاتی ترازو (kg، اختیاری)"><input name="observed" type="number" min="0.001" step="0.001" style={pwInput} /></PWField><PWButton disabled={!current || current.stage !== (tab === "wash" ? "SORTED" : "WASHED")}>تأیید پایان {tab === "wash" ? "شست‌وشو" : "اسلایس"}</PWButton></form>
+        {active && (
+          <div
+            style={{
+              marginTop: 14,
+              background: "#fff8e3",
+              padding: 12,
+              borderRadius: 9,
+              fontSize: 12,
+            }}
+          >
+            نشست {active.id} · قفل سازگاری:{" "}
+            <b>
+              {active.grade} / {active.size}
+            </b>
+          </div>
+        )}
       </div>
-      {tab === "slice" && <div style={pwBox}><h2>تخصیص سینی‌های خروجی اسلایس</h2>{batchPicker(live.filter(x => x.stage === "SLICED" && x.destination !== "DRYING" && !pwBusy(ledger, x)))}{current?.stage === "SLICED" && current.destination !== "DRYING" ? <>{summary(current)}<PWNotice>برای مسیر فریز یا فریزدرای، فقط سینی سالم پذیرفته می‌شود. مسیر خشک در همان سبد به خشک‌کن می‌رود و این مرحله را ندارد.</PWNotice><form onSubmit={allocate}><PWField label="اسکن QR سینی موجود"><input name="scan" required style={pwInput} /></PWField><PWField label="ترتیب سینی"><input name="sequence" type="number" min="1" step="1" defaultValue="1" required style={pwInput} /></PWField><PWField label="مقدار محصول در سینی (kg، اختیاری)"><input name="quantity" type="number" min="0.001" step="0.001" style={pwInput} /></PWField><PWButton disabled={current.allocated}>ثبت این سینی</PWButton></form><div style={{ margin: "16px 0" }}>{current.trays.map(tray => <p key={tray.code}>{tray.sequence}. {tray.code} · {tray.quantityKg === null ? "بدون وزن مجزا" : `${tray.quantityKg} kg`}</p>)}</div><PWButton disabled={current.allocated || !current.trays.length} onClick={finishAllocation}>{current.allocated ? "تخصیص نهایی شده" : "تأیید پایان تخصیص و آزادسازی سبد"}</PWButton></> : <PWEmpty>فقط بچ اسلایس‌شده با مقصد فریز یا فریزدرای به سینی تخصیص می‌یابد.</PWEmpty>}</div>}
-    </div>}
-    {cycleType && <>
-      <div style={pwBox}><h2>{cycleType === "FREEZE" ? "ساخت چرخه فریز از سینی‌های تخصیص‌یافته" : cycleType === "FREEZE_DRY" ? "ساخت چرخه فریزدرای" : "ساخت چرخه خشک‌کن"}</h2><PWNotice>{cycleType === "DRY" ? "فقط بچ شسته و اسلایس‌شده با مقصد خشک وارد خشک‌کن می‌شود." : cycleType === "FREEZE" ? "تمام سینی‌ها اسکن می‌شوند؛ مقصد فریز پس از چرخه به بسته‌بندی می‌رود و مقصد فریزدرای به مرحله فریزدرای." : "فقط بچی که مقصد نهایی آن فریزدرای است پس از فریز وارد این چرخه می‌شود."}</PWNotice>
-        {!cycleEligible.length ? <PWEmpty>بچ آماده با مرحله و محل صحیح وجود ندارد. صف کار و انتقال فیزیکی را بررسی کنید.</PWEmpty> : <form onSubmit={event => createCycle(event, cycleType)}>
-          <PWField label="تجهیز"><select name="machine" style={pwInput}>{ledger.machines[cycleType].map(code => <option key={code}>{code}</option>)}</select></PWField><PWField label="بچ‌های ورودی (انتخاب یک یا چند مورد)"><div>{cycleEligible.map(item => <label key={item.id} style={{ display: "block", padding: 10, borderBottom: "1px solid #e2eae7" }}><input type="checkbox" name="items" value={item.id} /> {item.code} · {item.weightKg} kg · {item.containerCode || item.trays.map(t => t.code).join("، ")}</label>)}</div></PWField>
-          {cycleType === "FREEZE" ? <PWField label="کد سینی‌های اسکن‌شده؛ هر کد در یک خط"><textarea name="trays" rows={3} required style={pwInput} /></PWField> : <PWField label="وزن کل ورودی چرخه (kg)"><input name="inputWeight" type="number" min="0.001" step="0.001" required style={pwInput} /></PWField>}<PWButton>ایجاد چرخه آماده</PWButton>
-        </form>}
+      <div style={pwBox}>
+        <h2>خروجی‌های نشست</h2>
+        {!active ? (
+          <PWEmpty>با اسکن اولین ورودی، نشست ساخته می‌شود.</PWEmpty>
+        ) : (
+          <>
+            <PWField label="اسکن سبد خالی خروجی">
+              <input
+                value={outputCode}
+                onChange={(event) => setOutputCode(event.target.value)}
+                style={pwInput}
+                placeholder="سبد جدید؛ مستقل از ورودی‌ها"
+              />
+            </PWField>
+            <PWField label="وزن خالص خروجی (kg)">
+              <input
+                type="number"
+                min="0.001"
+                step="0.001"
+                value={outputWeight}
+                onChange={(event) => setOutputWeight(event.target.value)}
+                style={pwInput}
+              />
+            </PWField>
+            <PWButton
+              disabled={!outputCode || !outputWeight}
+              onClick={addOutput}
+            >
+              ثبت این خروجی
+            </PWButton>
+            <div style={{ margin: "15px 0" }}>
+              {active.outputs.map((row: any, index: number) => (
+                <p key={row.containerCode}>
+                  {index + 1}. {row.containerCode} · {row.weightKg} kg
+                </p>
+              ))}
+            </div>
+            <div
+              style={{
+                background: "#eff8f5",
+                padding: 12,
+                borderRadius: 9,
+                fontSize: 12,
+              }}
+            >
+              ورودی {inputTotal} kg · خروجی {outputTotal} kg · مانده/افت {loss}{" "}
+              kg
+            </div>
+            <PWField label="علت افت یا مانده (در صورت اختلاف)">
+              <input
+                value={lossReason}
+                onChange={(event) => setLossReason(event.target.value)}
+                style={pwInput}
+              />
+            </PWField>
+            <label
+              style={{
+                display: "flex",
+                gap: 8,
+                fontSize: 12,
+                margin: "12px 0",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={empty}
+                onChange={(event) => setEmpty(event.target.checked)}
+              />
+              تمام محصول در خروجی‌ها ثبت شده و واحد شست‌وشو کاملاً خالی است.
+            </label>
+            <PWButton
+              disabled={
+                !active.outputs.length ||
+                !empty ||
+                loss < 0 ||
+                (loss > 0 && !lossReason.trim())
+              }
+              onClick={complete}
+            >
+              تکمیل نشست و ساخت شجره خروجی‌ها
+            </PWButton>
+          </>
+        )}
       </div>
-      <div style={{ display: "grid", gap: 14, marginTop: 20 }}>{ledger.cycles.filter(c => c.type === cycleType && !c.demo).slice().reverse().map(cycle => <div style={pwBox} key={cycle.id}><h3>{cycle.code} · {PW_STAGES[cycle.status]}</h3><p>{cycle.machineId} · ورودی {cycle.inputWeightKg} kg · بچ‌ها: {cycle.itemIds.join("، ")}</p>
-        <form onSubmit={event => { const submitter = (event.nativeEvent as any).submitter; cycleAction(event, cycle.id, submitter?.value); }}><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {cycle.status === "COMPLETING" && cycle.type !== "FREEZE" && cycle.itemIds.map((id: string) => <PWField key={id} label={`وزن نهایی ${id} (kg)`}><input name={`weight-${id}`} type="number" min="0.001" step="0.001" max={ledger.items.find(x => x.id === id)?.weightKg} style={pwInput} /></PWField>)}
-          {["RUNNING", "IN_PROGRESS", "PAUSED", "COMPLETING", "FAILED"].includes(cycle.status) && <input name="reason" placeholder="علت خرابی / تصمیم مدیر" style={{ ...pwInput, width: 250 }} />}
-          {(({ READY: ["START", "CANCEL"], RUNNING: ["PAUSE", "COMPLETE", "FAIL"], IN_PROGRESS: ["PAUSE", "COMPLETE", "FAIL"], PAUSED: ["RESUME", "CANCEL", "FAIL"], COMPLETING: ["FINISH", "FAIL"], FAILED: ["RESUME", "RESTART", "SCRAP"] } as any)[cycle.status] || []).map((action: string) => <PWButton key={action} type="submit" name="action" value={action} secondary={["CANCEL", "FAIL", "SCRAP"].includes(action)}>{({ START: "شروع چرخه", CANCEL: "لغو", PAUSE: "مکث", RESUME: "ادامه", COMPLETE: "پایان فرآیند؛ آماده تخلیه", FINISH: "ثبت خروجی و پایان تخلیه", FAIL: "ثبت خرابی", RESTART: "بازگشت به آماده", SCRAP: "اسقاط محصول" } as any)[action]}</PWButton>)}
-        </div></form>
-      </div>)}</div>
-    </>}
-    {tab === "merge" && <div style={{ ...pwBox, maxWidth: 850 }}><h2>ادغام فیزیکی در یک سبد مجزا</h2><PWNotice>این عملیات یک بچ جدید با شجره ورودی می‌سازد؛ گروه‌بندی نمایشی سبدها محسوب نمی‌شود. در این رابط تمام وزن بچ‌های انتخابی مصرف می‌شود.</PWNotice><form onSubmit={merge}><PWField label="بچ‌های ورودی"><div>{live.filter(item => !pwBusy(ledger, item) && !item.trays.length).map(item => <label key={item.id} style={{ display: "block", padding: 8 }}><input name="items" type="checkbox" value={item.id} /> {item.code} · {item.product} · {item.grade}/{item.size} · {item.weightKg} kg</label>)}</div></PWField><PWField label="اسکن سبد خالی خروجی در سورتینگ"><input name="scan" required style={pwInput} /></PWField><label style={{ display: "block", marginBottom: 14 }}><input name="staged" type="checkbox" required /> سبد خروجی خالی و در محل سورتینگ قرار دارد.</label><PWField label="وزن خروجی (kg)"><input name="weight" type="number" min="0.001" step="0.001" required style={pwInput} /></PWField><PWField label="گرید خروجی"><select name="grade" required style={pwInput}><option value="">انتخاب…</option>{[...new Set(live.map(x => x.grade))].map(x => <option key={x}>{x}</option>)}</select></PWField><PWField label="اندازه خروجی"><select name="size" required style={pwInput}><option value="">انتخاب…</option>{[...new Set(live.map(x => x.size))].map(x => <option key={x}>{x}</option>)}</select></PWField><PWButton disabled={live.length < 2}>تأیید ادغام و ایجاد بچ</PWButton></form></div>}
-    {tab === "results" && <div style={{ display: "grid", gap: 18 }}>
-      <div style={pwBox}><h2>بچ‌ها، خروجی‌ها و شجره</h2>{!allItems.length ? <PWEmpty /> : <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}><thead><tr>{["بچ", "محصول / گرید / اندازه", "والد / سبد ورودی", "ظرف فعلی", "وزن رسمی", "بازده", "وضعیت / محل"].map(h => <th key={h} style={{ padding: 12, textAlign: "right", background: "#eff6f3" }}>{h}</th>)}</tr></thead><tbody>{allItems.map(item => <tr key={item.id}>{[item.code, `${item.product} / ${item.grade} / ${item.size}`, `${item.parentId} / ${item.inputCodes.join("، ")}`, item.containerCode || item.trays.map(t => t.code).join("، ") || "—", `${item.weightKg} kg`, item.yieldPercent === undefined ? "—" : `${item.yieldPercent}%`, `${PW_STAGES[item.stage]} / ${PW_ZONES[item.zone] || item.zone}`].map((value, index) => <td key={index} style={{ padding: 12, borderBottom: "1px solid #e1eae6" }}>{value}</td>)}</tr>)}</tbody></table></div>}</div>
-      <div style={pwBox}><h2>افت سورتینگ</h2>{!ledger.events.some(e => e.action === "ثبت سورتینگ") ? <PWEmpty>پس از ثبت سورتینگ، وزن ورودی، خروجی و علت افت در اینجا نمایش داده می‌شود.</PWEmpty> : ledger.events.filter(e => e.action === "ثبت سورتینگ").map(event => <p key={event.seq}>{event.entity} · ورودی {event.details.inputWeightKg} kg · خروجی {event.details.outputWeightKg} kg · افت {event.details.lossKg} kg · علت {event.details.lossReason || "بدون افت"}</p>)}</div>
-      <div style={pwBox}><h2>رویدادهای عملیات</h2><small>ترتیب پایدار بر اساس شماره رویداد است؛ زمان برابر ترتیب را تغییر نمی‌دهد.</small>{!ledger.events.length ? <PWEmpty /> : ledger.events.slice().reverse().map(event => <div key={event.seq} style={{ borderBottom: "1px solid #e1eae6", padding: "12px 0" }}><b>#{event.seq} · {event.action}</b> · {event.entity}<small style={{ display: "block", color: "#6a817b", marginTop: 5 }}>{new Date(event.at).toLocaleString("fa-IR")}</small><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 11, color: "#56756d", direction: "ltr" }}>{JSON.stringify(event.details)}</pre></div>)}</div>
-    </div>}
-  </div>;
+    </div>
+  )
+}
+function ProductionScreen(props: any) {
+  const [tab, setTab] = useState("overview"),
+    [ledger, setLedger] = useState<PWLedger>(() => readProductionLedger()),
+    [notice, setNotice] = useState(""),
+    [error, setError] = useState(""),
+    [chosen, setChosen] = useState("")
+  const tabs = [
+    ["overview", "صف کار و مسیر"],
+    ["sorting", "سورتینگ"],
+    ["wash", "شست‌وشو"],
+    ["slice", "اسلایس و سینی"],
+    ["FREEZE", "فریز"],
+    ["FREEZE_DRY", "فریزدرای"],
+    ["DRY", "خشک‌کن"],
+    ["merge", "ادغام فیزیکی"],
+    ["results", "نتایج و رویدادها"],
+  ]
+  const allItems = ledger.items.filter((x) => !x.demo),
+    live = allItems.filter((x) => !x.consumed),
+    current = live.find((x) => x.id === chosen)
+  const execute = (message: string, work: (next: PWLedger) => void) => {
+    setError("")
+    setNotice("")
+    try {
+      const next = readProductionLedger()
+      if (next.storageError) throw Error(next.storageError)
+      work(next)
+      saveProductionLedger(next)
+      setLedger(next)
+      setNotice(message)
+    } catch (failure: any) {
+      setError(failure.message || "ثبت عملیات انجام نشد.")
+    }
+  }
+  const form = (event: any) => {
+    event.preventDefault()
+    return new FormData(event.currentTarget)
+  }
+  const switchTab = (value: string) => {
+    setTab(value)
+    setChosen("")
+    setError("")
+    setNotice("")
+    setLedger(readProductionLedger())
+  }
+  const batchPicker = (items: PWItem[]) => (
+    <PWField label="بچ ورودی">
+      <select
+        required
+        value={chosen}
+        onChange={(e) => setChosen(e.target.value)}
+        style={pwInput}
+      >
+        <option value="">انتخاب بچ…</option>
+        {items.map((x) => (
+          <option key={x.id} value={x.id}>
+            {x.code} · {x.product} · {x.grade}/{x.size} · {x.weightKg} kg
+          </option>
+        ))}
+      </select>
+    </PWField>
+  )
+  const summary = (item: PWItem) => (
+    <PWNotice>
+      {item.code} · {PW_STAGES[item.stage] || item.stage} · وزن رسمی{" "}
+      {item.weightKg} kg · ظرف {item.containerCode || "تخصیص به سینی"} · محل
+      فعلی {PW_ZONES[item.zone] || item.zone}
+      {pwBusy(ledger, item) ? " · قفل چرخه" : ""}
+    </PWNotice>
+  )
+  const move = (id: string) =>
+    execute("انتقال فیزیکی ثبت شد.", (next) => {
+      const item = next.items.find((x) => x.id === id)
+      pwUsable(next, item)
+      const destination = item.nextZone || item.destination
+      if (!destination) throw Error("برای این بچ مسیر عملیاتی مشخص نشده است.")
+      if (destination === item.zone) throw Error("بچ از قبل در محل مقصد است.")
+      const before = item.zone
+      item.zone = destination
+      pwEvent(next, "انتقال فیزیکی", item.code, {
+        from: before,
+        to: destination,
+        containerCode: item.containerCode,
+      })
+    })
+  const processBatch = (event: any, process: "WASH" | "SLICE") => {
+    const data = form(event)
+    execute(
+      process === "WASH"
+        ? "شست‌وشو ثبت شد؛ اکنون انتقال به اسلایس را ثبت کنید."
+        : "اسلایس ثبت شد؛ مرحله بعد از روی مقصد نهایی تعیین شد.",
+      (next) => {
+        const item = next.items.find((x) => x.id === chosen)
+        pwUsable(next, item)
+        const required = process === "WASH" ? "SORTED" : "WASHED",
+          zone = process === "WASH" ? "WASHING" : "SLICING"
+        if (item.stage !== required || item.zone !== zone)
+          throw Error(
+            `بچ باید ${PW_STAGES[required]} و در ${PW_ZONES[zone]} باشد؛ انتقال فیزیکی را در صف کار ثبت کنید.`,
+          )
+        if (
+          pwCode(data.get("scan")) !== item.containerCode ||
+          !item.containerCode
+        )
+          throw Error("QR اسکن‌شده با سبد همین بچ تطبیق ندارد.")
+        pwCarrier(item.containerCode, "basket")
+        const observed = String(data.get("observed") || "").trim()
+        if (
+          observed &&
+          (!Number.isFinite(Number(observed)) || !(Number(observed) > 0))
+        )
+          throw Error("خوانش اطلاعاتی وزن باید مثبت باشد.")
+        pwTransitionWeight(
+          next,
+          item,
+          process === "WASH" ? "WASHING_EXIT" : "SLICING_EXIT",
+          observed ? Number(observed) : undefined,
+        )
+        item.stage = process === "WASH" ? "WASHED" : "SLICED"
+        item.nextZone =
+          process === "WASH"
+            ? "SLICING"
+            : item.destination === "DRYING"
+              ? "DRYING"
+              : "FREEZING"
+        pwEvent(
+          next,
+          process === "WASH" ? "ثبت شست‌وشو" : "ثبت اسلایس",
+          item.code,
+          { nextZone: item.nextZone },
+        )
+      },
+    )
+  }
+  const allocate = (event: any) => {
+    const data = form(event)
+    execute("تخصیص سینی ثبت شد.", (next) => {
+      const item = next.items.find((x) => x.id === chosen)
+      pwUsable(next, item)
+      if (item.stage !== "SLICED" || item.allocated)
+        throw Error("یک بچ اسلایس‌شده با تخصیص باز انتخاب کنید.")
+      const tray = pwCarrier(String(data.get("scan")), "tray"),
+        sequence = Number(data.get("sequence")),
+        raw = String(data.get("quantity") || ""),
+        quantityKg = raw === "" ? null : Number(raw)
+      pwFreeCarrier(next, tray.code, item.id)
+      if (
+        !Number.isInteger(sequence) ||
+        sequence < 1 ||
+        (quantityKg !== null &&
+          (!Number.isFinite(quantityKg) || quantityKg <= 0))
+      )
+        throw Error("ترتیب مثبت و مقدار معتبر وارد کنید.")
+      if (
+        item.trays.some((t) => t.code === tray.code || t.sequence === sequence)
+      )
+        throw Error("کد یا ترتیب سینی تکراری است.")
+      if (quantityKg !== null && quantityKg > tray.capacityKg)
+        throw Error("مقدار از ظرفیت سینی بیشتر است.")
+      const allocated = pwNumber(
+        item.trays.reduce((sum, t) => sum + Number(t.quantityKg || 0), 0) +
+          Number(quantityKg || 0),
+      )
+      if (allocated > item.weightKg)
+        throw Error("مجموع مقدار تخصیص‌یافته از وزن بچ بیشتر است.")
+      item.trays.push({ code: tray.code, quantityKg, sequence })
+      pwEvent(next, "تخصیص سینی", item.code, {
+        tray: tray.code,
+        quantityKg,
+        sequence,
+      })
+    })
+  }
+  const finishAllocation = () =>
+    execute(
+      "تخصیص نهایی شد و سبد مبدا آزاد شد؛ بچ برای ساخت چرخه فریز آماده است.",
+      (next) => {
+        const item = next.items.find((x) => x.id === chosen)
+        pwUsable(next, item)
+        if (item.stage !== "SLICED" || !item.trays.length || item.allocated)
+          throw Error("تخصیص سینی باز و معتبر لازم است.")
+        if (
+          item.trays.every((t) => t.quantityKg !== null) &&
+          pwNumber(item.trays.reduce((sum, t) => sum + t.quantityKg, 0)) !==
+            item.weightKg
+        )
+          throw Error("مجموع وزن سینی‌ها باید با کل وزن بچ برابر باشد.")
+        const released = item.containerCode
+        item.containerCode = ""
+        item.allocated = true
+        pwEvent(next, "تأیید پایان تخصیص", item.code, {
+          releasedContainer: released,
+          trays: item.trays.map((t) => t.code),
+        })
+      },
+    )
+  const createCycle = (event: any, type: string) => {
+    const data = form(event)
+    execute(
+      "چرخه آماده ایجاد شد؛ بچ‌ها تا پایان یا لغو چرخه قفل هستند.",
+      (next) => {
+        const machineId = String(data.get("machine"))
+        if (!(next.machines[type] || []).includes(machineId))
+          throw Error("تجهیز انتخاب‌شده برای این فرآیند فعال نیست.")
+        if (
+          next.cycles.some(
+            (c) => c.machineId === machineId && PW_ACTIVE.includes(c.status),
+          )
+        )
+          throw Error("این ماشین در یک چرخه فعال مشغول است.")
+        const ids = data.getAll("items").map(String),
+          items = ids.map((id) => next.items.find((x) => x.id === id))
+        if (!items.length) throw Error("حداقل یک بچ انتخاب کنید.")
+        const scans = String(data.get("trays") || "")
+          .split(/[\s,،]+/)
+          .filter(Boolean)
+          .map(pwCode)
+        const expectedStage =
+            type === "FREEZE"
+              ? "SLICED"
+              : type === "FREEZE_DRY"
+                ? "FROZEN"
+                : "SLICED",
+          expectedZone =
+            type === "FREEZE"
+              ? "FREEZING"
+              : type === "FREEZE_DRY"
+                ? "FREEZE_DRYING"
+                : "DRYING"
+        items.forEach((item) => {
+          pwUsable(next, item)
+          if (item.stage !== expectedStage || item.zone !== expectedZone)
+            throw Error(
+              "مرحله یا محل فعلی یکی از بچ‌ها برای این چرخه مناسب نیست.",
+            )
+        })
+        if (items.some((item) => !!item!.demo !== !!items[0]!.demo))
+          throw Error("بچ آزمایشی و داده شما نباید در یک چرخه ترکیب شوند.")
+        const available = pwNumber(
+          items.reduce((sum, item) => sum + item!.weightKg, 0),
+        )
+        const inputWeightKg =
+          type === "FREEZE" ? available : Number(data.get("inputWeight"))
+        if (!(inputWeightKg > 0) || inputWeightKg > available)
+          throw Error(
+            "وزن کل ورودی باید مثبت و حداکثر برابر موجودی انتخابی باشد.",
+          )
+        if (type === "FREEZE") {
+          const expected = items.flatMap((item) =>
+            item!.trays.map((t) => t.code),
+          )
+          if (
+            items.some((item) => !item!.allocated) ||
+            !expected.length ||
+            new Set(scans).size !== scans.length ||
+            expected.length !== scans.length ||
+            expected.some((code) => !scans.includes(code))
+          )
+            throw Error(
+              "همه سینی‌های تخصیص‌یافته بچ‌های انتخابی را دقیقاً یک‌بار اسکن کنید.",
+            )
+          scans.forEach((code) => pwCarrier(code, "tray"))
+        }
+        const code = pwId(next, "CY"),
+          cycle = {
+            id: code,
+            code,
+            type,
+            machineId,
+            itemIds: ids,
+            trayCodes: scans,
+            inputWeightKg,
+            status: "READY",
+            createdAt: new Date().toISOString(),
+            demo: !!items[0]!.demo,
+          }
+        next.cycles.push(cycle)
+        pwEvent(next, "ساخت چرخه", code, {
+          type,
+          machineId,
+          batches: ids,
+          inputWeightKg,
+        })
+      },
+    )
+  }
+  const cycleAction = (event: any, id: string, action: string) => {
+    const data = form(event)
+    execute("وضعیت چرخه و موجودی به‌روزرسانی شد.", (next) => {
+      const cycle = next.cycles.find((c) => c.id === id)
+      if (!cycle) throw Error("چرخه پیدا نشد.")
+      const running = cycle.type === "DRY" ? "IN_PROGRESS" : "RUNNING",
+        transitions: any = {
+          READY: { START: running, CANCEL: "CANCELLED" },
+          RUNNING: { PAUSE: "PAUSED", COMPLETE: "COMPLETING", FAIL: "FAILED" },
+          IN_PROGRESS: {
+            PAUSE: "PAUSED",
+            COMPLETE: "COMPLETING",
+            FAIL: "FAILED",
+          },
+          PAUSED: { RESUME: running, CANCEL: "CANCELLED", FAIL: "FAILED" },
+          COMPLETING: { FINISH: "COMPLETED", FAIL: "FAILED" },
+          FAILED: { RESUME: running, RESTART: "READY", SCRAP: "SCRAPPED" },
+        }
+      const target = transitions[cycle.status]?.[action],
+        reason = String(data.get("reason") || "").trim(),
+        items: PWItem[] = cycle.itemIds.map(
+          (itemId: string) => next.items.find((x) => x.id === itemId)!,
+        )
+      if (!target) throw Error("این تغییر وضعیت مجاز نیست.")
+      if ((action === "FAIL" || cycle.status === "FAILED") && !reason)
+        throw Error("علت خرابی یا تصمیم مدیر را وارد کنید.")
+      if (
+        cycle.status === "FAILED" &&
+        items.some(
+          (item) => item.consumed || item.weightKg <= 0 || pwBusy(next, item),
+        )
+      )
+        throw Error("بچ پس از خرابی مصرف شده یا در چرخه دیگری استفاده شده است.")
+      if (cycle.status === "FAILED")
+        items.forEach((item) => {
+          if (item.cycleFailureId === cycle.id) {
+            item.blocked = false
+            delete item.cycleFailureId
+          }
+        })
+      if (action === "FAIL")
+        items.forEach((item) => {
+          item.blocked = true
+          item.cycleFailureId = cycle.id
+        })
+      if (action === "FINISH") {
+        items.forEach((item) => {
+          if (cycle.type === "FREEZE") {
+            const freezeOnly = item.destination === "FREEZING"
+            item.stage = "FROZEN"
+            item.zone = freezeOnly ? "PACKAGING" : "FREEZE_DRYING"
+            item.nextZone = item.zone
+          } else {
+            const measured = Number(data.get(`weight-${item.id}`))
+            if (
+              !Number.isFinite(measured) ||
+              !(measured > 0) ||
+              measured > item.weightKg
+            )
+              throw Error(
+                `وزن نهایی معتبر برای ${item.code} لازم است؛ حداکثر ${item.weightKg} kg.`,
+              )
+            item.beforeDryWeightKg = item.weightKg
+            item.weightKg = pwNumber(measured)
+            item.yieldPercent = pwNumber(
+              (measured / item.beforeDryWeightKg) * 100,
+            )
+            item.stage = cycle.type === "DRY" ? "DRIED" : "FREEZE_DRIED"
+            item.zone = "PACKAGING"
+            item.nextZone = "PACKAGING"
+            item.containerCode = ""
+            item.trays = []
+            item.allocated = false
+          }
+        })
+      }
+      if (action === "SCRAP")
+        items.forEach((item) => {
+          item.weightKg = 0
+          item.stage = "WASTED"
+          item.zone = "WASTE"
+          item.consumed = true
+          item.containerCode = ""
+          item.trays = []
+        })
+      const from = cycle.status
+      cycle.status = target
+      if (action === "START") cycle.startedAt = new Date().toISOString()
+      if (["COMPLETED", "FAILED", "CANCELLED", "SCRAPPED"].includes(target))
+        cycle.endedAt = new Date().toISOString()
+      pwEvent(next, `چرخه: ${action}`, cycle.code, {
+        from,
+        to: target,
+        reason: reason || null,
+        weights: items.map((item) => ({
+          code: item.code,
+          weightKg: item.weightKg,
+          stage: item.stage,
+        })),
+      })
+    })
+  }
+  const merge = (event: any) => {
+    const data = form(event)
+    execute(
+      "ادغام فیزیکی ثبت شد؛ بچ جدید و شجره ورودی‌ها در نتایج قابل مشاهده است.",
+      (next) => {
+        const ids = data.getAll("items").map(String),
+          items = ids.map((id) => next.items.find((x) => x.id === id))
+        if (items.length < 2) throw Error("حداقل دو بچ انتخاب کنید.")
+        items.forEach((item) => {
+          pwUsable(next, item)
+          if (item!.trays.length)
+            throw Error(
+              "بچ تخصیص‌یافته به سینی ابتدا باید عملیات جاری خود را تکمیل کند.",
+            )
+        })
+        if (items.some((item) => !!item!.demo !== !!items[0]!.demo))
+          throw Error("بچ‌های آزمایشی را با داده خودتان ادغام نکنید.")
+        if (items.some((item) => item!.product !== items[0]!.product))
+          throw Error(
+            "در این نمونه رابط، ادغام فقط برای یک محصول مشترک انجام می‌شود.",
+          )
+        const carrier = pwCarrier(String(data.get("scan")), "basket")
+        pwFreeCarrier(next, carrier.code)
+        if (data.get("staged") !== "on")
+          throw Error("قرارگیری فیزیکی سبد خالی در سورتینگ را تأیید کنید.")
+        const weightKg = Number(data.get("weight")),
+          sum = pwNumber(items.reduce((n, item) => n + item!.weightKg, 0))
+        if (!(weightKg > 0) || weightKg > sum || weightKg > carrier.capacityKg)
+          throw Error(
+            "وزن خروجی باید مثبت و در محدوده وزن ورودی و ظرفیت سبد باشد.",
+          )
+        const grade = String(data.get("grade") || ""),
+          size = String(data.get("size") || "")
+        if (!grade || !size) throw Error("گرید و اندازه خروجی لازم است.")
+        const code = pwId(next, "B"),
+          child: PWItem = {
+            id: code,
+            code,
+            parentId: ids.join(","),
+            parentIds: ids,
+            inputCodes: items.map((item) => item!.containerCode),
+            parentContributions: items.map((item) => ({
+              id: item!.id,
+              weightKg: item!.weightKg,
+            })),
+            product: items[0]!.product,
+            grade,
+            size,
+            weightKg: pwNumber(weightKg),
+            stage: "SORTED",
+            zone: "SORTING",
+            destination: null,
+            containerCode: carrier.code,
+            trays: [],
+            allocated: false,
+            consumed: false,
+            blocked: false,
+            demo: !!items[0]!.demo,
+          }
+        items.forEach((item) => {
+          item!.consumed = true
+          item!.stage = "CONSUMED"
+          item!.weightKg = 0
+          item!.containerCode = ""
+        })
+        next.items.push(child)
+        pwEvent(next, "ادغام فیزیکی", code, {
+          parents: ids,
+          inputWeightKg: sum,
+          outputWeightKg: weightKg,
+          lossKg: pwNumber(sum - weightKg),
+          container: carrier.code,
+        })
+      },
+    )
+  }
+  const cycleType = ["FREEZE", "FREEZE_DRY", "DRY"].includes(tab) ? tab : ""
+  const cycleEligible = live.filter(
+    (item) =>
+      !pwBusy(ledger, item) &&
+      !item.blocked &&
+      (cycleType === "FREEZE"
+        ? item.stage === "SLICED" && item.allocated && item.zone === "FREEZING"
+        : cycleType === "FREEZE_DRY"
+          ? item.stage === "FROZEN" && item.zone === "FREEZE_DRYING"
+          : item.stage === "SLICED" &&
+            item.destination === "DRYING" &&
+            item.zone === "DRYING"),
+  )
+  return (
+    <div
+      dir="rtl"
+      style={{
+        padding: 24,
+        color: "#183e38",
+        background: "#f3f7f6",
+        flex: 1,
+        minHeight: 0,
+        overflow: "auto",
+        fontFamily: "inherit",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 16,
+          marginBottom: 16,
+        }}
+      >
+        <div>
+          <h1 style={{ fontSize: 25, margin: 0 }}>میز کار تولید</h1>
+          <p style={{ color: "#6a817b", margin: "6px 0" }}>
+            از سبد ورودی تا عملیات ماشین، خروجی و رهگیری با داده همین نشست
+          </p>
+        </div>
+      </div>
+      <div
+        style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 16 }}
+      >
+        {tabs.map(([id, name]) => (
+          <PWButton
+            key={id}
+            secondary={tab !== id}
+            onClick={() => switchTab(id)}
+          >
+            {name}
+          </PWButton>
+        ))}
+      </div>
+      {(error || ledger.storageError) && (
+        <div
+          role="alert"
+          style={{
+            padding: 14,
+            marginBottom: 16,
+            color: "#9f2323",
+            background: "#fff0f0",
+            borderRadius: 10,
+          }}
+        >
+          {error || ledger.storageError}
+        </div>
+      )}
+      {notice && (
+        <div role="status">
+          <PWNotice>{notice}</PWNotice>
+        </div>
+      )}
+      {tab === "sorting" && <SortingScreen {...props} />}
+      {tab === "wash" && (
+        <WashingSessionScreen
+          ledger={ledger}
+          onChange={(next, message) => {
+            setLedger(next)
+            setNotice(message)
+            setError("")
+          }}
+        />
+      )}
+      {tab === "overview" && (
+        <>
+          <PWNotice>
+            مقصد نهایی هنگام توزین هر خروجی توسط کارشناس سورت تعیین می‌شود. خشک،
+            فریز و فریزدرای همگی از شست‌وشو و اسلایس عبور می‌کنند؛ ارسال تازه هرگز
+            شسته نمی‌شود. مدیر فقط بعداً با ثبت علت می‌تواند مقصد را اصلاح کند.
+            مقصد کاری و انتقال فیزیکی همچنان دو ثبت جدا هستند.
+          </PWNotice>
+          <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+            {[
+              ["بچ جاری", live.length],
+              [
+                "چرخه فعال",
+                ledger.cycles.filter((c) => PW_ACTIVE.includes(c.status))
+                  .length,
+              ],
+              ["مسیر تعیین‌شده", live.filter((x) => !!x.destination).length],
+            ].map(([title, count]) => (
+              <div key={String(title)} style={{ ...pwBox, flex: 1 }}>
+                <small>{title}</small>
+                <div style={{ fontSize: 28, marginTop: 8 }}>{count}</div>
+              </div>
+            ))}
+          </div>
+          {!live.length ? (
+            <PWEmpty>
+              ابتدا سبدهای همان محموله را در سورتینگ ثبت کنید؛ خروجی‌ها در همین
+              صف نمایش داده می‌شوند.
+            </PWEmpty>
+          ) : (
+            <div style={{ display: "grid", gap: 12 }}>
+              {live.map((item) => (
+                <div key={item.id} style={pwBox}>
+                  {summary(item)}
+                  <div style={{ fontSize: 13, marginBottom: 12 }}>
+                    محصول: {item.product} · گرید {item.grade} · اندازه{" "}
+                    {item.size} · مبدا {item.parentId} · سبد ورودی{" "}
+                    {item.inputCodes.join("، ") || "—"}
+                    {item.plannedRoute
+                      ? ` · مسیر پیشنهادی سورت: ${item.plannedRoute}`
+                      : ""}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      alignItems: "end",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {item.destination && item.stage === "SORTED" && (
+                      <form
+                        onSubmit={(event) => {
+                          const data = form(event)
+                          execute(
+                            "اصلاح مقصد ثبت شد؛ انتقال فیزیکی هنوز انجام نشده است.",
+                            (next) => {
+                              const row = next.items.find(
+                                (x) => x.id === item.id,
+                              )
+                              pwUsable(next, row)
+                              const destination = String(
+                                  data.get("destination"),
+                                ),
+                                reason = String(data.get("reason") || "").trim()
+                              if (!reason)
+                                throw Error("علت اصلاح مقصد الزامی است.")
+                              if (row.destination === destination)
+                                throw Error("مقصد تغییری نکرده است.")
+                              const previous = row.destination
+                              row.destination = destination
+                              row.nextZone = [
+                                "DRYING",
+                                "FREEZING",
+                                "FREEZE_DRYING",
+                              ].includes(destination)
+                                ? "WASHING"
+                                : destination
+                              pwEvent(next, "اصلاح مقصد", row.code, {
+                                previous,
+                                destination,
+                                reason,
+                              })
+                            },
+                          )
+                        }}
+                        style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+                      >
+                        <select
+                          name="destination"
+                          defaultValue={item.destination}
+                          style={{ ...pwInput, width: 180 }}
+                          required
+                        >
+                          {[
+                            "FRESH_EXPORT",
+                            "DRYING",
+                            "FREEZING",
+                            "FREEZE_DRYING",
+                            "QC",
+                            "COLD_ROOM_CLEAN",
+                            "COLD_ROOM_DIRTY",
+                            "WASTE",
+                          ].map((zone) => (
+                            <option key={zone} value={zone}>
+                              {PW_ZONES[zone]}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          name="reason"
+                          required
+                          placeholder="علت اصلاح مقصد"
+                          style={{ ...pwInput, width: 190 }}
+                        />
+                        <PWButton disabled={pwBusy(ledger, item)}>
+                          اصلاح مقصد
+                        </PWButton>
+                      </form>
+                    )}
+                    <span>
+                      مرحله بعد:{" "}
+                      {PW_ZONES[item.nextZone || item.destination || ""] ||
+                        "مسیر نامشخص"}
+                    </span>
+                    <PWButton
+                      secondary
+                      disabled={
+                        pwBusy(ledger, item) ||
+                        !(item.nextZone || item.destination) ||
+                        item.zone === (item.nextZone || item.destination) ||
+                        (item.stage === "SLICED" &&
+                          item.nextZone === "FREEZING" &&
+                          !item.allocated)
+                      }
+                      onClick={() => move(item.id)}
+                    >
+                      تأیید انتقال فیزیکی
+                    </PWButton>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {tab === "slice" && (
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}
+        >
+          <div style={pwBox}>
+            <h2>ثبت اسلایس یک بچ کامل</h2>
+            <PWNotice>
+              ورود با اسکن انجام می‌شود و وزن انتقال اختیاری است؛ در صورت ثبت،
+              اختلاف با آخرین وزن معتبر در تاریخچه ذخیره می‌شود.
+            </PWNotice>
+            <form onSubmit={(event) => processBatch(event, "SLICE")}>
+              {batchPicker(
+                live.filter((x) => x.stage === "WASHED" && !pwBusy(ledger, x)),
+              )}
+              {current && summary(current)}
+              <PWField label="اسکن QR سبد همین بچ">
+                <input
+                  name="scan"
+                  placeholder="اسکن یا ورود کد خوانده‌شده"
+                  required
+                  style={pwInput}
+                />
+              </PWField>
+              <PWField label="وزن خروج از شست‌وشو / ورود به اسلایس (kg، اختیاری)">
+                <input
+                  name="observed"
+                  type="number"
+                  min="0.001"
+                  step="0.001"
+                  style={pwInput}
+                />
+              </PWField>
+              <PWButton disabled={!current || current.stage !== "WASHED"}>
+                تأیید پایان اسلایس
+              </PWButton>
+            </form>
+          </div>
+          {tab === "slice" && (
+            <div style={pwBox}>
+              <h2>تخصیص سینی‌های خروجی اسلایس</h2>
+              {batchPicker(
+                live.filter(
+                  (x) =>
+                    x.stage === "SLICED" &&
+                    x.destination !== "DRYING" &&
+                    !pwBusy(ledger, x),
+                ),
+              )}
+              {current?.stage === "SLICED" &&
+              current.destination !== "DRYING" ? (
+                <>
+                  {summary(current)}
+                  <PWNotice>
+                    برای مسیر فریز یا فریزدرای، فقط سینی سالم پذیرفته می‌شود.
+                    مسیر خشک در همان سبد به خشک‌کن می‌رود و این مرحله را ندارد.
+                  </PWNotice>
+                  <form onSubmit={allocate}>
+                    <PWField label="اسکن QR سینی موجود">
+                      <input name="scan" required style={pwInput} />
+                    </PWField>
+                    <PWField label="ترتیب سینی">
+                      <input
+                        name="sequence"
+                        type="number"
+                        min="1"
+                        step="1"
+                        defaultValue="1"
+                        required
+                        style={pwInput}
+                      />
+                    </PWField>
+                    <PWField label="مقدار محصول در سینی (kg، اختیاری)">
+                      <input
+                        name="quantity"
+                        type="number"
+                        min="0.001"
+                        step="0.001"
+                        style={pwInput}
+                      />
+                    </PWField>
+                    <PWButton disabled={current.allocated}>
+                      ثبت این سینی
+                    </PWButton>
+                  </form>
+                  <div style={{ margin: "16px 0" }}>
+                    {current.trays.map((tray) => (
+                      <p key={tray.code}>
+                        {tray.sequence}. {tray.code} ·{" "}
+                        {tray.quantityKg === null
+                          ? "بدون وزن مجزا"
+                          : `${tray.quantityKg} kg`}
+                      </p>
+                    ))}
+                  </div>
+                  <PWButton
+                    disabled={current.allocated || !current.trays.length}
+                    onClick={finishAllocation}
+                  >
+                    {current.allocated
+                      ? "تخصیص نهایی شده"
+                      : "تأیید پایان تخصیص و آزادسازی سبد"}
+                  </PWButton>
+                </>
+              ) : (
+                <PWEmpty>
+                  فقط بچ اسلایس‌شده با مقصد فریز یا فریزدرای به سینی تخصیص
+                  می‌یابد.
+                </PWEmpty>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {cycleType && (
+        <>
+          <div style={pwBox}>
+            <h2>
+              {cycleType === "FREEZE"
+                ? "ساخت چرخه فریز از سینی‌های تخصیص‌یافته"
+                : cycleType === "FREEZE_DRY"
+                  ? "ساخت چرخه فریزدرای"
+                  : "ساخت چرخه خشک‌کن"}
+            </h2>
+            <PWNotice>
+              {cycleType === "DRY"
+                ? "فقط بچ شسته و اسلایس‌شده با مقصد خشک وارد خشک‌کن می‌شود."
+                : cycleType === "FREEZE"
+                  ? "تمام سینی‌ها اسکن می‌شوند؛ مقصد فریز پس از چرخه به بسته‌بندی می‌رود و مقصد فریزدرای به مرحله فریزدرای."
+                  : "فقط بچی که مقصد نهایی آن فریزدرای است پس از فریز وارد این چرخه می‌شود."}
+            </PWNotice>
+            {!cycleEligible.length ? (
+              <PWEmpty>
+                بچ آماده با مرحله و محل صحیح وجود ندارد. صف کار و انتقال فیزیکی
+                را بررسی کنید.
+              </PWEmpty>
+            ) : (
+              <form onSubmit={(event) => createCycle(event, cycleType)}>
+                <PWField label="تجهیز">
+                  <select name="machine" style={pwInput}>
+                    {ledger.machines[cycleType].map((code) => (
+                      <option key={code}>{code}</option>
+                    ))}
+                  </select>
+                </PWField>
+                <PWField label="بچ‌های ورودی (انتخاب یک یا چند مورد)">
+                  <div>
+                    {cycleEligible.map((item) => (
+                      <label
+                        key={item.id}
+                        style={{
+                          display: "block",
+                          padding: 10,
+                          borderBottom: "1px solid #e2eae7",
+                        }}
+                      >
+                        <input type="checkbox" name="items" value={item.id} />{" "}
+                        {item.code} · {item.weightKg} kg ·{" "}
+                        {item.containerCode ||
+                          item.trays.map((t) => t.code).join("، ")}
+                      </label>
+                    ))}
+                  </div>
+                </PWField>
+                {cycleType === "FREEZE" ? (
+                  <PWField label="کد سینی‌های اسکن‌شده؛ هر کد در یک خط">
+                    <textarea name="trays" rows={3} required style={pwInput} />
+                  </PWField>
+                ) : (
+                  <PWField label="وزن کل ورودی چرخه (kg)">
+                    <input
+                      name="inputWeight"
+                      type="number"
+                      min="0.001"
+                      step="0.001"
+                      required
+                      style={pwInput}
+                    />
+                  </PWField>
+                )}
+                <PWButton>ایجاد چرخه آماده</PWButton>
+              </form>
+            )}
+          </div>
+          <div style={{ display: "grid", gap: 14, marginTop: 20 }}>
+            {ledger.cycles
+              .filter((c) => c.type === cycleType && !c.demo)
+              .slice()
+              .reverse()
+              .map((cycle) => (
+                <div style={pwBox} key={cycle.id}>
+                  <h3>
+                    {cycle.code} · {PW_STAGES[cycle.status]}
+                  </h3>
+                  <p>
+                    {cycle.machineId} · ورودی {cycle.inputWeightKg} kg · بچ‌ها:{" "}
+                    {cycle.itemIds.join("، ")}
+                  </p>
+                  <form
+                    onSubmit={(event) => {
+                      const submitter = (event.nativeEvent as any).submitter
+                      cycleAction(event, cycle.id, submitter?.value)
+                    }}
+                  >
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {cycle.status === "COMPLETING" &&
+                        cycle.type !== "FREEZE" &&
+                        cycle.itemIds.map((id: string) => (
+                          <PWField key={id} label={`وزن نهایی ${id} (kg)`}>
+                            <input
+                              name={`weight-${id}`}
+                              type="number"
+                              min="0.001"
+                              step="0.001"
+                              max={
+                                ledger.items.find((x) => x.id === id)?.weightKg
+                              }
+                              style={pwInput}
+                            />
+                          </PWField>
+                        ))}
+                      {[
+                        "RUNNING",
+                        "IN_PROGRESS",
+                        "PAUSED",
+                        "COMPLETING",
+                        "FAILED",
+                      ].includes(cycle.status) && (
+                        <input
+                          name="reason"
+                          placeholder="علت خرابی / تصمیم مدیر"
+                          style={{ ...pwInput, width: 250 }}
+                        />
+                      )}
+                      {(
+                        ({
+                          READY: ["START", "CANCEL"],
+                          RUNNING: ["PAUSE", "COMPLETE", "FAIL"],
+                          IN_PROGRESS: ["PAUSE", "COMPLETE", "FAIL"],
+                          PAUSED: ["RESUME", "CANCEL", "FAIL"],
+                          COMPLETING: ["FINISH", "FAIL"],
+                          FAILED: ["RESUME", "RESTART", "SCRAP"],
+                        } as any)[cycle.status] || []
+                      ).map((action: string) => (
+                        <PWButton
+                          key={action}
+                          type="submit"
+                          name="action"
+                          value={action}
+                          secondary={["CANCEL", "FAIL", "SCRAP"].includes(
+                            action,
+                          )}
+                        >
+                          {
+                            ({
+                              START: "شروع چرخه",
+                              CANCEL: "لغو",
+                              PAUSE: "مکث",
+                              RESUME: "ادامه",
+                              COMPLETE: "پایان فرآیند؛ آماده تخلیه",
+                              FINISH: "ثبت خروجی و پایان تخلیه",
+                              FAIL: "ثبت خرابی",
+                              RESTART: "بازگشت به آماده",
+                              SCRAP: "اسقاط محصول",
+                            } as any)[action]
+                          }
+                        </PWButton>
+                      ))}
+                    </div>
+                  </form>
+                </div>
+              ))}
+          </div>
+        </>
+      )}
+      {tab === "merge" && (
+        <div style={{ ...pwBox, maxWidth: 850 }}>
+          <h2>ادغام فیزیکی در یک سبد مجزا</h2>
+          <PWNotice>
+            این عملیات یک بچ جدید با شجره ورودی می‌سازد؛ گروه‌بندی نمایشی سبدها
+            محسوب نمی‌شود. در این رابط تمام وزن بچ‌های انتخابی مصرف می‌شود.
+          </PWNotice>
+          <form onSubmit={merge}>
+            <PWField label="بچ‌های ورودی">
+              <div>
+                {live
+                  .filter((item) => !pwBusy(ledger, item) && !item.trays.length)
+                  .map((item) => (
+                    <label
+                      key={item.id}
+                      style={{ display: "block", padding: 8 }}
+                    >
+                      <input name="items" type="checkbox" value={item.id} />{" "}
+                      {item.code} · {item.product} · {item.grade}/{item.size} ·{" "}
+                      {item.weightKg} kg
+                    </label>
+                  ))}
+              </div>
+            </PWField>
+            <PWField label="اسکن سبد خالی خروجی در سورتینگ">
+              <input name="scan" required style={pwInput} />
+            </PWField>
+            <label style={{ display: "block", marginBottom: 14 }}>
+              <input name="staged" type="checkbox" required /> سبد خروجی خالی و
+              در محل سورتینگ قرار دارد.
+            </label>
+            <PWField label="وزن خروجی (kg)">
+              <input
+                name="weight"
+                type="number"
+                min="0.001"
+                step="0.001"
+                required
+                style={pwInput}
+              />
+            </PWField>
+            <PWField label="گرید خروجی">
+              <select name="grade" required style={pwInput}>
+                <option value="">انتخاب…</option>
+                {[...new Set(live.map((x) => x.grade))].map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
+            </PWField>
+            <PWField label="اندازه خروجی">
+              <select name="size" required style={pwInput}>
+                <option value="">انتخاب…</option>
+                {[...new Set(live.map((x) => x.size))].map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
+            </PWField>
+            <PWButton disabled={live.length < 2}>
+              تأیید ادغام و ایجاد بچ
+            </PWButton>
+          </form>
+        </div>
+      )}
+      {tab === "results" && (
+        <div style={{ display: "grid", gap: 18 }}>
+          <div style={pwBox}>
+            <h2>بچ‌ها، خروجی‌ها و شجره</h2>
+            {!allItems.length ? (
+              <PWEmpty />
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    fontSize: 13,
+                  }}
+                >
+                  <thead>
+                    <tr>
+                      {[
+                        "بچ",
+                        "محصول / گرید / اندازه",
+                        "والد / سبد ورودی",
+                        "ظرف فعلی",
+                        "وزن رسمی",
+                        "بازده",
+                        "وضعیت / محل",
+                      ].map((h) => (
+                        <th
+                          key={h}
+                          style={{
+                            padding: 12,
+                            textAlign: "right",
+                            background: "#eff6f3",
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allItems.map((item) => (
+                      <tr key={item.id}>
+                        {[
+                          item.code,
+                          `${item.product} / ${item.grade} / ${item.size}`,
+                          `${item.parentId} / ${item.inputCodes.join("، ")}`,
+                          item.containerCode ||
+                            item.trays.map((t) => t.code).join("، ") ||
+                            "—",
+                          `${item.weightKg} kg`,
+                          item.yieldPercent === undefined
+                            ? "—"
+                            : `${item.yieldPercent}%`,
+                          `${PW_STAGES[item.stage]} / ${PW_ZONES[item.zone] || item.zone}`,
+                        ].map((value, index) => (
+                          <td
+                            key={index}
+                            style={{
+                              padding: 12,
+                              borderBottom: "1px solid #e1eae6",
+                            }}
+                          >
+                            {value}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <div style={pwBox}>
+            <h2>افت سورتینگ</h2>
+            {!ledger.events.some((e) => e.action === "ثبت سورتینگ") ? (
+              <PWEmpty>
+                پس از ثبت سورتینگ، وزن ورودی، خروجی و علت افت در اینجا نمایش
+                داده می‌شود.
+              </PWEmpty>
+            ) : (
+              ledger.events
+                .filter((e) => e.action === "ثبت سورتینگ")
+                .map((event) => (
+                  <p key={event.seq}>
+                    {event.entity} · ورودی {event.details.inputWeightKg} kg ·
+                    خروجی {event.details.outputWeightKg} kg · افت{" "}
+                    {event.details.lossKg} kg · علت{" "}
+                    {event.details.lossReason || "بدون افت"}
+                  </p>
+                ))
+            )}
+          </div>
+          <div style={pwBox}>
+            <h2>رویدادهای عملیات</h2>
+            <small>
+              ترتیب پایدار بر اساس شماره رویداد است؛ زمان برابر ترتیب را تغییر
+              نمی‌دهد.
+            </small>
+            {!ledger.events.length ? (
+              <PWEmpty />
+            ) : (
+              ledger.events
+                .slice()
+                .reverse()
+                .map((event) => (
+                  <div
+                    key={event.seq}
+                    style={{
+                      borderBottom: "1px solid #e1eae6",
+                      padding: "12px 0",
+                    }}
+                  >
+                    <b>
+                      #{event.seq} · {event.action}
+                    </b>{" "}
+                    · {event.entity}
+                    <small
+                      style={{
+                        display: "block",
+                        color: "#6a817b",
+                        marginTop: 5,
+                      }}
+                    >
+                      {new Date(event.at).toLocaleString("fa-IR")}
+                    </small>
+                    <pre
+                      style={{
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "anywhere",
+                        fontSize: 11,
+                        color: "#56756d",
+                        direction: "ltr",
+                      }}
+                    >
+                      {JSON.stringify(event.details)}
+                    </pre>
+                  </div>
+                ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // Figma prototype fragment; assembled into WebApp.tsx. No backend calls.
 function SortingScreen() {
-  const batch = readPrototypeBatch(), ledger = readProductionLedger();
-  const [step, setStep] = useState("input"), [inputCodes, setInputCodes] = useState<string[]>([""]), [outputCode, setOutputCode] = useState(""), [gross, setGross] = useState(""), [grade, setGrade] = useState("A"), [size, setSize] = useState("درشت"), [destination, setDestination] = useState("FRESH_EXPORT"), [contributions, setContributions] = useState<Record<string, string>>({}), [lossReason, setLossReason] = useState(""), [outputs, setOutputs] = useState<any[]>([]), [error, setError] = useState(""), [scale, setScale] = useState("STABLE"), [staged, setStaged] = useState<string[]>([]);
-  const fleet: any[] = (() => { try { return JSON.parse(localStorage.getItem("storemesh.prototype.containers") || "[]"); } catch { return []; } })();
-  const consumed = ledger.consumedInputs || [], used = (b: any) => consumed.includes(batch.id + ":" + b.code);
-  const blocked = (b: any) => { const physical = fleet.find(c => (c.qr || c.code) === b.code); return used(b) || !!physical?.locked || /خراب|DAMAGED/.test(physical?.status || "") || /قرنطینه|در راه|خراب|CONSUMED|QUARANTINE|BLOCKED|DAMAGED/.test(b.status || "") || /قرنطینه/.test(b.zone || ""); };
-  const sources = inputCodes.map(code => batch.baskets.find((b: any) => b.code === code)).filter(Boolean), inputWeight = Number(sources.reduce((n: number, source: any) => n + Number(source.gross) - Number(source.tare), 0).toFixed(3)), total = Number(outputs.reduce((n, o) => n + o.weight, 0).toFixed(3)), loss = Number((inputWeight - total).toFixed(3));
-  const occupied = (code: string) => ledger.items.some((i: any) => i.containerCode === code && !i.consumed && !i.allocated && i.weightKg > 0) || batch.baskets.some((b: any) => b.code === code && !used(b));
-  const pool = fleet.filter(c => (c.status === "فعال" || c.status === "AVAILABLE") && !c.singleUse && !/سینی|TRAY|SINGLE_USE/.test(c.type || "") && !c.locked && !occupied(c.qr || c.code)), carrier = pool.find(c => (c.qr || c.code) === outputCode), tare = Number(carrier?.tare ?? carrier?.tareWeightKg ?? 0), net = Number((Number(gross) - tare).toFixed(3)), zones = carrier?.zones || carrier?.designatedZones || [], warning = carrier && !zones.includes("SORTING");
-  const field = "h-11 w-full rounded-lg border border-[#d4e2db] bg-white px-3 text-[13px]", primary = "rounded-lg bg-[#176b50] px-4 py-3 text-white text-[12px] font-bold disabled:opacity-40";
-  const destinationLabel: Record<string, string> = { FRESH_EXPORT: "ارسال تازه · بدون شست‌وشو", DRYING: "خشک · شست‌وشو ← اسلایس ← خشک", FREEZING: "فریز · شست‌وشو ← اسلایس ← فریز", FREEZE_DRYING: "فریزدرای · شست‌وشو ← اسلایس ← فریز ← فریزدرای", QC: "کنترل کیفیت", COLD_ROOM_CLEAN: "سردخانه تمیز", COLD_ROOM_DIRTY: "سردخانه کثیف", WASTE: "دفع" };
+  const batch = readPrototypeBatch(),
+    ledger = readProductionLedger()
+  const [step, setStep] = useState("input"),
+    [inputCodes, setInputCodes] = useState<string[]>([]),
+    [scanCode, setScanCode] = useState(""),
+    [entryWeight, setEntryWeight] = useState(""),
+    [entryWeights, setEntryWeights] = useState<Record<string, number>>({}),
+    [outputCode, setOutputCode] = useState(""),
+    [gross, setGross] = useState(""),
+    [grade, setGrade] = useState("A"),
+    [size, setSize] = useState("درشت"),
+    [destination, setDestination] = useState("FRESH_EXPORT"),
+    [contributions, setContributions] = useState<Record<string, string>>({}),
+    [lossReason, setLossReason] = useState(""),
+    [outputs, setOutputs] = useState<any[]>([]),
+    [error, setError] = useState(""),
+    [scale, setScale] = useState("STABLE"),
+    [staged, setStaged] = useState<string[]>([])
+  const fleet: any[] = (() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem("storemesh.prototype.containers") || "[]",
+      )
+    } catch {
+      return []
+    }
+  })()
+  const consumed = ledger.consumedInputs || [],
+    used = (b: any) => consumed.includes(batch.id + ":" + b.code)
+  const blocked = (b: any) => {
+    const physical = fleet.find((c) => (c.qr || c.code) === b.code)
+    return (
+      used(b) ||
+      !!physical?.locked ||
+      /خراب|DAMAGED/.test(physical?.status || "") ||
+      /قرنطینه|در راه|خراب|CONSUMED|QUARANTINE|BLOCKED|DAMAGED/.test(
+        b.status || "",
+      ) ||
+      /قرنطینه/.test(b.zone || "")
+    )
+  }
+  const sources = inputCodes
+      .map((code) => batch.baskets.find((b: any) => b.code === code))
+      .filter(Boolean),
+    inputWeight = Number(
+      sources
+        .reduce(
+          (n: number, source: any) =>
+            n +
+            (entryWeights[pwCode(source.code)] ??
+              Number(source.gross) - Number(source.tare)),
+          0,
+        )
+        .toFixed(3),
+    ),
+    total = Number(outputs.reduce((n, o) => n + o.weight, 0).toFixed(3)),
+    loss = Number((inputWeight - total).toFixed(3))
+  const scannedSource = batch.baskets.find(
+    (basket: any) => pwCode(basket.code) === pwCode(scanCode),
+  )
+  const occupied = (code: string) =>
+    ledger.items.some(
+      (i: any) =>
+        i.containerCode === code &&
+        !i.consumed &&
+        !i.allocated &&
+        i.weightKg > 0,
+    ) || batch.baskets.some((b: any) => b.code === code && !used(b))
+  const pool = fleet.filter(
+      (c) =>
+        (c.status === "فعال" || c.status === "AVAILABLE") &&
+        !c.singleUse &&
+        !/سینی|TRAY|SINGLE_USE/.test(c.type || "") &&
+        !c.locked &&
+        !occupied(c.qr || c.code),
+    ),
+    carrier = pool.find((c) => (c.qr || c.code) === outputCode),
+    tare = Number(carrier?.tare ?? carrier?.tareWeightKg ?? 0),
+    net = Number((Number(gross) - tare).toFixed(3)),
+    zones = carrier?.zones || carrier?.designatedZones || [],
+    warning = carrier && !zones.includes("SORTING")
+  const field =
+      "h-11 w-full rounded-lg border border-[#d4e2db] bg-white px-3 text-[13px]",
+    primary =
+      "rounded-lg bg-[#176b50] px-4 py-3 text-white text-[12px] font-bold disabled:opacity-40"
+  const destinationLabel: Record<string, string> = {
+    FRESH_EXPORT: "ارسال تازه · بدون شست‌وشو",
+    DRYING: "خشک · شست‌وشو ← اسلایس ← خشک",
+    FREEZING: "فریز · شست‌وشو ← اسلایس ← فریز",
+    FREEZE_DRYING: "فریزدرای · شست‌وشو ← اسلایس ← فریز ← فریزدرای",
+    QC: "کنترل کیفیت",
+    COLD_ROOM_CLEAN: "سردخانه تمیز",
+    COLD_ROOM_DIRTY: "سردخانه کثیف",
+    WASTE: "دفع",
+  }
+  const productGrades = readMasterData().products.find(
+    (item) => item.name === sources[0]?.product,
+  )?.grades || ["A", "B", "C"]
+  function scanInput() {
+    const code = pwCode(scanCode),
+      source = batch.baskets.find((b: any) => pwCode(b.code) === code)
+    if (!source || blocked(source))
+      return setError("سبد اسکن‌شده برای این نوبت سورت واجد شرایط نیست.")
+    if (inputCodes.includes(source.code))
+      return setError("این سبد قبلاً اسکن شده است.")
+    if (!/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""))
+      return setError(
+        "سبد باید ابتدا با اسکن گیت وارد سردخانه و سپس سورتینگ شود.",
+      )
+    if (sources.length && sources[0]?.product !== source.product)
+      return setError("همه ورودی‌های یک نوبت سورت باید یک محصول باشند.")
+    const last = Number(source.gross) - Number(source.tare || 0),
+      weight = entryWeight === "" ? undefined : Number(entryWeight)
+    if (weight !== undefined && (!Number.isFinite(weight) || weight <= 0))
+      return setError("وزن ورود باید مثبت باشد.")
+    setInputCodes([...inputCodes, source.code])
+    if (weight !== undefined)
+      setEntryWeights({ ...entryWeights, [pwCode(source.code)]: weight })
+    setScanCode("")
+    setEntryWeight("")
+    setError("")
+  }
   function start() {
-    if (!sources.length || sources.length !== inputCodes.length || new Set(inputCodes).size !== inputCodes.length || sources.some((source: any) => blocked(source)) || !(inputWeight > 0)) return setError("یک یا چند سبد موجود، آزاد و غیرتکراری انتخاب کنید.");
-    if (sources.some((source: any) => !/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""))) return setError("همه ورودی‌های سورت باید در سردخانه باشند؛ انتقال فیزیکی را ابتدا ثبت کنید.");
-    if (new Set(sources.map((source: any) => source.product)).size !== 1) return setError("همه ورودی‌های یک نوبت سورت باید یک محصول باشند.");
-    setStep("output"); setError("");
+    if (
+      !sources.length ||
+      sources.length !== inputCodes.length ||
+      new Set(inputCodes).size !== inputCodes.length ||
+      sources.some((source: any) => blocked(source)) ||
+      !(inputWeight > 0)
+    )
+      return setError("یک یا چند سبد موجود، آزاد و غیرتکراری انتخاب کنید.")
+    if (
+      sources.some(
+        (source: any) =>
+          !/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""),
+      )
+    )
+      return setError(
+        "همه ورودی‌های سورت باید در سردخانه باشند؛ انتقال فیزیکی را ابتدا ثبت کنید.",
+      )
+    if (new Set(sources.map((source: any) => source.product)).size !== 1)
+      return setError("همه ورودی‌های یک نوبت سورت باید یک محصول باشند.")
+    setStep("output")
+    setError("")
   }
   function add() {
-    if (!carrier || outputs.some(o => o.code === outputCode) || inputCodes.includes(outputCode)) return setError("سبد خروجی باید موجود، خالی و غیرتکراری باشد.");
-    if (!staged.includes(outputCode)) return setError("حضور فیزیکی سبد خروجی در سورتینگ را تأیید کنید.");
-    if (scale !== "STABLE") return setError("ترازو قطع است یا وزن ناپایدار است.");
-    if (!Number.isFinite(net) || net <= 0 || net > Number(carrier.capacity ?? carrier.capacityKg ?? Infinity) || total + net > inputWeight + .001) return setError("خالص خروجی باید مثبت و در محدوده ظرفیت و وزن ورودی باشد.");
-    const parentContributions = sources.length === 1 ? [{ batchId: sources[0]!.code, inputWeightKg: net }] : sources.map((source: any) => ({ batchId: source.code, inputWeightKg: Number(contributions[source.code] || 0) })).filter((row: any) => row.inputWeightKg > 0);
-    if (!parentContributions.length || Math.abs(parentContributions.reduce((sum: number, row: any) => sum + row.inputWeightKg, 0) - net) > .001) return setError("سهم واقعی والدها باید دقیقاً برابر وزن خالص باشد؛ صفر یعنی آن والد در این خروجی حضور ندارد.");
-    setOutputs([...outputs, { code: outputCode, grade, size, gross: Number(gross), tare, weight: net, destination, parentContributions, designationWarning: !!warning }]); setOutputCode(""); setGross(""); setContributions({}); setError("");
+    if (
+      !carrier ||
+      outputs.some((o) => o.code === outputCode) ||
+      inputCodes.includes(outputCode)
+    )
+      return setError("سبد خروجی باید موجود، خالی و غیرتکراری باشد.")
+    if (!staged.includes(outputCode))
+      return setError("حضور فیزیکی سبد خروجی در سورتینگ را تأیید کنید.")
+    if (scale !== "STABLE")
+      return setError("ترازو قطع است یا وزن ناپایدار است.")
+    if (
+      !Number.isFinite(net) ||
+      net <= 0 ||
+      net > Number(carrier.capacity ?? carrier.capacityKg ?? Infinity) ||
+      total + net > inputWeight + 0.001
+    )
+      return setError(
+        "خالص خروجی باید مثبت و در محدوده ظرفیت و وزن ورودی باشد.",
+      )
+    const parentContributions =
+      sources.length === 1
+        ? [{ batchId: sources[0]!.code, inputWeightKg: net }]
+        : sources
+            .map((source: any) => ({
+              batchId: source.code,
+              inputWeightKg: Number(contributions[source.code] || 0),
+            }))
+            .filter((row: any) => row.inputWeightKg > 0)
+    if (
+      !parentContributions.length ||
+      Math.abs(
+        parentContributions.reduce(
+          (sum: number, row: any) => sum + row.inputWeightKg,
+          0,
+        ) - net,
+      ) > 0.001
+    )
+      return setError(
+        "سهم واقعی والدها باید دقیقاً برابر وزن خالص باشد؛ صفر یعنی آن والد در این خروجی حضور ندارد.",
+      )
+    setOutputs([
+      ...outputs,
+      {
+        code: outputCode,
+        grade,
+        size,
+        gross: Number(gross),
+        tare,
+        weight: net,
+        destination,
+        parentContributions,
+        designationWarning: !!warning,
+      },
+    ])
+    setOutputCode("")
+    setGross("")
+    setContributions({})
+    setError("")
   }
-  function finish() { if (!outputs.length || loss < -.001 || (loss > 0 && !lossReason)) return setError("برای هر افت مثبت، دلیل افت الزامی است."); try { recordSortingOutputs(batch, inputCodes, outputs, lossReason); setStep("done"); setError(""); } catch (failure: any) { setError(failure.message || "ذخیره انجام نشد."); } }
-  return <div className="space-y-4 p-5 bg-[#f4f7f5] text-[#18302a]" dir="rtl">
-    <div className="flex justify-between items-center"><div><h2 className="text-xl font-bold">سورتینگ · چند ورودی، خروجی تک‌به‌تک</h2><p className="text-[12px] text-[#718079] mt-1">چند سبد هم‌محصول را قفل کنید؛ هر سبد خروجی را جدا وزن کنید و مقصد نهایی را همان لحظه تعیین کنید.</p></div><span className="text-[11px] px-3 py-2 bg-[#fff3d6] rounded-full">ترازو و اسکن شبیه‌سازی‌شده</span></div>
-    {error && <div role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg text-[13px]">{error}</div>}
-    {step === "done" ? <Card className="p-7 text-center"><h3 className="text-xl font-bold text-[#176b50]">سورت و مسیر خروجی‌ها ثبت شد</h3><p className="my-3">{inputCodes.length} ورودی → {outputs.length} بچ مستقل، {total.toFixed(3)} کیلوگرم.</p><p className="text-[12px]">تسک مسیر هر خروجی فوراً ساخته شد؛ مدیر فقط بعداً با علت می‌تواند مسیر را تغییر دهد.</p><button className={primary + " mt-5"} onClick={() => { setStep("input"); setInputCodes([""]); setOutputs([]); setLossReason(""); setStaged([]); }}>نوبت سورت جدید</button></Card> : <>
-      <Card className="p-4"><div className="flex justify-between items-center mb-3"><h3 className="font-bold">۱. اسکن و قفل سبدهای ورودی</h3>{step === "input" && <button className={primary} onClick={() => setInputCodes([...inputCodes, ""])}>＋ افزودن سبد ورودی</button>}</div><div className="space-y-2">{inputCodes.map((code, index) => <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-3"><label className="text-[12px]">اسکن QR<input className={field} disabled={step !== "input"} value={code} onChange={e => { const next = [...inputCodes]; next[index] = e.target.value.trim(); setInputCodes(next); setError(""); }} /></label><label className="text-[12px]">انتخاب از موجودی<select className={field} disabled={step !== "input"} value={code} onChange={e => { const next = [...inputCodes]; next[index] = e.target.value; setInputCodes(next); }}><option value="">انتخاب کنید…</option>{batch.baskets.map((b: any) => <option key={b.code} value={b.code} disabled={blocked(b) || inputCodes.some((value, i) => i !== index && value === b.code)}>{b.code} · {(b.gross - b.tare).toFixed(3)} kg</option>)}</select></label>{step === "input" && <button aria-label="حذف ورودی" className="text-red-700" disabled={inputCodes.length === 1} onClick={() => setInputCodes(inputCodes.filter((_, i) => i !== index))}>×</button>}</div>)}</div><div className="mt-3 p-3 bg-[#e7f1ec] rounded-lg text-[12px]">{sources.length} سبد · وزن قابل سورت <b>{inputWeight.toFixed(3)} kg</b></div>{step === "input" ? <button className={primary + " mt-3"} onClick={start}>قفل همه ورودی‌ها و شروع خروجی‌گیری</button> : <span className="block mt-3 text-[#176b50] text-[12px]">✓ {inputCodes.length} ورودی قفل شد</span>}</Card>
-      {step === "output" && <div className="grid grid-cols-[2fr_1fr] gap-4"><Card className="p-4"><h3 className="font-bold mb-3">۲. اسکن، توزین و تعیین مقصد هر خروجی</h3><div className="grid grid-cols-2 gap-3"><label className="text-[12px]">سبد خروجی<select className={field} value={outputCode} onChange={e => setOutputCode(e.target.value)}><option value="">انتخاب کنید…</option>{pool.filter(c => !outputs.some(o => o.code === (c.qr || c.code))).map(c => <option key={c.qr || c.code} value={c.qr || c.code}>{c.qr || c.code} · خالی {c.tare ?? c.tareWeightKg ?? 0} kg</option>)}</select></label><label className="text-[12px]">مقصد نهایی<select aria-label="مقصد نهایی خروجی سورت" className={field} value={destination} onChange={e => setDestination(e.target.value)}>{Object.entries(destinationLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label className="text-[12px]">گرید نهایی<select className={field} value={grade} onChange={e => setGrade(e.target.value)}>{["A", "B", "C"].map(x => <option key={x}>{x}</option>)}</select></label><label className="text-[12px]">اندازه نهایی<select className={field} value={size} onChange={e => setSize(e.target.value)}>{["درشت", "متوسط", "ریز", "مخلوط"].map(x => <option key={x}>{x}</option>)}</select></label><label className="text-[12px]">وزن ناخالص (kg)<input type="number" step="0.001" className={field} value={gross} onChange={e => setGross(e.target.value)} /></label><label className="text-[12px]">وضعیت لودسل<select className={field} value={scale} onChange={e => setScale(e.target.value)}><option value="STABLE">متصل · پایدار</option><option value="UNSTABLE">ناپایدار</option><option value="OFFLINE">قطع</option></select></label></div><div className="flex items-center justify-between rounded-xl bg-[#102f29] text-white p-4 my-3"><span className="text-[12px]">خالص = ناخالص − وزن خالی ({tare.toFixed(3)})</span><b className="text-xl font-mono">{gross && net > 0 ? net.toFixed(3) : "0.000"} kg</b><button className="border border-white/40 rounded-lg px-3 py-2 text-[11px]" disabled={!carrier || scale !== "STABLE"} onClick={() => setGross((Math.min(18.5, Math.max(0, inputWeight - total)) + tare).toFixed(3))}>وزن نمونه</button></div>
-        {sources.length > 1 && <fieldset className="border border-dashed rounded-lg p-3 mb-3"><legend className="text-[12px]">سهم واقعی والدها در این خروجی</legend><div className="grid grid-cols-2 gap-2">{sources.map((source: any) => <label key={source.code} className="text-[12px]">{source.code}<input type="number" min="0" step="0.001" className={field} value={contributions[source.code] || ""} onChange={e => setContributions({ ...contributions, [source.code]: e.target.value })} placeholder="۰ یعنی بدون سهم" /></label>)}</div></fieldset>}{carrier && <label className="flex gap-2 text-[12px] mb-3"><input type="checkbox" checked={staged.includes(outputCode)} onChange={e => setStaged(e.target.checked ? [...staged, outputCode] : staged.filter(x => x !== outputCode))} />حضور فیزیکی این سبد در سورتینگ تأیید شد</label>}{warning && <p className="p-3 bg-[#fff3d6] rounded-lg text-[12px] mb-3">هشدار زون ظرف ثبت می‌شود.</p>}<button className={primary + " w-full"} disabled={!carrier || !gross || scale !== "STABLE" || !staged.includes(outputCode)} onClick={add}>ثبت این خروجی و ادامه</button><div className="mt-4 divide-y">{outputs.map((o, n) => <div key={o.code} className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 py-3 text-[12px]"><b>{o.code}</b><span>{o.weight.toFixed(3)} kg</span><span>{destinationLabel[o.destination]}</span><button className="text-red-700" onClick={() => setOutputs(outputs.filter((_, i) => i !== n))}>حذف</button></div>)}</div></Card>
-        <Card className="p-4 h-fit"><h3 className="font-bold mb-4">تراز وزن</h3><p className="flex justify-between my-3">ورودی <b>{inputWeight.toFixed(3)} kg</b></p><p className="flex justify-between my-3">خروجی <b>{total.toFixed(3)} kg</b></p><p className="flex justify-between my-3">افت <b>{loss.toFixed(3)} kg</b></p><label className="text-[12px]">دلیل افت<select className={field + " mt-2"} value={lossReason} onChange={e => setLossReason(e.target.value)}><option value="">بدون افت</option>{["WASTE", "DAMAGE", "MOISTURE_LOSS", "RESIDUAL_MATERIAL", "MEASUREMENT_VARIANCE"].map(x => <option key={x}>{x}</option>)}</select></label><button className={primary + " w-full mt-4"} disabled={!outputs.length || loss < -.001 || (loss > 0 && !lossReason)} onClick={finish}>تکمیل سورت و ساخت مسیرها</button><p className="p-3 mt-3 text-[12px] bg-[#e7f1ec] rounded-lg">شست‌وشو مقصد نیست؛ برای خشک، فریز و فریزدرای خودکار است. ارسال تازه هرگز شسته نمی‌شود.</p></Card></div>}
-    </>}
-  </div>;
+  function finish() {
+    if (!outputs.length || loss < -0.001 || (loss > 0 && !lossReason))
+      return setError("برای هر افت مثبت، دلیل افت الزامی است.")
+    try {
+      recordSortingOutputs(batch, inputCodes, outputs, lossReason, entryWeights)
+      setStep("done")
+      setError("")
+    } catch (failure: any) {
+      setError(failure.message || "ذخیره انجام نشد.")
+    }
+  }
+  return (
+    <div className="space-y-4 p-5 bg-[#f4f7f5] text-[#18302a]" dir="rtl">
+      <div>
+        <h2 className="text-xl font-bold">
+          سورتینگ · ورودی اسکن‌محور، خروجی تک‌به‌تک
+        </h2>
+        <p className="text-[12px] text-[#718079] mt-1">
+          اسکنر سخت‌افزاری هر سبد را مستقیم به نشست اضافه می‌کند؛ وزن ورود اختیاری
+          و مقصد هر خروجی در همان لحظه ثبت می‌شود.
+        </p>
+      </div>
+      {error && (
+        <div
+          role="alert"
+          className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg text-[13px]"
+        >
+          {error}
+        </div>
+      )}
+      {step === "done" ? (
+        <Card className="p-7 text-center">
+          <h3 className="text-xl font-bold text-[#176b50]">
+            سورت و مسیر خروجی‌ها ثبت شد
+          </h3>
+          <p className="my-3">
+            {inputCodes.length} ورودی → {outputs.length} بچ مستقل،{" "}
+            {total.toFixed(3)} کیلوگرم.
+          </p>
+          <p className="text-[12px]">
+            موقعیت، حرکت و شجره همه خروجی‌ها در همان نشست ثبت شد.
+          </p>
+          <button
+            className={primary + " mt-5"}
+            onClick={() => {
+              setStep("input")
+              setInputCodes([])
+              setEntryWeights({})
+              setOutputs([])
+              setLossReason("")
+              setStaged([])
+            }}
+          >
+            نوبت سورت جدید
+          </button>
+        </Card>
+      ) : (
+        <>
+          <Card className="p-4">
+            <h3 className="font-bold mb-3">۱. اسکن سبدهای ورودی</h3>
+            {step === "input" && (
+              <ScanOptionalWeighTransition
+                scan={scanCode}
+                setScan={setScanCode}
+                onScan={scanInput}
+                lastWeight={
+                  scannedSource
+                    ? Number(scannedSource.gross) - Number(scannedSource.tare)
+                    : undefined
+                }
+                weight={entryWeight}
+                setWeight={setEntryWeight}
+                action="ثبت اسکن و افزودن به نشست"
+              />
+            )}
+            <div className="mt-3 divide-y">
+              {sources.map((source: any) => (
+                <div
+                  key={source.code}
+                  className="flex justify-between py-2 text-[12px]"
+                >
+                  <button
+                    onClick={() => {
+                      setInputCodes(
+                        inputCodes.filter((code) => code !== source.code),
+                      )
+                      const next = { ...entryWeights }
+                      delete next[pwCode(source.code)]
+                      setEntryWeights(next)
+                    }}
+                    className="text-red-700"
+                    disabled={step !== "input"}
+                  >
+                    حذف
+                  </button>
+                  <span>
+                    {entryWeights[pwCode(source.code)] !== undefined
+                      ? `وزن ورود ${entryWeights[pwCode(source.code)].toFixed(3)} kg`
+                      : `بدون توزین · آخرین وزن ${(source.gross - source.tare).toFixed(3)} kg`}
+                  </span>
+                  <b className="font-mono">{source.code}</b>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 p-3 bg-[#e7f1ec] rounded-lg text-[12px]">
+              {sources.length} سبد · وزن قابل سورت{" "}
+              <b>{inputWeight.toFixed(3)} kg</b>
+            </div>
+            {step === "input" ? (
+              <button
+                className={primary + " mt-3"}
+                disabled={!inputCodes.length}
+                onClick={start}
+              >
+                قفل ورودی‌های اسکن‌شده و شروع خروجی‌گیری
+              </button>
+            ) : (
+              <span className="block mt-3 text-[#176b50] text-[12px]">
+                ✓ {inputCodes.length} ورودی قفل شد
+              </span>
+            )}
+          </Card>
+          {step === "output" && (
+            <div className="grid grid-cols-[2fr_1fr] gap-4">
+              <Card className="p-4">
+                <h3 className="font-bold mb-3">
+                  ۲. اسکن، توزین و تعیین مقصد هر خروجی
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="text-[12px]">
+                    سبد خروجی
+                    <select
+                      className={field}
+                      value={outputCode}
+                      onChange={(e) => setOutputCode(e.target.value)}
+                    >
+                      <option value="">انتخاب کنید…</option>
+                      {pool
+                        .filter(
+                          (c) =>
+                            !outputs.some((o) => o.code === (c.qr || c.code)),
+                        )
+                        .map((c) => (
+                          <option key={c.qr || c.code} value={c.qr || c.code}>
+                            {c.qr || c.code} · خالی{" "}
+                            {c.tare ?? c.tareWeightKg ?? 0} kg
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label className="text-[12px]">
+                    مقصد نهایی
+                    <select
+                      aria-label="مقصد نهایی خروجی سورت"
+                      className={field}
+                      value={destination}
+                      onChange={(e) => setDestination(e.target.value)}
+                    >
+                      {Object.entries(destinationLabel).map(([id, label]) => (
+                        <option key={id} value={id}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-[12px]">
+                    گرید نهایی
+                    <select
+                      className={field}
+                      value={grade}
+                      onChange={(e) => setGrade(e.target.value)}
+                    >
+                      {productGrades.map((x) => (
+                        <option key={x}>{x}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-[12px]">
+                    اندازه نهایی
+                    <select
+                      className={field}
+                      value={size}
+                      onChange={(e) => setSize(e.target.value)}
+                    >
+                      {["درشت", "متوسط", "ریز", "مخلوط"].map((x) => (
+                        <option key={x}>{x}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-[12px]">
+                    وزن ناخالص (kg)
+                    <input
+                      type="number"
+                      step="0.001"
+                      className={field}
+                      value={gross}
+                      onChange={(e) => setGross(e.target.value)}
+                    />
+                  </label>
+                  <label className="text-[12px]">
+                    وضعیت لودسل
+                    <select
+                      className={field}
+                      value={scale}
+                      onChange={(e) => setScale(e.target.value)}
+                    >
+                      <option value="STABLE">متصل · پایدار</option>
+                      <option value="UNSTABLE">ناپایدار</option>
+                      <option value="OFFLINE">قطع</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="flex items-center justify-between rounded-xl bg-[#102f29] text-white p-4 my-3">
+                  <span className="text-[12px]">
+                    خالص = ناخالص − وزن خالی ({tare.toFixed(3)})
+                  </span>
+                  <b className="text-xl font-mono">
+                    {gross && net > 0 ? net.toFixed(3) : "0.000"} kg
+                  </b>
+                  <button
+                    className="border border-white/40 rounded-lg px-3 py-2 text-[11px]"
+                    disabled={!carrier || scale !== "STABLE"}
+                    onClick={() =>
+                      setGross(
+                        (
+                          Math.min(18.5, Math.max(0, inputWeight - total)) +
+                          tare
+                        ).toFixed(3),
+                      )
+                    }
+                  >
+                    دریافت از ترازو
+                  </button>
+                </div>
+                {sources.length > 1 && (
+                  <fieldset className="border border-dashed rounded-lg p-3 mb-3">
+                    <legend className="text-[12px]">
+                      سهم واقعی والدها در این خروجی
+                    </legend>
+                    <div className="grid grid-cols-2 gap-2">
+                      {sources.map((source: any) => (
+                        <label key={source.code} className="text-[12px]">
+                          {source.code}
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            className={field}
+                            value={contributions[source.code] || ""}
+                            onChange={(e) =>
+                              setContributions({
+                                ...contributions,
+                                [source.code]: e.target.value,
+                              })
+                            }
+                            placeholder="۰ یعنی بدون سهم"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+                {carrier && (
+                  <label className="flex gap-2 text-[12px] mb-3">
+                    <input
+                      type="checkbox"
+                      checked={staged.includes(outputCode)}
+                      onChange={(e) =>
+                        setStaged(
+                          e.target.checked
+                            ? [...staged, outputCode]
+                            : staged.filter((x) => x !== outputCode),
+                        )
+                      }
+                    />
+                    حضور فیزیکی این سبد در سورتینگ تأیید شد
+                  </label>
+                )}
+                {warning && (
+                  <p className="p-3 bg-[#fff3d6] rounded-lg text-[12px] mb-3">
+                    هشدار زون ظرف ثبت می‌شود.
+                  </p>
+                )}
+                <button
+                  className={primary + " w-full"}
+                  disabled={
+                    !carrier ||
+                    !gross ||
+                    scale !== "STABLE" ||
+                    !staged.includes(outputCode)
+                  }
+                  onClick={add}
+                >
+                  ثبت این خروجی و ادامه
+                </button>
+                <div className="mt-4 divide-y">
+                  {outputs.map((o, n) => (
+                    <div
+                      key={o.code}
+                      className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 py-3 text-[12px]"
+                    >
+                      <b>{o.code}</b>
+                      <span>{o.weight.toFixed(3)} kg</span>
+                      <span>{destinationLabel[o.destination]}</span>
+                      <button
+                        className="text-red-700"
+                        onClick={() =>
+                          setOutputs(outputs.filter((_, i) => i !== n))
+                        }
+                      >
+                        حذف
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+              <Card className="p-4 h-fit">
+                <h3 className="font-bold mb-4">تراز وزن</h3>
+                <p className="flex justify-between my-3">
+                  ورودی <b>{inputWeight.toFixed(3)} kg</b>
+                </p>
+                <p className="flex justify-between my-3">
+                  خروجی <b>{total.toFixed(3)} kg</b>
+                </p>
+                <p className="flex justify-between my-3">
+                  افت <b>{loss.toFixed(3)} kg</b>
+                </p>
+                <label className="text-[12px]">
+                  دلیل افت
+                  <select
+                    className={field + " mt-2"}
+                    value={lossReason}
+                    onChange={(e) => setLossReason(e.target.value)}
+                  >
+                    <option value="">بدون افت</option>
+                    {[
+                      "WASTE",
+                      "DAMAGE",
+                      "MOISTURE_LOSS",
+                      "RESIDUAL_MATERIAL",
+                      "MEASUREMENT_VARIANCE",
+                    ].map((x) => (
+                      <option key={x}>{x}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className={primary + " w-full mt-4"}
+                  disabled={
+                    !outputs.length ||
+                    loss < -0.001 ||
+                    (loss > 0 && !lossReason)
+                  }
+                  onClick={finish}
+                >
+                  تکمیل سورت و ساخت مسیرها
+                </button>
+                <p className="p-3 mt-3 text-[12px] bg-[#e7f1ec] rounded-lg">
+                  شست‌وشو مقصد نیست؛ برای خشک، فریز و فریزدرای خودکار است. ارسال
+                  تازه هرگز شسته نمی‌شود.
+                </p>
+              </Card>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
 }
 
 function ProductionInventorySummary({ history = false }: { history?: boolean }) {
@@ -861,12 +3319,20 @@ function ShipmentsScreen() {
   );
 }
 
-function TransfersScreen({navigate}:{navigate:(s:WebScreen)=>void}){
+function LegacyTransfersScreen({navigate}:{navigate:(s:WebScreen)=>void}){
  const receipt=readPrototypeBatch(); const consumed=readProductionLedger().consumedInputs; const batch={...receipt,baskets:receipt.baskets.filter(b=>!consumed.includes(receipt.id+":"+b.code))}; const [kind,setKind]=useState<"internal"|"site">("internal"); const [stage,setStage]=useState<"setup"|"scan"|"done">("setup"); const [dest,setDest]=useState(""); const [moved,setMoved]=useState<string[]>([]); const ids=batch.baskets.map(b=>b.code); const internal=["قرنطینه QC","سردخانه ۱ · زون A","سردخانه ۱ · زون B","سورتینگ · خط ۱","بسته‌بندی · خط ۲","انبار محصول نهایی"];
  const complete=()=>{const updated={...batch,status:kind==="internal"?"موجودی فعال":"در راه",destination:dest,baskets:batch.baskets.map(b=>({...b,zone:dest,status:kind==="internal"?"قابل مصرف":"در راه"})),events:[...batch.events,{time:"همین حالا",title:kind==="internal"?"انتقال داخلی تکمیل شد":"مانیفست بین‌سایتی صادر شد",detail:dest+" · "+batch.baskets.length+" ظرف"}]};writePrototypeBatch({...updated,baskets:receipt.baskets.map(b=>updated.baskets.find(x=>x.code===b.code)||b)});setStage("done")};
  if(stage==="done")return <div className="flex-1 bg-[#f4f7f5] p-8" dir="rtl"><Card className="max-w-3xl mx-auto mt-12 p-9 text-center"><div className="w-16 h-16 rounded-full bg-[#176b50] text-white text-3xl mx-auto flex items-center justify-center">✓</div><h2 className="font-bold text-[23px] mt-4">{kind==="internal"?"انتقال داخلی ثبت شد":"مانیفست انتقال بین‌سایتی ساخته شد"}</h2><p className="text-[12px] text-[#718079] mt-2">{batch.id} · {batch.baskets.length} ظرف · مقصد {dest}</p><div className="flex gap-2 justify-center mt-6"><button onClick={()=>navigate("inventory")} className="bg-[#176b50] text-white h-11 px-6 rounded-lg">مشاهده موجودی و رهگیری</button><button onClick={()=>{setStage("setup");setMoved([]);setDest("")}} className="border h-11 px-5 rounded-lg">انتقال جدید</button></div></Card></div>;
  return <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl"><div className="flex justify-between mb-4"><div><h2 className="font-bold text-[#18302a] text-[22px]">مرکز انتقال</h2><p className="text-[#718079] text-[13px]">انتقال داخلی بین زون‌ها و فرایندها یا انتقال بین سایت‌ها</p></div><Badge text="کنترل مقصد بر اساس وضعیت کالا" color="#176b50" bg="#e1f2eb"/></div><div className="grid grid-cols-2 gap-3 mb-4"><button onClick={()=>{setKind("internal");setStage("setup");setDest("")}} className={(kind==="internal"?"border-[#176b50] bg-[#eaf6f0]":"border-[#d8e4df] bg-white")+" border-2 rounded-xl p-4 text-right"}><b>انتقال داخلی سایت</b><p className="text-[11px] text-[#718079]">دریافت، قرنطینه، سردخانه، سورتینگ، تولید و بسته‌بندی</p></button><button onClick={()=>{setKind("site");setStage("setup");setDest("")}} className={(kind==="site"?"border-[#176b50] bg-[#eaf6f0]":"border-[#d8e4df] bg-white")+" border-2 rounded-xl p-4 text-right"}><b>انتقال بین سایت‌ها</b><p className="text-[11px] text-[#718079]">ساخت مانیفست، ارسال، وضعیت در راه و تأیید تحویل</p></button></div>
  {stage==="setup"?<div className="grid grid-cols-3 gap-4"><Card className="col-span-2 p-5"><h3 className="font-bold mb-4">۱. تعریف مقصد مجاز</h3><div className="grid grid-cols-2 gap-3"><label className="text-[11px]">بچ/محموله مبدأ<input readOnly value={batch.id} className="w-full h-11 border rounded-lg px-3 mt-1 font-mono bg-[#f7faf8]"/></label><label className="text-[11px]">{kind==="internal"?"زون یا فرایند مقصد":"سایت مقصد"}<select value={dest} onChange={e=>setDest(e.target.value)} className="w-full h-11 border rounded-lg px-3 mt-1 bg-white"><option value="">انتخاب کنید...</option>{(kind==="internal"?internal:["سایت تبریز","سایت اصفهان","سایت شیراز"]).map(x=><option>{x}</option>)}</select></label></div>{dest&&<div className="mt-4 bg-[#edf8f3] rounded-xl p-4 text-[11px]"><b className="text-[#176b50]">مقصد بر اساس وضعیت فعلی مجاز است ✓</b><p className="mt-1">{kind==="internal"?"ظرف قرنطینه فقط به QC و محصول آزادشده به سردخانه/سورتینگ/بسته‌بندی منتقل می‌شود.":"پس از اسکن، مانیفست با شناسه shipment ساخته خواهد شد."}</p></div>}<button disabled={!dest} onClick={()=>setStage("scan")} className="mt-5 bg-[#176b50] disabled:bg-[#aab8b3] text-white h-11 px-6 rounded-lg">شروع عملیات اسکن</button></Card><Card className="p-5"><b>مبدأ</b><p className="font-mono text-[#176b50] mt-2">{batch.id}</p><div className="space-y-2 mt-4 text-[11px]"><div className="flex justify-between"><span>تأمین‌کننده</span><b>{batch.supplier}</b></div><div className="flex justify-between"><span>تعداد ظروف</span><b>{batch.baskets.length}</b></div><div className="flex justify-between"><span>وضعیت</span><b>{batch.status}</b></div></div></Card></div>:<div className="grid grid-cols-[1fr_320px] gap-4"><Card className="p-5"><h3 className="font-bold">۲. اسکن در گیت {dest}</h3><button onClick={()=>{const n=ids.find(x=>!moved.includes(x));if(n)setMoved([...moved,n])}} className="w-full h-14 border-2 border-dashed border-[#176b50] rounded-xl text-[#176b50] mt-4 font-bold">⌗ شبیه‌سازی اسکن ظرف بعدی</button><div className="mt-4">{moved.slice().reverse().map(x=><div className="flex justify-between border-t py-2 text-[11px]"><span className="text-[#176b50]">تأیید گیت ✓</span><span className="font-mono">{x}</span></div>)}</div></Card><Card className="p-5"><div className="w-28 h-28 rounded-full border-[10px] border-[#dbe9e3] mx-auto flex items-center justify-center"><b>{moved.length}/{ids.length}</b></div><button disabled={moved.length<ids.length} onClick={complete} className="w-full mt-5 bg-[#176b50] disabled:bg-[#aab8b3] text-white h-11 rounded-lg">{kind==="internal"?"تکمیل انتقال و ثبت موجودی":"صدور مانیفست و ارسال"}</button><button onClick={()=>setStage("setup")} className="w-full border h-10 rounded-lg mt-2">بازگشت</button></Card></div>}</div>
+}
+function InventoryMovementScreen({navigate}:{navigate:(s:WebScreen)=>void}){
+  const receipt=readPrototypeBatch(),master=readMasterData();
+  const locations=["سردخانه ۱", "سردخانه ۲", ...master.warehouses.filter(x=>x.active).map(x=>x.name)];
+  const [code,setCode]=useState(""),[from,setFrom]=useState(""),[to,setTo]=useState(""),[reason,setReason]=useState(""),[done,setDone]=useState(false),[error,setError]=useState("");
+  const move=()=>{const basket=receipt.baskets.find(item=>item.code===code.trim());if(!basket)return setError("کد اسکن‌شده در موجودی جاری پیدا نشد.");if(!from||!to||from===to||!reason.trim())return setError("مبدأ، مقصد متفاوت و علت جابجایی استثنایی الزامی است.");const at=new Date().toLocaleTimeString("fa-IR");writePrototypeBatch({...receipt,baskets:receipt.baskets.map(item=>item.code===basket.code?{...item,zone:to}:item),events:[...receipt.events,{time:at,title:"جابجایی استثنایی موجودی",detail:`${basket.code} · ${from} ← ${to} · ${reason}`} ]});setDone(true);setError("")};
+  if(done)return <div className="flex-1 bg-[#f4f7f5] p-8" dir="rtl"><Card className="max-w-2xl mx-auto p-8 text-center"><h2 className="text-xl font-bold text-[#176b50]">جابجایی موجودی ثبت شد</h2><p className="mt-3 text-[12px]">موقعیت جاری، سابقه حرکت و رهگیری هم‌زمان به‌روزرسانی شدند.</p><div className="flex gap-2 justify-center mt-5"><button className="bg-[#176b50] text-white rounded-lg px-5 py-3" onClick={()=>navigate("inventory")}>مشاهده موجودی</button><button className="border rounded-lg px-5 py-3" onClick={()=>{setDone(false);setCode("");setReason("")}}>جابجایی دیگر</button></div></Card></div>;
+  return <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl"><div className="mb-4"><h2 className="font-bold text-[#18302a] text-[22px]">جابجایی استثنایی موجودی</h2><p className="text-[#718079] text-[13px]">فقط برای انتقال خارج از مسیر عادی؛ حرکت‌های دریافت و تولید با اسکن همان مرحله ثبت می‌شوند.</p></div>{error&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mb-3">{error}</p>}<Card className="p-5 max-w-3xl"><label className="text-[11px] font-bold">اسکن QR سبد<input value={code} onChange={e=>setCode(e.target.value)} placeholder="مثلاً BSK-0002" className="w-full h-12 border-2 border-dashed border-[#176b50] rounded-lg px-3 mt-1 font-mono"/></label><div className="grid grid-cols-2 gap-3 mt-4"><label className="text-[11px]">مبدأ<select value={from} onChange={e=>setFrom(e.target.value)} className="w-full h-11 border rounded-lg px-3 mt-1 bg-white"><option value="">انتخاب…</option>{locations.map(x=><option key={x}>{x}</option>)}</select></label><label className="text-[11px]">مقصد<select value={to} onChange={e=>setTo(e.target.value)} className="w-full h-11 border rounded-lg px-3 mt-1 bg-white"><option value="">انتخاب…</option>{locations.map(x=><option key={x}>{x}</option>)}</select></label></div><label className="block text-[11px] mt-3">علت<textarea value={reason} onChange={e=>setReason(e.target.value)} className="w-full border rounded-lg p-3 mt-1" placeholder="مثلاً جابه‌جایی ظرفیت سردخانه"/></label><button onClick={move} className="w-full mt-4 bg-[#176b50] text-white rounded-lg py-3 font-bold">تأیید جابجایی اسکن‌شده</button></Card></div>
 }
 function TasksScreen() {
   return (
@@ -1016,7 +3482,7 @@ function ConfigScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
       </div>
     </div>
   );
-}function MasterDataScreen() {
+}function LegacyMasterDataScreen() {
   const [activeTab, setActiveTab] = useState("محصولات");
   const [showCreateForm, setShowCreateForm] = useState(false);
   return (
@@ -1058,7 +3524,22 @@ function ConfigScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
       </Card>
     </div>
   );
-}function UsersScreen() {
+}
+function MasterDataScreen(){
+  const [data,setData]=useState<MasterDataState>(()=>readMasterData());
+  const [tab,setTab]=useState<keyof MasterDataState>("products"),[editing,setEditing]=useState<any>(null),[open,setOpen]=useState(false),[error,setError]=useState("");
+  const labels:any={products:"محصولات",suppliers:"تأمین‌کنندگان",customers:"مشتریان",warehouses:"انبارها"};
+  const blank=()=>tab==="products"?{id:"",code:"",name:"",category:"",grades:"",sizes:"",active:true}:{id:"",code:"",name:"",contact:"",location:"",active:true};
+  const [form,setForm]=useState<any>(blank());
+  const persist=(next:MasterDataState)=>{setData(next);writeMasterData(next)};
+  const choose=(key:keyof MasterDataState)=>{setTab(key);setOpen(false);setEditing(null);setError("");setForm(key==="products"?{id:"",code:"",name:"",category:"",grades:"",sizes:"",active:true}:{id:"",code:"",name:"",contact:"",location:"",active:true})};
+  const begin=(row?:any)=>{setEditing(row||null);setError("");setForm(row?{...row,grades:Array.isArray(row.grades)?row.grades.join("، "):"",sizes:Array.isArray(row.sizes)?row.sizes.join("، "):""}:blank());setOpen(true)};
+  const save=()=>{const name=String(form.name||"").trim(),code=String(form.code||"").trim();if(!name||!code)return setError("نام و کد الزامی است.");let row:any={...form,id:editing?.id||`${tab.slice(0,1).toUpperCase()}-${Date.now()}`,name,code};if(tab==="products"){row.grades=String(form.grades||"").split(/[،,]/).map((x:string)=>x.trim()).filter(Boolean);row.sizes=String(form.sizes||"").split(/[،,]/).map((x:string)=>x.trim()).filter(Boolean);if(!row.grades.length)return setError("حداقل یک گرید برای محصول تعریف کنید.");if(!row.sizes.length)row.sizes=["استاندارد"]}const rows=(data[tab] as any[]);const nextRows=editing?rows.map(x=>x.id===editing.id?row:x):[...rows,row];const next={...data,[tab]:nextRows};persist(next);setOpen(false);setEditing(null)};
+  const toggle=(row:any)=>{const next={...data,[tab]:(data[tab] as any[]).map(x=>x.id===row.id?{...x,active:!x.active}:x)} as MasterDataState;persist(next)};
+  const rows=data[tab] as any[];
+  return <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl"><div className="flex justify-between items-start mb-4"><div><h2 className="font-bold text-[#18302a] text-[22px]">داده‌های پایه</h2><p className="text-[#718079] text-[13px]">هر تب منبع داده، فرم ایجاد و ویرایش مستقل دارد.</p></div><GreenBtn onClick={()=>begin()}>+ افزودن {labels[tab]}</GreenBtn></div><div className="flex gap-2 mb-4">{(Object.keys(labels) as (keyof MasterDataState)[]).map(key=><button key={key} onClick={()=>choose(key)} className={(tab===key?"bg-[#176b50] text-white":"bg-[#e8efec] text-[#718079]")+" px-4 py-2 rounded-full text-[12px]"}>{labels[key]}</button>)}</div><Card className="overflow-hidden"><div className="grid grid-cols-[.75fr_1fr_1.2fr_1.3fr_1fr] gap-3 bg-[#eef3f0] p-3 text-[11px] text-[#718079]"><span>عملیات</span><span>وضعیت</span><span>{tab==="products"?"گریدهای محصول":tab==="warehouses"?"موقعیت":"تماس"}</span><span>نام</span><span>کد</span></div>{rows.map(row=><div key={row.id} className="grid grid-cols-[.75fr_1fr_1.2fr_1.3fr_1fr] gap-3 p-3 border-t items-center text-[12px]"><div className="flex gap-2"><button onClick={()=>begin(row)} className="text-[#176b50] font-bold">ویرایش</button><button onClick={()=>toggle(row)} className="text-[#8a611c]">{row.active?"غیرفعال":"فعال"}</button></div><Badge text={row.active?"فعال":"غیرفعال"} color={row.active?"#16825b":"#718079"} bg={row.active?"#dff3e9":"#e8efec"}/><span>{tab==="products"?row.grades.join("، "):tab==="warehouses"?row.location:row.contact}</span><b>{row.name}</b><span className="font-mono">{row.code}</span></div>)}</Card>{open&&<div className="fixed inset-0 z-50 bg-[#09231dcc] flex items-center justify-center"><div className="bg-white rounded-2xl p-6 w-[680px]" dir="rtl"><div className="flex justify-between"><h3 className="font-bold text-[18px]">{editing?"ویرایش":"افزودن"} {labels[tab]}</h3><button onClick={()=>setOpen(false)} className="text-xl">×</button></div>{error&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mt-3 text-[12px]">{error}</p>}<div className="grid grid-cols-2 gap-3 mt-4"><label className="text-[11px]">نام<input value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label><label className="text-[11px]">کد<input value={form.code||""} onChange={e=>setForm({...form,code:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>{tab==="products"?<><label className="text-[11px]">دسته‌بندی<input value={form.category||""} onChange={e=>setForm({...form,category:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label><label className="text-[11px]">گریدها (با ویرگول جدا کنید)<input value={form.grades||""} onChange={e=>setForm({...form,grades:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1" placeholder="A، B، C"/></label><label className="text-[11px] col-span-2">اندازه‌ها<input value={form.sizes||""} onChange={e=>setForm({...form,sizes:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1" placeholder="درشت، متوسط، ریز"/></label></>:tab==="warehouses"?<label className="text-[11px] col-span-2">موقعیت<input value={form.location||""} onChange={e=>setForm({...form,location:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>:<label className="text-[11px] col-span-2">شماره تماس<input value={form.contact||""} onChange={e=>setForm({...form,contact:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>}</div><label className="flex gap-2 mt-4 text-[12px]"><input type="checkbox" checked={form.active!==false} onChange={e=>setForm({...form,active:e.target.checked})}/>فعال و قابل انتخاب در عملیات جدید</label><button onClick={save} className="w-full mt-5 bg-[#176b50] text-white rounded-lg py-3 font-bold">ذخیره</button></div></div>}</div>
+}
+function UsersScreen() {
   const [showNewUser, setShowNewUser] = useState(false);
   return (
     <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl">
@@ -1251,7 +3732,7 @@ const screenTitles: Record<WebScreen, { title: string; subtitle: string }> = {
   packaging: { title: "بسته‌بندی", subtitle: "Web / packaging" },
   consumables: { title: "اقلام مصرفی", subtitle: "Web / consumables" },
   shipments: { title: "ارسال‌ها", subtitle: "Web / shipments" },
-  transfers: { title: "انتقال بین سایت", subtitle: "Web / transfers" },
+  "inventory-movement": { title: "جابجایی استثنایی موجودی", subtitle: "Web / inventory-movement" },
   tasks: { title: "کارها", subtitle: "Web / tasks" },
   printing: { title: "چاپ و لیبل", subtitle: "Web / printing" },
   trace: { title: "رهگیری", subtitle: "Web / trace" },
@@ -1281,7 +3762,7 @@ export default function WebApp({ onExit }: { onExit: () => void }) {
       case "packaging": return <PackagingScreen />;
       case "consumables": return <ConsumablesScreen />;
       case "shipments": return <ShipmentsScreen />;
-      case "transfers": return <TransfersScreen navigate={setScreen} />;
+      case "inventory-movement": return <InventoryMovementScreen navigate={setScreen} />;
       case "tasks": return <TasksScreen />;
       case "printing": return <PrintingScreen />;
       case "trace": return <TraceScreen />;

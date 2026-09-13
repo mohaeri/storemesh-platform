@@ -92,6 +92,18 @@ Status: UI correction finalized in the Figma Make prototype on 2026-09-08; no ba
 - Disposable containers remain traceable in a separate tab and are excluded from the permanent reusable fleet and sorting-container selection.
 - Preview verification confirmed type-specific prefix generation, ownership-field removal, current tare/zone editing, damage reporting with permanent code locking, and disposable-container separation.
 
+## UI-only change record
+
+### 2026-09-13 — Master data, movement, sorting entry, and washing session prototype
+
+Status: Figma Make Version 16 finalized; UI/prototype logic only. No backend, database, API route, request/response shape, or contract was changed.
+
+- Products, suppliers, customers, and warehouses use independent browser-local collections and forms. Product active status gates new receiving choices while saved history remains intact; grades and sizes are product-specific.
+- Normal workflow movement is scan-driven at the operational step. Shipping no longer contains internal transfer; a separate Inventory Movement screen is labeled and recorded as an exceptional manual move.
+- Sorting accepts only scanned input baskets. Entry weighing is optional; when supplied, the prototype stores previous weight, new weight, and delta in the event ledger.
+- Washing is represented as a persistent session with multiple compatible inputs, multiple new weighed outputs, all-parent genealogy, and a completion gate requiring every output to be registered and the unit confirmed empty.
+- These interactions require backend capability verification before production implementation. Version 16 must not be interpreted as evidence that the current server exposes the same master-data status/grade APIs, exceptional movement endpoint, transition-weight evidence, or multi-output washing-session contract.
+
 ## Historical backend changes before this rule
 
 The following backend work was completed before this UI-only rule. Detailed acceptance results are in the matching Fix Request reports under `docs/fix-requests/done/`.

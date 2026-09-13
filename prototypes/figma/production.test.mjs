@@ -6,9 +6,10 @@ import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const ts = require(process.env.PROTOTYPE_TYPESCRIPT || 'typescript');
 const source = fs.readFileSync(new URL('./ProductionWorkbench.tsx', import.meta.url), 'utf8').split('const pwBox =')[0];
+const helperSource = source.replace(/function ScanOptionalWeighTransition[\s\S]*?(?=function pwTransitionWeight)/, '');
 const assembled = fs.readFileSync(new URL('./WebApp.tsx', import.meta.url), 'utf8');
 const hub = fs.readFileSync(new URL('./HubApp.tsx', import.meta.url), 'utf8');
-const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const js = ts.transpileModule(helperSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 function setup() {
   const data = new Map();
   const receipt = { id: 'R1', supplier: 'Test', baskets: [{ code: 'IN1', product: 'Apple', gross: 11, tare: 1, zone: 'COLD_ROOM_CLEAN' }] };
@@ -23,12 +24,12 @@ function setup() {
 test('sorting persists one child per basket and exact mass balance', () => {
   const s=setup(); const children=s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',6),s.output('OUT2',4)],'');
   assert.equal(children.length,2); assert.notEqual(children[0].id,children[1].id);
-  const l=s.readProductionLedger(); assert.equal(l.items.length,2); assert.equal(l.events[0].details.lossKg,0);
+  const l=s.readProductionLedger(); assert.equal(l.items.length,2); assert.equal(l.events.find(event=>event.action==='ثبت سورتینگ').details.lossKg,0);
   assert.equal(l.items[0].parentId,'IN1'); assert.equal(l.items[0].inputCodes[0],'IN1'); assert.equal(l.items[0].zone,'SORTING'); assert.equal(l.items[0].destination,'FRESH_EXPORT'); assert.equal(l.items[0].nextZone,'FRESH_EXPORT');
 });
 test('multiple input baskets preserve exact weighted parents and create processing prerequisite route', () => { const s=setup(); s.receipt.baskets.push({code:'IN2',product:'Apple',gross:6,tare:1,zone:'COLD_ROOM_CLEAN'}); s.carriers.push({code:'IN2',type:'BASKET',capacityKg:20,status:'ACTIVE'}); s.data.set('storemesh.prototype.containers',JSON.stringify(s.carriers)); const [child]=s.recordSortingOutputs(s.receipt,['IN1','IN2'],[s.output('OUT1',15,'FREEZE_DRYING',[{batchId:'IN1',inputWeightKg:10},{batchId:'IN2',inputWeightKg:5}])],''); assert.equal(child.nextZone,'WASHING'); assert.deepEqual(Array.from(child.parentIds),['IN1','IN2']); assert.deepEqual(Array.from(s.readProductionLedger().consumedInputs),['R1:IN1','R1:IN2']); });
 test('consumed source cannot be sorted twice', () => { const s=setup(); s.recordSortingOutputs(s.receipt,['IN1'],[s.output()],''); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT2')],'')); assert.equal(s.readProductionLedger().items.length,1); });
-test('positive loss needs classified reason', () => { const s=setup(); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',9)],'')); s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',9)],'WASTE'); assert.equal(s.readProductionLedger().events[0].details.lossKg,1); });
+test('positive loss needs classified reason', () => { const s=setup(); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',9)],'')); s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',9)],'WASTE'); assert.equal(s.readProductionLedger().events.find(event=>event.action==='ثبت سورتینگ').details.lossKg,1); });
 test('overweight and duplicate output reject without partial write', () => { const s=setup(); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',11)],'')); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output('OUT1',5),s.output('OUT1',5)],'')); assert.equal(s.readProductionLedger().items.length,0); });
 test('input cannot also be output', () => { const s=setup(); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output('IN1')],'')); });
 test('receiving occupied basket cannot become production output', () => { const s=setup(); s.receipt.baskets.push({code:'OUT1',gross:3,tare:1,zone:'COLD_ROOM_CLEAN'}); assert.throws(()=>s.recordSortingOutputs(s.receipt,['IN1'],[s.output()],'')); });
@@ -56,4 +57,43 @@ test('production hides test controls and keeps same-session data flow', () => {
   for (const label of ['نقش شبیه‌سازی', 'نمایش داده آزمایشی', 'افزودن نمونه آزمایشی جداگانه', 'بازخوانی', 'فعال‌سازی تجهیز آزمایشی']) assert.doesNotMatch(assembled, new RegExp(label));
   assert.match(assembled, /با داده همین نشست/);
   assert.match(assembled, /PW_DEFAULT_MACHINES/);
+});
+test('master data has independent persisted collections and product-specific grades', () => {
+  assert.match(assembled, /storemesh\.prototype\.master-data\.v1/);
+  assert.match(assembled, /products:\s*MasterProduct\[\]/);
+  assert.match(assembled, /suppliers:\s*MasterParty\[\]/);
+  assert.match(assembled, /customers:\s*MasterParty\[\]/);
+  assert.match(assembled, /warehouses:\s*MasterWarehouse\[\]/);
+  assert.match(assembled, /\.filter\((?:\(item\)|item)\s*=>\s*item\.active\)/);
+  assert.match(assembled, /row\.grades=String\(form\.grades/);
+  assert.match(assembled, /row\.sizes=String\(form\.sizes/);
+});
+test('shipping contains no internal transfer and exceptional movement lives under inventory', () => {
+  assert.doesNotMatch(assembled, /screens:\s*\[\s*"shipments",\s*"transfers"/);
+  assert.match(assembled, /screens:\s*\[\s*"inventory",\s*"inventory-movement"/);
+  assert.match(assembled, /جابجایی استثنایی/);
+  assert.match(assembled, /فقط برای انتقال خارج از مسیر عادی/);
+});
+test('sorting input is scan-driven with optional weighing and product grades', () => {
+  assert.match(assembled, /اسکن سبدهای ورودی/);
+  assert.match(assembled, /ScanOptionalWeighTransition/);
+  assert.match(assembled, /entryWeights/);
+  assert.match(assembled, /readMasterData\(\)\.products/);
+  assert.doesNotMatch(assembled, /افزودن سبد ورودی/);
+  assert.doesNotMatch(assembled, /انتخاب از موجودی/);
+});
+test('optional transition weighing records previous, new and delta weights', () => {
+  assert.match(source, /previousWeightKg/);
+  assert.match(source, /newWeightKg/);
+  assert.match(source, /deltaKg/);
+  assert.match(source, /بدون توزین/);
+});
+test('washing session enforces compatibility, multiple outputs, complete genealogy and empty unit', () => {
+  assert.match(assembled, /نشست شست‌وشوی چندسبدی/);
+  assert.match(assembled, /نشست فعال شست‌وشو شامل گرید/);
+  assert.match(assembled, /session\.outputs\.push/);
+  assert.match(assembled, /parentIds: parents\.map/);
+  assert.match(assembled, /parentContributions: contributions/);
+  assert.match(assembled, /واحد شست‌وشو کاملاً خالی است/);
+  assert.match(assembled, /if \(!empty\)/);
 });
