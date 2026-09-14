@@ -17,14 +17,34 @@ function SortingScreen() {
     [outputs, setOutputs] = useState<any[]>([]),
     [error, setError] = useState(""),
     [scale, setScale] = useState("STABLE"),
-    [staged, setStaged] = useState<string[]>([])
+    [staged, setStaged] = useState<string[]>([]),
+    [outputScanOpen, setOutputScanOpen] = useState(false)
+  const defaultFleet = [
+    {
+      qr: "CTR-001",
+      type: "سبد پلاستیکی",
+      tare: 1.28,
+      capacity: 25,
+      zones: ["RECEIVING", "COLD_STORAGE", "SORTING"],
+      status: "فعال",
+    },
+    {
+      qr: "CTR-003",
+      type: "سبد پلاستیکی",
+      tare: 1.28,
+      capacity: 25,
+      zones: ["SORTING", "WASHING", "COLD_STORAGE"],
+      status: "فعال",
+    },
+  ]
   const fleet: any[] = (() => {
     try {
       return JSON.parse(
-        localStorage.getItem("storemesh.prototype.containers") || "[]",
+        localStorage.getItem("storemesh.prototype.containers") ||
+          JSON.stringify(defaultFleet),
       )
     } catch {
-      return []
+      return defaultFleet
     }
   })()
   const consumed = ledger.consumedInputs || [],
@@ -150,6 +170,19 @@ function SortingScreen() {
     if (new Set(sources.map((source: any) => source.product)).size !== 1)
       return setError("همه ورودی‌های یک نوبت سورت باید یک محصول باشند.")
     setStep("output")
+    setError("")
+  }
+  function scanOutput(rawCode = outputCode) {
+    const code = pwCode(rawCode),
+      selected = pool.find((c) => pwCode(c.qr || c.code) === code)
+    if (
+      !selected ||
+      outputs.some((o) => pwCode(o.code) === code) ||
+      inputCodes.some((inputCode) => pwCode(inputCode) === code)
+    )
+      return setError("سبد خروجی باید موجود، خالی و غیرتکراری باشد.")
+    setOutputCode(selected.qr || selected.code)
+    setStaged([...new Set([...staged, selected.qr || selected.code])])
     setError("")
   }
   function add() {
@@ -344,24 +377,28 @@ function SortingScreen() {
                 <div className="grid grid-cols-2 gap-3">
                   <label className="text-[12px]">
                     سبد خروجی
-                    <select
-                      className={field}
+                    <div className="flex gap-2">
+                    <input
+                      aria-label="کد سبد خروجی سورت"
+                      className={field + " font-mono"}
                       value={outputCode}
                       onChange={(e) => setOutputCode(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") scanOutput()
+                      }}
+                      placeholder="اسکن QR سبد خالی"
+                    />
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-lg border border-[#176b50] px-3 text-[11px] font-bold text-[#176b50]"
+                      onClick={() => setOutputScanOpen(true)}
                     >
-                      <option value="">انتخاب کنید…</option>
-                      {pool
-                        .filter(
-                          (c) =>
-                            !outputs.some((o) => o.code === (c.qr || c.code)),
-                        )
-                        .map((c) => (
-                          <option key={c.qr || c.code} value={c.qr || c.code}>
-                            {c.qr || c.code} · خالی{" "}
-                            {c.tare ?? c.tareWeightKg ?? 0} kg
-                          </option>
-                        ))}
-                    </select>
+                      شبیه‌ساز اسکن
+                    </button>
+                    </div>
+                    <span className="mt-1 block text-[10px] text-[#718079]">
+                      اسکن سخت‌افزاری و شبیه‌ساز هر دو همین اعتبارسنجی را اجرا می‌کنند.
+                    </span>
                   </label>
                   <label className="text-[12px]">
                     مقصد نهایی
@@ -425,6 +462,27 @@ function SortingScreen() {
                     </select>
                   </label>
                 </div>
+                <ScanSimulator
+                  open={outputScanOpen}
+                  title="اسکن سبد خالی خروجی سورتینگ"
+                  suggestedCode={
+                    pool.find(
+                      (c) =>
+                        !outputs.some(
+                          (o) => pwCode(o.code) === pwCode(c.qr || c.code),
+                        ),
+                    )?.qr ||
+                    pool.find(
+                      (c) =>
+                        !outputs.some(
+                          (o) => pwCode(o.code) === pwCode(c.qr || c.code),
+                        ),
+                    )?.code ||
+                    ""
+                  }
+                  onClose={() => setOutputScanOpen(false)}
+                  onScan={scanOutput}
+                />
                 <div className="flex items-center justify-between rounded-xl bg-[#102f29] text-white p-4 my-3">
                   <span className="text-[12px]">
                     خالص = ناخالص − وزن خالی ({tare.toFixed(3)})
