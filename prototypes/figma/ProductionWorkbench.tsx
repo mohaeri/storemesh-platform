@@ -25,6 +25,7 @@ type PWLedger = {
   items: PWItem[]
   cycles: any[]
   washSessions: any[]
+  sortingSessions: any[]
   events: any[]
   consumedInputs: string[]
   machines: Record<string, string[]>
@@ -84,6 +85,7 @@ const pwEmpty = (): PWLedger => ({
   items: [],
   cycles: [],
   washSessions: [],
+  sortingSessions: [],
   events: [],
   consumedInputs: [],
   machines: { ...PW_DEFAULT_MACHINES },
@@ -258,9 +260,13 @@ function pwId(ledger: PWLedger, prefix: string) {
 }
 function pwCarriers() {
   let value: any
+  const defaults = [
+    { qr: "CTR-001", type: "سبد پلاستیکی", tare: 1.28, capacity: 25, zones: ["RECEIVING", "COLD_STORAGE", "SORTING"], status: "فعال" },
+    { qr: "CTR-003", type: "سبد پلاستیکی", tare: 1.28, capacity: 25, zones: ["SORTING", "WASHING", "COLD_STORAGE"], status: "فعال" },
+  ]
   try {
     value = JSON.parse(
-      localStorage.getItem("storemesh.prototype.containers") || "[]",
+      localStorage.getItem("storemesh.prototype.containers") || JSON.stringify(defaults),
     )
   } catch {
     throw Error("فهرست کانتینرهای مرورگر قابل خواندن نیست.")
@@ -525,6 +531,11 @@ function recordSortingOutputs(
     lossKg: loss,
     lossReason: loss > 0 ? lossReason : null,
   })
+  ledger.sortingSessions = (ledger.sortingSessions || []).map((session: any) =>
+    session.receiptId === batch.id && session.status === "IN_PROGRESS"
+      ? { ...session, status: "COMPLETED", completedAt: new Date().toISOString() }
+      : session,
+  )
   saveProductionLedger(ledger)
   return children
 }

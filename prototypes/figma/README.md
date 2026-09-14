@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source installed in Figma Make as Version 24 on 2026-09-14.
+This folder keeps the reproducible source installed in Figma Make as Version 26 on 2026-09-14.
 
 ## What is included
 
@@ -22,7 +22,7 @@ node --test prototypes/figma/production.test.mjs
 
 The assembled source must also pass the downloaded Figma project's TypeScript check and `pnpm build` before it is installed through the Figma Make code editor.
 
-Version 24 adds the shared scan simulator to each Sorting output: it proposes an available empty basket even in a fresh prototype session, applies the same validation as a hardware scan, and records physical presence before weighing and destination selection. Version 22's right-side Persian Web sidebar and automatic Washing scan suggestion remain intact.
+Version 26 separates Sorting entry and exit into a persisted session. Entry scans multiple source baskets, offers optional per-basket load-cell capture, and locks them into the Persian `در حال سورت` inventory state. After a reload, Exit restores the active session and handles each new output basket with the shared scanner, weighing, and operator-selected destination. Inventory no longer shows the previous cold-room destination while a basket is actively being sorted. Version 22's right-side Persian Web sidebar and automatic Washing scan suggestion remain intact.
 
 ## Scope boundary
 

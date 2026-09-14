@@ -4,7 +4,7 @@ type PrototypeBatch={id:string;supplier:string;reference:string;createdAt:string
 const PROTOTYPE_KEY="storemesh.prototype.batch";
 function prototypeColdStorageLocation(value:string|undefined|null):boolean{const location=String(value||"").trim().toUpperCase().replace(/[\s_.-]+/g,"");return location.includes("سردخانه")||location.includes("COLDROOM")||location.includes("COLDSTORAGE")}
 function normalizePrototypeBasket(b:PrototypeBasket):PrototypeBasket{const legacyWaiting="آماده"+" انتقال",location=b.currentLocation||b.zone||"RECEIVING";const waiting=b.currentState==="AWAITING_GATE_SCAN"||b.status===legacyWaiting;const state=waiting?"AWAITING_GATE_SCAN":b.currentState||b.status||"RECEIVED";const destination=waiting?(b.destination||"COLD_ROOM_DIRTY"):b.destination===undefined?(location==="RECEIVING"?"COLD_ROOM_DIRTY":null):b.destination;const nextAction=b.nextAction||(destination?`اسکن ورود به ${destination}`:"منتظر تخصیص برنامه تولید");return {...b,zone:location,status:state,currentLocation:location,currentState:state,destination,nextAction}}
-function normalizePrototypeBatch(value:PrototypeBatch):PrototypeBatch{const legacyWaiting="آماده"+" انتقال",baskets=(value.baskets||[]).map(normalizePrototypeBasket),pending=baskets.filter(b=>b.currentState==="AWAITING_GATE_SCAN"),pendingDestination=pending[0]?.destination||value.destination;return {...value,status:pending.length?`در انتظار اسکن مقصد (${pending.length})`:value.status===legacyWaiting?"موجودی ثبت‌شده":value.status,destination:pendingDestination,baskets,events:value.events||[]}}
+function normalizePrototypeBatch(value:PrototypeBatch):PrototypeBatch{const legacyWaiting="آماده"+" انتقال",baskets=(value.baskets||[]).map(normalizePrototypeBasket),pending=baskets.filter(b=>b.currentState==="AWAITING_GATE_SCAN"),pendingDestination=pending[0]?.destination||baskets.find(b=>b.destination)?.destination;return {...value,status:pending.length?`در انتظار اسکن مقصد (${pending.length})`:value.status===legacyWaiting?"موجودی ثبت‌شده":value.status,destination:pendingDestination,baskets,events:value.events||[]}}
 function readPrototypeBatch():PrototypeBatch{try{const x=localStorage.getItem(PROTOTYPE_KEY);if(x)return normalizePrototypeBatch(JSON.parse(x))}catch{} return normalizePrototypeBatch({id:"RCV-1405-0928",supplier:"گلخانه نمونه",reference:"BL-1405-091",createdAt:"امروز ۱۴:۳۰",status:"در انتظار اسکن سردخانه",destination:"COLD_ROOM_DIRTY",baskets:[{id:1,code:"TMP-7862368",product:"گوجه فرنگی",grade:"A",size:"درشت",gross:20,tare:1.28,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:"COLD_ROOM_DIRTY",nextAction:"اسکن ورود سردخانه"},{id:2,code:"BSK-0002",product:"گوجه فرنگی",grade:"A",size:"درشت",gross:20.38,tare:1.28,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:"COLD_ROOM_DIRTY",nextAction:"اسکن ورود سردخانه"},{id:3,code:"BSK-0003",product:"گوجه فرنگی",grade:"B",size:"متوسط",gross:19.12,tare:1.28,currentLocation:"RECEIVING",currentState:"AWAITING_GATE_SCAN",destination:"COLD_ROOM_DIRTY",nextAction:"اسکن ورود سردخانه"}],events:[{time:"۱۴:۳۰",title:"ثبت محموله",detail:"ایستگاه دریافت وب"}]})}
 function writePrototypeBatch(b:PrototypeBatch){localStorage.setItem(PROTOTYPE_KEY,JSON.stringify(normalizePrototypeBatch(b)));window.dispatchEvent(new Event("storemesh-data"))}
 function applyReceiptWorkflowScan(batch:PrototypeBatch,rawCode:string,target:string):PrototypeBatch{const code=String(rawCode||"").trim().toUpperCase();if(!code)throw Error("ابتدا QR سبد را اسکن کنید.");const source=normalizePrototypeBatch(batch),basket=source.baskets.find(item=>item.code.toUpperCase()===code);if(!basket)throw Error("سبد اسکن‌شده در موجودی جاری پیدا نشد.");const sortingEntry=target==="SORTING";if(sortingEntry&&!prototypeColdStorageLocation(basket.currentLocation||basket.zone))throw Error("سبد باید پیش از ورود به سورتینگ در سردخانه ثبت شده باشد.");if(!sortingEntry&&basket.destination!==target)throw Error(`مقصد مجاز این سبد ${basket.destination||"تعیین نشده"} است.`);const stored=target==="COLD_ROOM_DIRTY"||target==="COLD_ROOM_CLEAN"||prototypeColdStorageLocation(target),nextState=stored?"STORED":"IN_PROCESS",nextDestination=null,nextAction=stored?"منتظر انتخاب برای عملیات سورتینگ":"تکمیل عملیات جاری";const at=new Date().toLocaleTimeString("fa-IR");return normalizePrototypeBatch({...source,baskets:source.baskets.map(item=>item.code.toUpperCase()===code?{...item,zone:target,status:nextState,currentLocation:target,currentState:nextState,destination:nextDestination,nextAction}:item),events:[...source.events,{time:at,title:"اسکن گذرگاه عملیاتی",detail:`${code} · ${basket.currentLocation} ← ${target} · اقدام بعدی: ${nextAction}`}]})}
@@ -363,13 +363,13 @@ function ReceivingScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
 }
 
 function ContainersScreen(){const STORE="storemesh.prototype.containers";const inputClass="w-full h-11 rounded-lg border border-[#d9e3de] bg-white px-3 text-[12px] text-[#18302a] outline-none focus:border-[#176b50]";const batch=readPrototypeBatch();const zones=[{id:"RECEIVING",label:"دریافت"},{id:"COLD_STORAGE",label:"سردخانه"},{id:"SORTING",label:"سورتینگ"},{id:"WASHING",label:"شست‌وشو"},{id:"SLICING",label:"اسلایس"},{id:"FREEZING",label:"فریز"},{id:"DRYING",label:"خشک‌کن"},{id:"PACKAGING",label:"بسته‌بندی"},{id:"SHIPPING",label:"ارسال"}];const seed=[{qr:"CTR-001",type:"سبد پلاستیکی",tare:1.28,capacity:25,zones:["RECEIVING","COLD_STORAGE","SORTING"],last:"امروز ۰۹:۳۰",status:"فعال"},{qr:"CTR-002",type:"سبد پلاستیکی",tare:1.3,capacity:25,zones:["RECEIVING"],last:"دیروز ۱۵:۱۰",status:"خراب",damageReason:"ترک بدنه",transferredTo:"CTR-003"},{qr:"CTR-003",type:"سبد پلاستیکی",tare:1.28,capacity:25,zones:["SORTING","WASHING","COLD_STORAGE"],last:"امروز ۱۱:۰۰",status:"فعال"}];const [rows,setRows]=useState<any[]>(()=>{try{return JSON.parse(localStorage.getItem(STORE)||"null")||seed}catch{return seed}});const [tab,setTab]=useState<"ACTIVE"|"DAMAGED"|"SINGLE_USE">("ACTIVE");const [modal,setModal]=useState<""|"CREATE"|"EDIT"|"DAMAGE">("");const [selectedRow,setSelectedRow]=useState<any>(null);const [created,setCreated]=useState("");const [damageReason,setDamageReason]=useState("");const [target,setTarget]=useState("");const blank={type:"سبد پلاستیکی",tare:1.28,capacity:25,zones:["RECEIVING","COLD_STORAGE","SORTING"]};const [form,setForm]=useState<any>(blank);const persist=(next:any[])=>{setRows(next);localStorage.setItem(STORE,JSON.stringify(next));window.dispatchEvent(new Event("storemesh-data"))};const toggle=(z:string)=>setForm((f:any)=>({...f,zones:f.zones.includes(z)?f.zones.filter((x:string)=>x!==z):[...f.zones,z]}));const prefix=(type:string)=>type==="سینی فرایندی"?"TRY":type==="کانتینر عمومی"?"CTR":"BSK";const create=()=>{if(form.tare<0||form.capacity<=form.tare||!form.zones.length)return;const p=prefix(form.type),n=rows.filter(r=>String(r.qr).startsWith(p+"-")).length+1,qr=p+"-"+String(n).padStart(4,"0");persist([...rows,{...form,qr,last:"استفاده نشده",status:"فعال",singleUse:false}]);setCreated(qr)};const openEdit=(r:any)=>{setSelectedRow(r);setForm({type:r.type,tare:r.tare,capacity:r.capacity,zones:[...r.zones]});setModal("EDIT")};const saveEdit=()=>{if(!selectedRow||form.tare<0||form.capacity<=form.tare||!form.zones.length)return;persist(rows.map(r=>r.qr===selectedRow.qr?{...r,tare:form.tare,capacity:form.capacity,zones:form.zones}:r));setModal("")};const markDamaged=()=>{if(!selectedRow||!damageReason.trim())return;persist(rows.map(r=>r.qr===selectedRow.qr?{...r,status:"خراب",damageReason,transferredTo:target||null,last:"امروز · گزارش خرابی"}:r));setModal("");setTab("DAMAGED")};const singles=batch.baskets.filter(b=>b.code.startsWith("TMP-")).map(b=>({qr:b.code,type:"ظرف یک‌بارمصرف تأمین‌کننده",tare:null,capacity:b.gross,zones:[b.zone||"RECEIVING"],last:batch.createdAt,status:"درحال‌استفاده",singleUse:true}));const shown=tab==="SINGLE_USE"?singles:rows.filter(r=>tab==="ACTIVE"?r.status==="فعال":r.status==="خراب");const zoneNames=(r:any)=>r.zones.map((z:string)=>zones.find(x=>x.id===z)?.label||z).join("، ");return <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl"><div className="flex items-start justify-between mb-4"><div><h2 className="font-bold text-[#18302a] text-[22px]">کانتینرها</h2><p className="text-[#718079] text-[13px]">چرخه عمر سبدهای دائمی و نمایش جداگانه ظروف یک‌بارمصرف</p></div><div className="flex gap-2 items-center"><Badge text="سایت ایران" color="#176b50" bg="#e1f2eb"/><button onClick={()=>{setForm(blank);setCreated("");setModal("CREATE")}} className="bg-[#176b50] text-white rounded-lg px-5 py-2 text-[12px] font-bold">+ سبد جدید</button></div></div><div className="grid grid-cols-3 gap-2 mb-4 max-w-2xl">{[{id:"ACTIVE",label:"سبدهای فعال",count:rows.filter(r=>r.status==="فعال").length},{id:"DAMAGED",label:"خراب / از رده خارج",count:rows.filter(r=>r.status==="خراب").length},{id:"SINGLE_USE",label:"ظروف یک‌بارمصرف",count:singles.length}].map(x=><button onClick={()=>setTab(x.id as any)} className={"rounded-xl border p-3 text-right "+(tab===x.id?"bg-[#176b50] text-white border-[#176b50]":"bg-white border-[#d8e4df]")}><b className="block text-[12px]">{x.label}</b><small>{x.count} مورد</small></button>)}</div><Card className="overflow-hidden"><div className="grid grid-cols-[.8fr_1fr_.7fr_.7fr_1.1fr_1.6fr_.8fr_1fr] gap-2 bg-[#eef3f0] px-3 py-2 text-[10px] text-[#718079]"><span>وضعیت</span><span>آخرین استفاده</span><span>ظرفیت</span><span>وزن خالی</span><span>نوع</span><span>زون‌های مجاز</span><span>کد QR</span><span>عملیات</span></div>{!shown.length?<div className="p-8 text-center text-[#718079] text-[12px]">موردی در این گروه وجود ندارد.</div>:shown.map((r:any)=><div key={r.qr} className="grid grid-cols-[.8fr_1fr_.7fr_.7fr_1.1fr_1.6fr_.8fr_1fr] gap-2 px-3 py-3 border-t text-[11px] items-center"><Badge text={r.status} color={r.status==="فعال"?"#16825b":r.status==="خراب"?"#b84242":"#9a6420"} bg={r.status==="فعال"?"#dff3e9":r.status==="خراب"?"#fbe6e6":"#fff0dc"}/><span>{r.last}</span><b>{r.capacity} kg</b><span>{r.singleUse?"—":r.tare+" kg"}</span><span>{r.type}</span><span>{zoneNames(r)}</span><b className="font-mono">{r.qr}</b><div className="flex gap-2">{tab==="ACTIVE"&&<><button onClick={()=>openEdit(r)} className="text-[#176b50] font-bold">ویرایش</button><button onClick={()=>{setSelectedRow(r);setDamageReason("");setTarget("");setModal("DAMAGE")}} className="text-[#b84242] font-bold">خرابی</button></>}{tab==="DAMAGED"&&<span className="text-[#718079]">کد قفل است</span>}{tab==="SINGLE_USE"&&<span className="text-[#718079]">غیرقابل استفاده مجدد</span>}</div></div>)}</Card>{tab==="SINGLE_USE"&&<div className="mt-3 bg-[#fff8e3] text-[#765b15] rounded-lg p-3 text-[11px]">ظروف یک‌بارمصرف در رهگیری باقی می‌مانند، اما وارد ناوگان سبدهای دائمی و انتخاب سورتینگ نمی‌شوند.</div>}{modal&&<div className="fixed inset-0 z-50 bg-[#09231dcc] flex items-center justify-center"><div className="bg-white rounded-2xl p-6 w-[720px] max-h-[90vh] overflow-auto relative"><button onClick={()=>setModal("")} className="absolute left-4 top-3 text-[22px]">×</button>{modal==="DAMAGE"?<><h3 className="font-bold text-[#18302a] text-[18px]">گزارش خرابی {selectedRow?.qr}</h3><p className="text-[#718079] text-[11px] mt-1">کد این سبد برای همیشه حفظ و قفل می‌شود و هرگز به سبد دیگری اختصاص نمی‌یابد.</p><label className="block text-[11px] font-bold mt-4">سبد سالم مقصد (در صورت وجود محصول)<select className={inputClass} value={target} onChange={e=>setTarget(e.target.value)}><option value="">سبد خالی است / انتقال لازم نیست</option>{rows.filter(r=>r.status==="فعال"&&r.qr!==selectedRow?.qr).map(r=><option value={r.qr}>{r.qr}</option>)}</select></label><label className="block text-[11px] font-bold mt-3">علت خرابی<textarea className="w-full border rounded-lg p-3 mt-1" value={damageReason} onChange={e=>setDamageReason(e.target.value)} placeholder="مثلاً شکستگی بدنه یا دسته"/></label><div className="bg-[#fbe6e6] text-[#9f3535] rounded-lg p-3 text-[11px] mt-3">این عملیات حذف نیست؛ سابقه سبد حفظ می‌شود و QR آن دیگر قابل استفاده نخواهد بود.</div><button disabled={!damageReason.trim()} onClick={markDamaged} className="w-full mt-4 bg-[#b84242] disabled:opacity-40 text-white rounded-lg py-3 text-[12px] font-bold">ثبت خرابی و قفل دائمی کد</button></>:!created?<><h3 className="font-bold text-[#18302a] text-[18px]">{modal==="CREATE"?"ساخت سبد جدید":"ویرایش سبد "+selectedRow?.qr}</h3><p className="text-[#718079] text-[11px] mt-1">مالکیت سبدهای دائمی همیشه «مجموعه» است. فقط وزن خالی، ظرفیت و زون‌های مجاز قابل اصلاح‌اند.</p><div className="grid grid-cols-3 gap-3 mt-4"><label className="text-[11px] font-bold">نوع سبد<select disabled={modal==="EDIT"} className={inputClass} value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option>سبد پلاستیکی</option><option>سبد استیل</option><option>سینی فرایندی</option><option>کانتینر عمومی</option></select></label><label className="text-[11px] font-bold">وزن خالی / Tare (kg)<input type="number" step="0.01" className={inputClass} value={form.tare} onChange={e=>setForm({...form,tare:Number(e.target.value)})}/></label><label className="text-[11px] font-bold">ظرفیت مجاز (kg)<input type="number" className={inputClass} value={form.capacity} onChange={e=>setForm({...form,capacity:Number(e.target.value)})}/></label></div><h4 className="font-bold text-[12px] mt-5 mb-2">زون‌های مجاز (حداقل یک مورد)</h4><div className="grid grid-cols-3 gap-2">{zones.map(z=><button onClick={()=>toggle(z.id)} className={"rounded-lg border px-3 py-2 text-[11px] text-right "+(form.zones.includes(z.id)?"bg-[#e1f2eb] border-[#176b50] text-[#176b50]":"border-[#d8e4df]")}>{form.zones.includes(z.id)?"✓ ":""}{z.label}</button>)}</div><div className="bg-[#eef3f0] rounded-lg p-3 text-[11px] mt-4">پیشوند خودکار نوع: <b className="font-mono">{prefix(form.type)}-</b> · مالکیت: <b>مجموعه</b> · تاریخچه جداگانه کالیبراسیون ثبت نمی‌شود.</div><button disabled={!form.zones.length||form.tare<0||form.capacity<=form.tare} onClick={modal==="CREATE"?create:saveEdit} className="w-full mt-4 bg-[#176b50] disabled:opacity-40 text-white rounded-lg py-3 text-[12px] font-bold">{modal==="CREATE"?"ایجاد شناسه دائمی و QR":"ذخیره اصلاح وزن و زون‌ها"}</button></>:<div className="text-center"><div className="w-36 h-36 mx-auto border-4 border-[#18302a] grid place-items-center text-[64px]">⌗</div><small className="block mt-3 text-[#718079]">سبد مجموعه با موفقیت ساخته شد</small><b className="block font-mono text-[24px] text-[#133a31]">{created}</b><span className="inline-block mt-2 bg-[#dff3e9] text-[#176b50] rounded-full px-3 py-1 text-[10px]">QR آماده چاپ · کد دائمی و غیرقابل بازیافت</span><button onClick={()=>setModal("")} className="w-full mt-5 bg-[#176b50] text-white rounded-lg py-3 text-[12px] font-bold">بستن و مشاهده در فهرست</button></div>}</div></div>}</div>}function ReceivingInventoryScreen(){
- const [view,setView]=useState<"batches"|"containers">("batches"); const [query,setQuery]=useState(""); const [trace,setTrace]=useState<PrototypeBasket|null>(null); const [scanOpen,setScanOpen]=useState(false); const [error,setError]=useState(""); const [revision,setRevision]=useState(0); const receipt=readPrototypeBatch(); const consumed=readProductionLedger().consumedInputs; const batch={...receipt,baskets:receipt.baskets.filter(b=>!consumed.includes(receipt.id+":"+b.code))}; const total=batch.baskets.reduce((s,b)=>s+b.gross-b.tare,0); const pending=batch.baskets.find(b=>b.destination==="COLD_ROOM_DIRTY"); const scanGate=(code:string)=>{try{writePrototypeBatch(applyReceiptWorkflowScan(readPrototypeBatch(),code,"COLD_ROOM_DIRTY"));setError("");setRevision(revision+1)}catch(failure:any){setError(failure.message)}};
+ const [view,setView]=useState<"batches"|"containers">("batches"); const [query,setQuery]=useState(""); const [trace,setTrace]=useState<PrototypeBasket|null>(null); const [scanOpen,setScanOpen]=useState(false); const [error,setError]=useState(""); const [revision,setRevision]=useState(0); const receipt=readPrototypeBatch(); const consumed=readProductionLedger().consumedInputs; const batch={...receipt,baskets:receipt.baskets.filter(b=>!consumed.includes(receipt.id+":"+b.code))}; const total=batch.baskets.reduce((s,b)=>s+b.gross-b.tare,0); const pending=batch.baskets.find(b=>b.destination==="COLD_ROOM_DIRTY"); const stateNames:Record<string,string>={IN_SORTING:"در حال سورت",STORED:"موجود در سردخانه",AWAITING_GATE_SCAN:"در انتظار اسکن مقصد",CONSUMED:"مصرف‌شده",RECEIVED:"دریافت‌شده"}; const locationNames:Record<string,string>={SORTING:"سورتینگ",COLD_ROOM_DIRTY:"سردخانه کثیف",COLD_ROOM_CLEAN:"سردخانه تمیز",RECEIVING:"دریافت"}; const displayBatchStatus=batch.baskets.some(b=>b.currentState==="IN_SORTING")?"در حال سورت":batch.status; const activeDestinations=[...new Set(batch.baskets.map(b=>b.destination).filter(Boolean))] as string[]; const displayBatchDestination=activeDestinations.length===1?(locationNames[activeDestinations[0]]||activeDestinations[0]):activeDestinations.length>1?`${activeDestinations.length} مقصد فعال`:"فعلاً حرکت لازم نیست"; batch.destination=displayBatchDestination; const scanGate=(code:string)=>{try{writePrototypeBatch(applyReceiptWorkflowScan(readPrototypeBatch(),code,"COLD_ROOM_DIRTY"));setError("");setRevision(revision+1)}catch(failure:any){setError(failure.message)}};
  const rows=batch.baskets.filter(b=>[b.code,b.product,b.grade,batch.id].join(" ").includes(query));
  return <div className="shrink-0 bg-[#f4f7f5] p-4 overflow-visible" dir="rtl"><div className="flex justify-between mb-3"><div><h2 className="font-bold text-[#18302a] text-[20px]">موجودی و رهگیری</h2><p className="text-[#718079] text-[12px]">نمای سلسله‌مراتبی بچ، ظروف و زنجیره رویداد</p></div><Badge text="همگام با داده همین نشست" color="#176b50" bg="#e1f2eb"/></div>
- <div className="grid grid-cols-4 gap-3 mb-3"><StatCard label="بچ فعال" value={batch.baskets.length?"۱":"۰"}/><StatCard label="ظروف بچ" value={String(batch.baskets.length)}/><StatCard label="وزن خالص" value={total.toFixed(2)+"kg"}/><StatCard label="وضعیت" value={batch.status}/></div>
+ <div className="grid grid-cols-4 gap-3 mb-3"><StatCard label="بچ فعال" value={batch.baskets.length?"۱":"۰"}/><StatCard label="ظروف بچ" value={String(batch.baskets.length)}/><StatCard label="وزن خالص" value={total.toFixed(2)+"kg"}/><StatCard label="وضعیت" value={displayBatchStatus}/></div>
  {error&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mb-3 text-[12px]">{error}</p>}{pending&&<div className="bg-white border border-[#c9ddd5] rounded-xl p-3 mb-3 flex items-center gap-3"><div className="ml-auto"><b className="text-[12px]">اقدام بعدی: {pending.nextAction}</b><p className="text-[11px] text-[#718079]">{pending.code} · {pending.currentLocation} ← {pending.destination}</p></div><button onClick={()=>setScanOpen(true)} className="bg-[#176b50] text-white rounded-lg px-4 py-2 text-[12px] font-bold">⌗ اسکن گذرگاه</button></div>}
  <Card><div className="p-3 flex justify-between border-b"><div className="flex gap-2"><button onClick={()=>setView("batches")} className={(view==="batches"?"bg-[#176b50] text-white":"bg-[#edf2ef]")+" px-4 h-9 rounded-lg text-[12px]"}>نمای بچ‌ها</button><button onClick={()=>setView("containers")} className={(view==="containers"?"bg-[#176b50] text-white":"bg-[#edf2ef]")+" px-4 h-9 rounded-lg text-[12px]"}>نمای ظروف</button></div><input value={query} onChange={e=>setQuery(e.target.value)} className="border rounded-lg px-3 h-9 text-[12px]" placeholder="جست‌وجوی بچ، QR یا محصول..."/></div>
- {view==="batches"?<div className="p-3 overflow-visible"><div className="grid grid-cols-7 gap-3 text-[11px] text-[#718079] pb-2"><span>عملیات</span><span>وضعیت</span><span>مقصد</span><span>وزن خالص</span><span>تعداد ظروف</span><span>تأمین‌کننده</span><span>سریال بچ</span></div><div className="grid grid-cols-7 gap-3 items-center border-t py-3 text-[12px] overflow-visible"><button onClick={()=>setView("containers")} className="text-[#176b50] font-bold">بازکردن بچ ←</button><Badge text={batch.status} color="#176b50" bg="#dff3e9"/><span>{batch.destination||"در انتظار تخصیص"}</span><b>{total.toFixed(2)} kg</b><span>{batch.baskets.length} ظرف</span><span>{batch.supplier}</span><div className="flex items-center gap-2 font-mono"><span>{batch.id}</span><div className="relative group"><button aria-label="جزئیات ظروف بچ" className="w-5 h-5 rounded-full bg-[#dcebe5] text-[#176b50] font-bold">ⓘ</button><div className="hidden group-hover:block absolute z-[80] bottom-7 left-0 w-[420px] bg-[#133a31] text-white rounded-xl shadow-2xl p-4 font-sans pointer-events-none"><b className="block mb-2">ظروف عضو بچ · {batch.baskets.length} عدد</b>{batch.baskets.map(b=><div key={b.code} className="grid grid-cols-4 gap-2 py-2 border-t border-white/15 text-[11px]"><span>{(b.gross-b.tare).toFixed(2)} خالص</span><span>{b.tare.toFixed(2)} ظرف</span><span>{b.gross.toFixed(2)} ناخالص</span><span className="font-mono">{b.code}</span></div>)}</div></div></div></div></div>:<div><div className="grid grid-cols-8 gap-2 px-3 py-2 bg-[#f7faf8] text-[11px] text-[#718079]"><span>عملیات</span><span>وضعیت</span><span>موقعیت</span><span>خالص</span><span>گرید اولیه</span><span>محصول</span><span>بچ والد</span><span>ظرف</span></div>{rows.map(b=><div className="grid grid-cols-8 gap-2 px-3 py-3 border-t text-[11px] items-center"><button onClick={()=>setTrace(b)} className="text-[#176b50] font-bold">رهگیری ←</button><Badge text={b.status||batch.status} color="#176b50" bg="#dff3e9"/><span>{b.zone||batch.destination||"دریافت"}</span><b>{(b.gross-b.tare).toFixed(2)} kg</b><span>{b.grade}</span><span>{b.product}</span><span className="font-mono">{batch.id}</span><span className="font-mono">{b.code}</span></div>)}</div>}</Card>
+ {view==="batches"?<div className="p-3 overflow-visible"><div className="grid grid-cols-7 gap-3 text-[11px] text-[#718079] pb-2"><span>عملیات</span><span>وضعیت</span><span>مقصد</span><span>وزن خالص</span><span>تعداد ظروف</span><span>تأمین‌کننده</span><span>سریال بچ</span></div><div className="grid grid-cols-7 gap-3 items-center border-t py-3 text-[12px] overflow-visible"><button onClick={()=>setView("containers")} className="text-[#176b50] font-bold">بازکردن بچ ←</button><Badge text={displayBatchStatus} color="#176b50" bg="#dff3e9"/><span>{batch.destination||"در انتظار تخصیص"}</span><b>{total.toFixed(2)} kg</b><span>{batch.baskets.length} ظرف</span><span>{batch.supplier}</span><div className="flex items-center gap-2 font-mono"><span>{batch.id}</span><div className="relative group"><button aria-label="جزئیات ظروف بچ" className="w-5 h-5 rounded-full bg-[#dcebe5] text-[#176b50] font-bold">ⓘ</button><div className="hidden group-hover:block absolute z-[80] bottom-7 left-0 w-[420px] bg-[#133a31] text-white rounded-xl shadow-2xl p-4 font-sans pointer-events-none"><b className="block mb-2">ظروف عضو بچ · {batch.baskets.length} عدد</b>{batch.baskets.map(b=><div key={b.code} className="grid grid-cols-4 gap-2 py-2 border-t border-white/15 text-[11px]"><span>{(b.gross-b.tare).toFixed(2)} خالص</span><span>{b.tare.toFixed(2)} ظرف</span><span>{b.gross.toFixed(2)} ناخالص</span><span className="font-mono">{b.code}</span></div>)}</div></div></div></div></div>:<div><div className="grid grid-cols-8 gap-2 px-3 py-2 bg-[#f7faf8] text-[11px] text-[#718079]"><span>عملیات</span><span>وضعیت</span><span>موقعیت</span><span>خالص</span><span>گرید اولیه</span><span>محصول</span><span>بچ والد</span><span>ظرف</span></div>{rows.map(b=><div className="grid grid-cols-8 gap-2 px-3 py-3 border-t text-[11px] items-center"><button onClick={()=>setTrace(b)} className="text-[#176b50] font-bold">رهگیری ←</button><Badge text={stateNames[b.currentState||b.status||""]||b.status||batch.status} color="#176b50" bg="#dff3e9"/><span>{locationNames[b.currentLocation||b.zone||""]||b.zone||batch.destination||"دریافت"}</span><b>{(b.gross-b.tare).toFixed(2)} kg</b><span>{b.grade}</span><span>{b.product}</span><span className="font-mono">{batch.id}</span><span className="font-mono">{b.code}</span></div>)}</div>}</Card>
  {trace&&<div className="fixed inset-0 bg-black/40 z-[90] flex items-center justify-center" onClick={()=>setTrace(null)}><div className="bg-white rounded-2xl w-[700px] overflow-hidden" onClick={e=>e.stopPropagation()}><div className="bg-[#133a31] text-white p-5 flex justify-between"><div><h3 className="font-bold">رهگیری ظرف {trace.code}</h3><p className="text-[11px] text-[#bcd4cc]">بچ والد {batch.id}</p></div><button onClick={()=>setTrace(null)}>×</button></div><div className="p-6"><div className="grid grid-cols-4 gap-2 mb-5">{[["ناخالص",trace.gross.toFixed(2)],["وزن ظرف",trace.tare.toFixed(2)],["خالص",(trace.gross-trace.tare).toFixed(2)],["موقعیت",trace.currentLocation||trace.zone||"دریافت"]].map(x=><div className="bg-[#f1f6f3] p-3 rounded-xl"><small className="block text-[#718079]">{x[0]}</small><b>{x[1]}</b></div>)}</div><div className="bg-[#edf8f3] rounded-lg p-3 mb-4 text-[11px]"><b>اقدام بعدی:</b> {trace.nextAction} · <b>مقصد:</b> {trace.destination||"فعلاً حرکت لازم نیست"}</div><div className="border-r-2 border-[#b9d4ca] pr-5 space-y-4">{batch.events.slice().reverse().map(e=><div><b className="text-[12px] text-[#176b50]">{e.time} · {e.title}</b><p className="text-[11px] text-[#718079]">{e.detail}</p></div>)}</div></div></div></div>}<ScanSimulator open={scanOpen} title="اسکن ورود به سردخانه" suggestedCode={pending?.code||""} onClose={()=>setScanOpen(false)} onScan={scanGate}/></div>
 }
 // BEGIN PRODUCTION WORKSPACE
@@ -400,6 +400,7 @@ type PWLedger = {
   items: PWItem[]
   cycles: any[]
   washSessions: any[]
+  sortingSessions: any[]
   events: any[]
   consumedInputs: string[]
   machines: Record<string, string[]>
@@ -459,6 +460,7 @@ const pwEmpty = (): PWLedger => ({
   items: [],
   cycles: [],
   washSessions: [],
+  sortingSessions: [],
   events: [],
   consumedInputs: [],
   machines: { ...PW_DEFAULT_MACHINES },
@@ -633,9 +635,13 @@ function pwId(ledger: PWLedger, prefix: string) {
 }
 function pwCarriers() {
   let value: any
+  const defaults = [
+    { qr: "CTR-001", type: "سبد پلاستیکی", tare: 1.28, capacity: 25, zones: ["RECEIVING", "COLD_STORAGE", "SORTING"], status: "فعال" },
+    { qr: "CTR-003", type: "سبد پلاستیکی", tare: 1.28, capacity: 25, zones: ["SORTING", "WASHING", "COLD_STORAGE"], status: "فعال" },
+  ]
   try {
     value = JSON.parse(
-      localStorage.getItem("storemesh.prototype.containers") || "[]",
+      localStorage.getItem("storemesh.prototype.containers") || JSON.stringify(defaults),
     )
   } catch {
     throw Error("فهرست کانتینرهای مرورگر قابل خواندن نیست.")
@@ -900,6 +906,11 @@ function recordSortingOutputs(
     lossKg: loss,
     lossReason: loss > 0 ? lossReason : null,
   })
+  ledger.sortingSessions = (ledger.sortingSessions || []).map((session: any) =>
+    session.receiptId === batch.id && session.status === "IN_PROGRESS"
+      ? { ...session, status: "COMPLETED", completedAt: new Date().toISOString() }
+      : session,
+  )
   saveProductionLedger(ledger)
   return children
 }
@@ -2552,10 +2563,12 @@ function ProductionScreen(props: any) {
 function SortingScreen() {
   const batch = readPrototypeBatch(),
     ledger = readProductionLedger()
-  const [step, setStep] = useState("input"),
+  const activeSortingSession = (ledger.sortingSessions || []).find(
+    (session: any) => session.status === "IN_PROGRESS",
+  )
+  const [step, setStep] = useState("menu"),
     [inputCodes, setInputCodes] = useState<string[]>([]),
     [scanCode, setScanCode] = useState(""),
-    [entryWeight, setEntryWeight] = useState(""),
     [entryWeights, setEntryWeights] = useState<Record<string, number>>({}),
     [outputCode, setOutputCode] = useState(""),
     [gross, setGross] = useState(""),
@@ -2568,7 +2581,8 @@ function SortingScreen() {
     [error, setError] = useState(""),
     [scale, setScale] = useState("STABLE"),
     [staged, setStaged] = useState<string[]>([]),
-    [outputScanOpen, setOutputScanOpen] = useState(false)
+    [outputScanOpen, setOutputScanOpen] = useState(false),
+    [inputScanOpen, setInputScanOpen] = useState(false)
   const defaultFleet = [
     {
       qr: "CTR-001",
@@ -2633,9 +2647,6 @@ function SortingScreen() {
     ),
     total = Number(outputs.reduce((n, o) => n + o.weight, 0).toFixed(3)),
     loss = Number((inputWeight - total).toFixed(3))
-  const scannedSource = batch.baskets.find(
-    (basket: any) => pwCode(basket.code) === pwCode(scanCode),
-  )
   const occupied = (code: string) =>
     ledger.items.some(
       (i: any) =>
@@ -2687,16 +2698,14 @@ function SortingScreen() {
       )
     if (sources.length && sources[0]?.product !== source.product)
       return setError("همه ورودی‌های یک نوبت سورت باید یک محصول باشند.")
-    const last = Number(source.gross) - Number(source.tare || 0),
-      weight = entryWeight === "" ? undefined : Number(entryWeight)
-    if (weight !== undefined && (!Number.isFinite(weight) || weight <= 0))
-      return setError("وزن ورود باید مثبت باشد.")
-    try{writePrototypeBatch(applyReceiptWorkflowScan(readPrototypeBatch(),source.code,"SORTING"))}catch(failure:any){return setError(failure.message)}
     setInputCodes([...inputCodes, source.code])
-    if (weight !== undefined)
-      setEntryWeights({ ...entryWeights, [pwCode(source.code)]: weight })
     setScanCode("")
-    setEntryWeight("")
+    setError("")
+  }
+  function captureEntryWeight(source: any) {
+    const measured = Number((Number(source.gross) - Number(source.tare || 0)).toFixed(3))
+    if (!(measured > 0)) return setError("ترازو وزن معتبر دریافت نکرد.")
+    setEntryWeights({ ...entryWeights, [pwCode(source.code)]: measured })
     setError("")
   }
   function start() {
@@ -2708,17 +2717,53 @@ function SortingScreen() {
       !(inputWeight > 0)
     )
       return setError("یک یا چند سبد موجود، آزاد و غیرتکراری انتخاب کنید.")
-    if (
-      sources.some(
-        (source: any) =>
-          !pwSortingLocation(source.currentLocation || source.zone),
-      )
-    )
-      return setError(
-        "همه ورودی‌های سورت باید با اسکن در ایستگاه سورتینگ ثبت شده باشند.",
-      )
+    if (sources.some((source: any) => !pwColdStorageLocation(source.currentLocation || source.zone)))
+      return setError("همه سبدها باید هنگام قفل نشست در سردخانه موجود باشند.")
     if (new Set(sources.map((source: any) => source.product)).size !== 1)
       return setError("همه ورودی‌های یک نوبت سورت باید یک محصول باشند.")
+    if (activeSortingSession)
+      return setError("یک نشست سورتینگ در حال اجراست؛ ابتدا خروج آن را ثبت کنید.")
+    try {
+      const next = readProductionLedger()
+      const session = {
+        id: pwId(next, "SORT"),
+        receiptId: batch.id,
+        inputCodes: [...inputCodes],
+        entryWeights: { ...entryWeights },
+        status: "IN_PROGRESS",
+        startedAt: new Date().toISOString(),
+      }
+      next.sortingSessions = [...(next.sortingSessions || []), session]
+      pwEvent(next, "شروع نشست سورتینگ", session.id, {
+        receiptId: batch.id,
+        inputCodes: session.inputCodes,
+        entryWeights: session.entryWeights,
+      })
+      saveProductionLedger(next)
+      const current = readPrototypeBatch()
+      writePrototypeBatch({
+        ...current,
+        destination: undefined,
+        baskets: current.baskets.map((basket: any) =>
+          inputCodes.some((code) => pwCode(code) === pwCode(basket.code))
+            ? { ...basket, status: "IN_SORTING", currentState: "IN_SORTING", currentLocation: "SORTING", zone: "SORTING", destination: null, nextAction: "ثبت خروجی سورتینگ" }
+            : basket,
+        ),
+        events: [...current.events, { time: new Date().toLocaleTimeString("fa-IR"), title: "شروع نشست سورتینگ", detail: `${inputCodes.length} سبد قفل شد و در وضعیت در حال سورت قرار گرفت.` }],
+      })
+      setStep("menu")
+      setInputCodes([])
+      setEntryWeights({})
+      setError("")
+    } catch (failure: any) {
+      setError(failure.message || "نشست سورتینگ ذخیره نشد.")
+    }
+  }
+  function openExit() {
+    if (!activeSortingSession)
+      return setError("هیچ نشست سورتینگ فعالی برای خروج وجود ندارد.")
+    setInputCodes([...(activeSortingSession.inputCodes || [])])
+    setEntryWeights({ ...(activeSortingSession.entryWeights || {}) })
     setStep("output")
     setError("")
   }
@@ -2810,11 +2855,10 @@ function SortingScreen() {
     <div className="space-y-4 p-5 bg-[#f4f7f5] text-[#18302a]" dir="rtl">
       <div>
         <h2 className="text-xl font-bold">
-          سورتینگ · ورودی اسکن‌محور، خروجی تک‌به‌تک
+          سورتینگ · ورود و خروج مستقل
         </h2>
         <p className="text-[12px] text-[#718079] mt-1">
-          اسکنر سخت‌افزاری هر سبد را مستقیم به نشست اضافه می‌کند؛ وزن ورود اختیاری
-          و مقصد هر خروجی در همان لحظه ثبت می‌شود.
+          ابتدا ورود سبدها را ثبت و نشست را قفل کنید؛ پس از پایان فیزیکی سورت، خروجی‌ها را تک‌به‌تک ثبت کنید.
         </p>
       </div>
       {error && (
@@ -2825,7 +2869,42 @@ function SortingScreen() {
           {error}
         </div>
       )}
-      {step === "done" ? (
+      {step === "menu" ? (
+        <div className="grid grid-cols-2 gap-4">
+          <button
+            onClick={() => {
+              if (activeSortingSession) return setError("یک نشست سورتینگ فعال است؛ ابتدا خروج آن را ثبت کنید.")
+              setStep("input")
+              setInputCodes([])
+              setEntryWeights({})
+              setError("")
+            }}
+            className="rounded-2xl border border-[#cfe0d8] bg-white p-7 text-right hover:border-[#176b50]"
+          >
+            <b className="block text-lg text-[#176b50]">ورود به سورتینگ</b>
+            <span className="mt-2 block text-[12px] text-[#718079]">اسکن چند سبد، توزین اختیاری هر سبد و قفل نشست برای شروع عملیات</span>
+          </button>
+          <button
+            onClick={openExit}
+            disabled={!activeSortingSession}
+            className="rounded-2xl border border-[#cfe0d8] bg-white p-7 text-right hover:border-[#176b50] disabled:opacity-45"
+          >
+            <b className="block text-lg text-[#176b50]">خروج از سورتینگ</b>
+            <span className="mt-2 block text-[12px] text-[#718079]">اسکن و توزین تک‌به‌تک سبدهای خروجی و تعیین مقصد هر کدام</span>
+          </button>
+          <Card className="col-span-2 p-4">
+            {activeSortingSession ? (
+              <div className="flex items-center justify-between text-[12px]">
+                <Badge text="در حال سورت" color="#9a6420" bg="#fff0dc" />
+                <span>{activeSortingSession.inputCodes.length} سبد قفل‌شده · نشست {activeSortingSession.id}</span>
+                <b>اقدام بعدی: ثبت خروج از سورتینگ</b>
+              </div>
+            ) : (
+              <p className="text-[12px] text-[#718079]">نشست سورتینگ فعالی وجود ندارد. ابتدا «ورود به سورتینگ» را انتخاب کنید.</p>
+            )}
+          </Card>
+        </div>
+      ) : step === "done" ? (
         <Card className="p-7 text-center">
           <h3 className="text-xl font-bold text-[#176b50]">
             سورت و مسیر خروجی‌ها ثبت شد
@@ -2840,7 +2919,7 @@ function SortingScreen() {
           <button
             className={primary + " mt-5"}
             onClick={() => {
-              setStep("input")
+              setStep("menu")
               setInputCodes([])
               setEntryWeights({})
               setOutputs([])
@@ -2848,28 +2927,15 @@ function SortingScreen() {
               setStaged([])
             }}
           >
-            نوبت سورت جدید
+            بازگشت به انتخاب ورود یا خروج
           </button>
         </Card>
       ) : (
         <>
-          <Card className="p-4">
-            <h3 className="font-bold mb-3">۱. اسکن سبدهای ورودی</h3>
+          {step === "input" && <Card className="p-4">
+            <h3 className="font-bold mb-3">ورود به سورتینگ · اسکن سبدهای ورودی</h3>
             {step === "input" && (
-              <><div aria-label="سبدهای شناسایی‌شده برای سورت" className="mb-3 rounded-lg bg-[#edf8f3] p-3 text-[11px] text-[#365c4f]"><b>{eligibleSources.length} سبد موجود در سردخانه و آماده ورود به سورت شناسایی شد.</b>{eligibleSources.length>0?<span className="block mt-1 font-mono">سبد بعدی: {eligibleSources[0].code} · {eligibleSources[0].product}</span>:<span className="block mt-1">سبد آزاد و قابل‌استفاده‌ای در سردخانه وجود ندارد.</span>}</div><ScanOptionalWeighTransition
-                scan={scanCode}
-                setScan={setScanCode}
-                onScan={scanInput}
-                suggestedCode={eligibleSources[0]?.code||""}
-                lastWeight={
-                  scannedSource
-                    ? Number(scannedSource.gross) - Number(scannedSource.tare)
-                    : undefined
-                }
-                weight={entryWeight}
-                setWeight={setEntryWeight}
-                action="ثبت اسکن و افزودن به نشست"
-              /></>
+              <><div aria-label="سبدهای شناسایی‌شده برای سورت" className="mb-3 rounded-lg bg-[#edf8f3] p-3 text-[11px] text-[#365c4f]"><b>{eligibleSources.length} سبد موجود در سردخانه و آماده ورود به سورت شناسایی شد.</b>{eligibleSources.length>0?<span className="block mt-1 font-mono">سبد بعدی: {eligibleSources[0].code} · {eligibleSources[0].product}</span>:<span className="block mt-1">سبد آزاد و قابل‌استفاده‌ای در سردخانه وجود ندارد.</span>}</div><div className="flex gap-2"><input aria-label="اسکن QR ورود سورتینگ" className={field + " font-mono"} value={scanCode} onChange={(event) => setScanCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") scanInput() }} placeholder="اسکن QR سبد ورودی"/><button className={primary} disabled={!scanCode.trim()} onClick={() => scanInput()}>افزودن سبد</button><button className="rounded-lg border border-[#176b50] px-4 text-[12px] font-bold text-[#176b50]" onClick={() => setInputScanOpen(true)}>⌗ شبیه‌ساز اسکن</button></div><ScanSimulator open={inputScanOpen} title="اسکن سبد ورودی سورتینگ" suggestedCode={eligibleSources[0]?.code || ""} onClose={() => setInputScanOpen(false)} onScan={scanInput}/></>
             )}
             <div className="mt-3 divide-y">
               {sources.map((source: any) => (
@@ -2891,10 +2957,11 @@ function SortingScreen() {
                   >
                     حذف
                   </button>
-                  <span>
+                  <span className="flex items-center gap-2">
                     {entryWeights[pwCode(source.code)] !== undefined
                       ? `وزن ورود ${entryWeights[pwCode(source.code)].toFixed(3)} kg`
-                      : `بدون توزین · آخرین وزن ${(source.gross - source.tare).toFixed(3)} kg`}
+                      : `آخرین وزن ${(source.gross - source.tare).toFixed(3)} kg`}
+                    <button onClick={() => captureEntryWeight(source)} className="rounded-lg border border-[#176b50] px-3 py-1 text-[#176b50]">⚖ دریافت وزن از ترازو (اختیاری)</button>
                   </span>
                   <b className="font-mono">{source.code}</b>
                 </div>
@@ -2910,19 +2977,19 @@ function SortingScreen() {
                 disabled={!inputCodes.length}
                 onClick={start}
               >
-                قفل ورودی‌های اسکن‌شده و شروع خروجی‌گیری
+                قفل سبدها و شروع سورتینگ
               </button>
             ) : (
               <span className="block mt-3 text-[#176b50] text-[12px]">
                 ✓ {inputCodes.length} ورودی قفل شد
               </span>
             )}
-          </Card>
+          </Card>}
           {step === "output" && (
             <div className="grid grid-cols-[2fr_1fr] gap-4">
               <Card className="p-4">
                 <h3 className="font-bold mb-3">
-                  ۲. اسکن، توزین و تعیین مقصد هر خروجی
+                  خروج از سورتینگ · اسکن، توزین و تعیین مقصد هر خروجی
                 </h3>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="text-[12px]">
