@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source installed in Figma Make as Version 21 on 2026-09-14.
+This folder keeps the reproducible source installed in Figma Make as Version 22 on 2026-09-14.
 
 ## What is included
 
@@ -22,7 +22,7 @@ node --test prototypes/figma/production.test.mjs
 
 The assembled source must also pass the downloaded Figma project's TypeScript check and `pnpm build` before it is installed through the Figma Make code editor.
 
-Version 21 fixes the Sorting entry session without redesigning the UI. Eligible baskets are discovered in cold storage, each scan moves that basket into Sorting, and the continue/completion checks now validate the resulting Sorting location instead of incorrectly requiring the already-scanned basket to remain in cold storage. Version 20's corrected Receiving-to-Sorting boundary remains intact: Receiving never offers Sorting as its destination.
+Version 22 keeps the existing visual design while placing the Persian Web sidebar on the right and making the Washing input scan simulator propose the first eligible basket automatically. Version 21's corrected Sorting entry session and Version 20's Receiving-to-Sorting boundary remain intact.
 
 ## Scope boundary
 

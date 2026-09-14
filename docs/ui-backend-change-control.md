@@ -14,6 +14,12 @@ Last updated: 2026-09-14
 
 ## Open UI/backend alignment notes
 
+### 2026-09-14 — Persian sidebar and Washing scan suggestion (UI only)
+
+- The Persian Web shell now places its primary sidebar on the right while preserving the existing menu order and content layout.
+- Washing passes the first eligible input container code to the shared scan simulator, so opening it pre-fills a real candidate and still uses the same scan validation handler.
+- Backend/API/contract/database impact: none. No backend repository was changed.
+
 ### 2026-09-14 — Sorting scan/continue state consistency (UI only)
 
 - Each accepted Sorting input scan physically transitions the basket from its cold-room location into `SORTING`.

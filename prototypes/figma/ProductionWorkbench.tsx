@@ -867,6 +867,7 @@ function WashingSessionScreen({
           scan={scan}
           setScan={setScan}
           onScan={addInput}
+          suggestedCode={eligible[0]?.containerCode || ""}
           lastWeight={scanned?.weightKg}
           weight={entryWeight}
           setWeight={setEntryWeight}

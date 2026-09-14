@@ -76,9 +76,9 @@ function getActiveSidebarSection(screen: WebScreen) {
 function Sidebar({ screen, onNavigate }: { screen: WebScreen; onNavigate: (s: WebScreen) => void }) {
   const activeSection = getActiveSidebarSection(screen);
   return (
-    <div className="flex flex-col bg-[#133a31] w-[220px] min-h-full px-3 py-4 shrink-0">
+    <div className="flex flex-col bg-[#133a31] w-[220px] min-h-full px-3 py-4 shrink-0" dir="rtl">
       <div
-        className="bg-[#c6a45c] rounded-xl flex items-center justify-center mb-5"
+        className="bg-[#c6a45c] rounded-xl flex items-center justify-center mb-5 self-start"
         style={{ width: 40, height: 40 }}
       >
         <span className="font-['Vazirmatn:ExtraBold',sans-serif] font-extrabold text-white text-[11px]">SM</span>
@@ -1242,6 +1242,7 @@ function WashingSessionScreen({
           scan={scan}
           setScan={setScan}
           onScan={addInput}
+          suggestedCode={eligible[0]?.containerCode || ""}
           lastWeight={scanned?.weightKg}
           weight={entryWeight}
           setWeight={setEntryWeight}
@@ -3816,7 +3817,7 @@ export default function WebApp({ onExit }: { onExit: () => void }) {
       {/* App top bar */}
       <TopBar title={title} subtitle={subtitle} />
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="flex flex-row-reverse flex-1 min-h-0 overflow-hidden">
         <Sidebar screen={screen} onNavigate={setScreen} />
         <main className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
           {section && section.screens.length > 1 && (

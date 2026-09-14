@@ -46,6 +46,8 @@ test('zone designation mismatch persists warning, not false hard gate', () => { 
 test('active cycle and blocked batch prevent further work', () => { const s=setup(); const l=s.pwEmpty(), item={id:'X',weightKg:10,zone:'SORTING'}; l.cycles=[{status:'READY',itemIds:['X']}]; assert.throws(()=>s.pwUsable(l,item)); l.cycles=[]; item.blocked=true; assert.throws(()=>s.pwUsable(l,item)); });
 test('web shell keeps sub-navigation inside content and removes control tower', () => {
   assert.doesNotMatch(assembled, /control-tower|برج کنترل/);
+  assert.match(assembled, /<div className="flex flex-row-reverse flex-1 min-h-0 overflow-hidden">/);
+  assert.match(assembled, /w-\[220px\][^>]+dir="rtl"/);
   assert.match(assembled, /<main className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">/);
   assert.match(assembled, /<Sidebar screen=\{screen\} onNavigate=\{setScreen\} \/>\s*<main/);
   assert.match(hub, /۲۰ صفحه Web/);
@@ -107,5 +109,6 @@ test('shared scan simulator is reused by receiving production packaging and ship
 test('generic ready-for-transfer status is absent and movement records have explicit operator fields',()=>{assert.doesNotMatch(assembled,/Ready for Transfer|آماده انتقال/);assert.match(assembled,/currentLocation/);assert.match(assembled,/currentState/);assert.match(assembled,/nextAction/);assert.match(source,/pwNormalizeItem/)});
 test('receiving selects and executes destination before completion without requiring inventory',()=>{assert.match(assembled,/تأیید دریافت و انتخاب مقصد/);assert.match(assembled,/مقصد مستقیم محموله/);assert.match(assembled,/انتقال کل بچ یکجا/);assert.match(assembled,/اسکن تک‌تک در همین صفحه/);assert.match(assembled,/برای ثبت آن لازم نیست به صفحه موجودی بروید/);assert.match(assembled,/مشاهده رهگیری \(اختیاری\)/)});
 test('scan simulator refreshes and prefills the suggested basket code on every open',()=>{assert.match(assembled,/useEffect\(\(\)=>\{if\(open\)setCode\(suggestedCode\)\}/);assert.match(assembled,/کد پیشنهادی آماده است/);assert.match(assembled,/اسکن کد پیشنهادی/)});
+test('washing scan simulator proposes the first compatible eligible basket',()=>{assert.match(assembled,/suggestedCode=\{eligible\[0\]\?\.containerCode \|\| ""\}/)});
 test('sorting discovers baskets by physical cold-room location without a fake receiving destination',()=>{assert.match(assembled,/const eligibleSources = batch\.baskets\.filter/);assert.match(assembled,/pwColdStorageLocation\(b\.currentLocation \|\| b\.zone\)/);assert.doesNotMatch(assembled,/b\.destination === "SORTING"/);assert.match(assembled,/سبدهای شناسایی‌شده برای سورت/);assert.match(assembled,/suggestedCode=\{eligibleSources\[0\]\?\.code\|\|""\}/);assert.match(assembled,/const destinationNames:Record<string,string>=\{COLD_ROOM_DIRTY:"سردخانه کثیف",QUARANTINE:"قرنطینه \/ QC"\}/)});
 test('sorting accepts scanned inputs after their cold-room-to-sorting transition',()=>{assert.match(assembled,/pwSortingLocation\(source\.currentLocation \|\| source\.zone\)/);assert.match(assembled,/همه ورودی‌های سورت باید با اسکن در ایستگاه سورتینگ ثبت شده باشند/)});
