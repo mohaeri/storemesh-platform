@@ -408,6 +408,7 @@ type PWLedger = {
 const PW_STORAGE = "storemesh.prototype.production.v1"
 const PW_ACTIVE = ["READY", "RUNNING", "IN_PROGRESS", "PAUSED", "COMPLETING"]
 function pwColdStorageLocation(value:string|undefined|null):boolean{const location=String(value||"").trim().toUpperCase().replace(/[\s_.-]+/g,"");return location.includes("سردخانه")||location.includes("COLDROOM")||location.includes("COLDSTORAGE")}
+function pwSortingLocation(value:string|undefined|null):boolean{const location=String(value||"").trim().toUpperCase().replace(/[\s_.-]+/g,"");return location.includes("سورتینگ")||location.includes("SORTING")}
 const PW_ZONES: Record<string, string> = {
   SORTING: "سورتینگ",
   WASHING: "شست‌وشو",
@@ -759,10 +760,10 @@ function recordSortingOutputs(
   if (
     sources.some(
       (source: any) =>
-        !/سردخانه|COLD_ROOM|COLD_STORAGE/.test(source.zone || ""),
+        !pwSortingLocation(source.currentLocation || source.zone),
     )
   )
-    throw Error("همه ورودی‌ها باید در سردخانه باشند.")
+    throw Error("همه ورودی‌ها باید با اسکن در ایستگاه سورتینگ ثبت شده باشند.")
   const available = pwNumber(
     sources.reduce(
       (sum: number, x: any) =>
@@ -2689,11 +2690,11 @@ function SortingScreen() {
     if (
       sources.some(
         (source: any) =>
-          !pwColdStorageLocation(source.currentLocation || source.zone),
+          !pwSortingLocation(source.currentLocation || source.zone),
       )
     )
       return setError(
-        "همه ورودی‌های سورت باید در سردخانه باشند؛ انتقال فیزیکی را ابتدا ثبت کنید.",
+        "همه ورودی‌های سورت باید با اسکن در ایستگاه سورتینگ ثبت شده باشند.",
       )
     if (new Set(sources.map((source: any) => source.product)).size !== 1)
       return setError("همه ورودی‌های یک نوبت سورت باید یک محصول باشند.")

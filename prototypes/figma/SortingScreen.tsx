@@ -141,11 +141,11 @@ function SortingScreen() {
     if (
       sources.some(
         (source: any) =>
-          !pwColdStorageLocation(source.currentLocation || source.zone),
+          !pwSortingLocation(source.currentLocation || source.zone),
       )
     )
       return setError(
-        "همه ورودی‌های سورت باید در سردخانه باشند؛ انتقال فیزیکی را ابتدا ثبت کنید.",
+        "همه ورودی‌های سورت باید با اسکن در ایستگاه سورتینگ ثبت شده باشند.",
       )
     if (new Set(sources.map((source: any) => source.product)).size !== 1)
       return setError("همه ورودی‌های یک نوبت سورت باید یک محصول باشند.")

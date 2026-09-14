@@ -1,6 +1,6 @@
 # UI / Backend Change Control
 
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 ## Standing rule
 
@@ -13,6 +13,12 @@ Last updated: 2026-09-13
 - Finalized documentation changes must be committed and pushed. Unrelated local changes must not be included.
 
 ## Open UI/backend alignment notes
+
+### 2026-09-14 — Sorting scan/continue state consistency (UI only)
+
+- Each accepted Sorting input scan physically transitions the basket from its cold-room location into `SORTING`.
+- The continue and output-completion validators now require that scanned Sorting location. They no longer reject successfully scanned baskets for no longer remaining in cold storage.
+- Backend/API/contract/database impact: none. No backend repository was changed.
 
 ### 2026-09-13 — Receiving-to-Sorting discovery (UI only)
 
