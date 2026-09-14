@@ -3817,8 +3817,7 @@ export default function WebApp({ onExit }: { onExit: () => void }) {
       {/* App top bar */}
       <TopBar title={title} subtitle={subtitle} />
 
-      <div className="flex flex-row-reverse flex-1 min-h-0 overflow-hidden">
-        <Sidebar screen={screen} onNavigate={setScreen} />
+      <div className="grid grid-cols-[minmax(0,1fr)_220px] flex-1 min-h-0 overflow-hidden" dir="ltr">
         <main className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
           {section && section.screens.length > 1 && (
             <div className="bg-[#f4f7f5] border-b border-[#d8e4df] shrink-0">
@@ -3827,6 +3826,7 @@ export default function WebApp({ onExit }: { onExit: () => void }) {
           )}
           {renderScreen()}
         </main>
+        <Sidebar screen={screen} onNavigate={setScreen} />
       </div>
 
       {/* Exit button */}

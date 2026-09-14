@@ -46,10 +46,10 @@ test('zone designation mismatch persists warning, not false hard gate', () => { 
 test('active cycle and blocked batch prevent further work', () => { const s=setup(); const l=s.pwEmpty(), item={id:'X',weightKg:10,zone:'SORTING'}; l.cycles=[{status:'READY',itemIds:['X']}]; assert.throws(()=>s.pwUsable(l,item)); l.cycles=[]; item.blocked=true; assert.throws(()=>s.pwUsable(l,item)); });
 test('web shell keeps sub-navigation inside content and removes control tower', () => {
   assert.doesNotMatch(assembled, /control-tower|برج کنترل/);
-  assert.match(assembled, /<div className="flex flex-row-reverse flex-1 min-h-0 overflow-hidden">/);
+  assert.match(assembled, /<div className="grid grid-cols-\[minmax\(0,1fr\)_220px\] flex-1 min-h-0 overflow-hidden" dir="ltr">/);
   assert.match(assembled, /w-\[220px\][^>]+dir="rtl"/);
   assert.match(assembled, /<main className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">/);
-  assert.match(assembled, /<Sidebar screen=\{screen\} onNavigate=\{setScreen\} \/>\s*<main/);
+  assert.match(assembled, /<\/main>\s*<Sidebar screen=\{screen\} onNavigate=\{setScreen\} \/>/);
   assert.match(hub, /۲۰ صفحه Web/);
   assert.doesNotMatch(hub, /۲۱ صفحه Web|۳۷ صفحه/);
 });
