@@ -448,6 +448,48 @@ const pwCode = (value: any) =>
   String(value ?? "")
     .trim()
     .toUpperCase()
+function pwProportionalParentContributions(
+  sources: any[],
+  outputWeightKg: number,
+  entryWeights: Record<string, number> = {},
+) {
+  const parents = sources
+    .map((source: any) => ({
+      batchId: source.code,
+      sourceWeightKg: pwNumber(
+        entryWeights[pwCode(source.code)] ??
+          Number(source.gross) - Number(source.tare || 0),
+      ),
+    }))
+    .filter((parent: any) => parent.sourceWeightKg > 0)
+  const totalSourceWeightKg = pwNumber(
+    parents.reduce(
+      (sum: number, parent: any) => sum + parent.sourceWeightKg,
+      0,
+    ),
+  )
+  const output = pwNumber(outputWeightKg)
+  if (!parents.length || !(totalSourceWeightKg > 0) || !(output > 0))
+    throw Error("وزن معتبر والدها و خروجی برای محاسبه شجره لازم است.")
+
+  let allocatedWeightKg = 0
+  return parents.map((parent: any, index: number) => {
+    const inputWeightKg =
+      index === parents.length - 1
+        ? pwNumber(output - allocatedWeightKg)
+        : pwNumber(
+            (output * parent.sourceWeightKg) / totalSourceWeightKg,
+          )
+    allocatedWeightKg = pwNumber(allocatedWeightKg + inputWeightKg)
+    return {
+      batchId: parent.batchId,
+      inputWeightKg,
+      sharePercent: pwNumber(
+        (parent.sourceWeightKg * 100) / totalSourceWeightKg,
+      ),
+    }
+  })
+}
 const PW_DEFAULT_MACHINES: Record<string, string[]> = {
   FREEZE: ["FRZ-01"],
   FREEZE_DRY: ["FD-01"],
@@ -2575,7 +2617,6 @@ function SortingScreen() {
     [grade, setGrade] = useState("A"),
     [size, setSize] = useState("درشت"),
     [destination, setDestination] = useState("FRESH_EXPORT"),
-    [contributions, setContributions] = useState<Record<string, string>>({}),
     [lossReason, setLossReason] = useState(""),
     [outputs, setOutputs] = useState<any[]>([]),
     [error, setError] = useState(""),
@@ -2800,27 +2841,11 @@ function SortingScreen() {
       return setError(
         "خالص خروجی باید مثبت و در محدوده ظرفیت و وزن ورودی باشد.",
       )
-    const parentContributions =
-      sources.length === 1
-        ? [{ batchId: sources[0]!.code, inputWeightKg: net }]
-        : sources
-            .map((source: any) => ({
-              batchId: source.code,
-              inputWeightKg: Number(contributions[source.code] || 0),
-            }))
-            .filter((row: any) => row.inputWeightKg > 0)
-    if (
-      !parentContributions.length ||
-      Math.abs(
-        parentContributions.reduce(
-          (sum: number, row: any) => sum + row.inputWeightKg,
-          0,
-        ) - net,
-      ) > 0.001
+    const parentContributions = pwProportionalParentContributions(
+      sources,
+      net,
+      entryWeights,
     )
-      return setError(
-        "سهم واقعی والدها باید دقیقاً برابر وزن خالص باشد؛ صفر یعنی آن والد در این خروجی حضور ندارد.",
-      )
     setOutputs([
       ...outputs,
       {
@@ -2837,7 +2862,6 @@ function SortingScreen() {
     ])
     setOutputCode("")
     setGross("")
-    setContributions({})
     setError("")
   }
   function finish() {
@@ -3122,34 +3146,9 @@ function SortingScreen() {
                     دریافت از ترازو
                   </button>
                 </div>
-                {sources.length > 1 && (
-                  <fieldset className="border border-dashed rounded-lg p-3 mb-3">
-                    <legend className="text-[12px]">
-                      سهم واقعی والدها در این خروجی
-                    </legend>
-                    <div className="grid grid-cols-2 gap-2">
-                      {sources.map((source: any) => (
-                        <label key={source.code} className="text-[12px]">
-                          {source.code}
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.001"
-                            className={field}
-                            value={contributions[source.code] || ""}
-                            onChange={(e) =>
-                              setContributions({
-                                ...contributions,
-                                [source.code]: e.target.value,
-                              })
-                            }
-                            placeholder="۰ یعنی بدون سهم"
-                          />
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                )}
+                <p className="mb-3 rounded-lg border border-[#cde3da] bg-[#edf7f3] p-3 text-[12px] text-[#176b50]">
+                  شجره والد این خروجی خودکار و متناسب با وزن ثبت‌شده سبدهای ورودی نشست محاسبه می‌شود.
+                </p>
                 {carrier && (
                   <label className="flex gap-2 text-[12px] mb-3">
                     <input

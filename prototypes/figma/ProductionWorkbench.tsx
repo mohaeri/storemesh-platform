@@ -73,6 +73,48 @@ const pwCode = (value: any) =>
   String(value ?? "")
     .trim()
     .toUpperCase()
+function pwProportionalParentContributions(
+  sources: any[],
+  outputWeightKg: number,
+  entryWeights: Record<string, number> = {},
+) {
+  const parents = sources
+    .map((source: any) => ({
+      batchId: source.code,
+      sourceWeightKg: pwNumber(
+        entryWeights[pwCode(source.code)] ??
+          Number(source.gross) - Number(source.tare || 0),
+      ),
+    }))
+    .filter((parent: any) => parent.sourceWeightKg > 0)
+  const totalSourceWeightKg = pwNumber(
+    parents.reduce(
+      (sum: number, parent: any) => sum + parent.sourceWeightKg,
+      0,
+    ),
+  )
+  const output = pwNumber(outputWeightKg)
+  if (!parents.length || !(totalSourceWeightKg > 0) || !(output > 0))
+    throw Error("وزن معتبر والدها و خروجی برای محاسبه شجره لازم است.")
+
+  let allocatedWeightKg = 0
+  return parents.map((parent: any, index: number) => {
+    const inputWeightKg =
+      index === parents.length - 1
+        ? pwNumber(output - allocatedWeightKg)
+        : pwNumber(
+            (output * parent.sourceWeightKg) / totalSourceWeightKg,
+          )
+    allocatedWeightKg = pwNumber(allocatedWeightKg + inputWeightKg)
+    return {
+      batchId: parent.batchId,
+      inputWeightKg,
+      sharePercent: pwNumber(
+        (parent.sourceWeightKg * 100) / totalSourceWeightKg,
+      ),
+    }
+  })
+}
 const PW_DEFAULT_MACHINES: Record<string, string[]> = {
   FREEZE: ["FRZ-01"],
   FREEZE_DRY: ["FD-01"],
