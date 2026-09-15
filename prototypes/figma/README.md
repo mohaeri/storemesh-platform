@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source installed in Figma Make as Version 28 on 2026-09-15.
+This folder keeps the reproducible source prepared for Figma Make as Version 29 on 2026-09-15.
 
 ## What is included
 
@@ -22,7 +22,7 @@ node --test prototypes/figma/production.test.mjs
 
 The assembled source must also pass the downloaded Figma project's TypeScript check and `pnpm build` before it is installed through the Figma Make code editor.
 
-Version 28 keeps Sorting entry and exit as a persisted session and removes manual parent-share entry from every output. Each output's genealogy is calculated automatically in proportion to the valid entry weight of every mixed source basket; rounding residue is assigned deterministically so the recorded parent weights exactly equal the output net weight. For example, five 20 kg parents contribute 20% (4 kg) each to a 20 kg output. Version 26's scan, optional entry weighing, session lock, reload recovery, one-at-a-time output weighing, destination choice, and Persian `در حال سورت` inventory state remain intact.
+Version 29 separates physical storage, operational destination, and required process. Receiving offers exactly three cold-room locations and a separate QC hold. Base Data includes configurable operational destinations with applicability. Sorting preserves physical location, selects one of the approved operational outcomes, adds Freeze Sliced, and records disposal weight without allocating a basket. Washing and Slicing use route-aware physical handoffs and expose QC holds. Version 28's persisted Sorting session and automatic proportional parent genealogy remain intact.
 
 ## Scope boundary
 

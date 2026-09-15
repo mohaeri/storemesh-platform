@@ -40,14 +40,31 @@ const PW_ZONES: Record<string, string> = {
   WASHING: "شست‌وشو",
   SLICING: "اسلایس",
   FREEZING: "فریز",
+  FREEZING_SLICED: "فریز اسلایس",
   FREEZE_DRYING: "فریزدرای",
   DRYING: "خشک‌کن",
   FRESH_EXPORT: "ارسال تازه",
-  COLD_ROOM_CLEAN: "سردخانه تمیز",
-  COLD_ROOM_DIRTY: "سردخانه کثیف",
+  COLD_ROOM_POSITIVE_CLEAN: "سردخانه مثبت تمیز",
+  COLD_ROOM_POSITIVE_DIRTY: "سردخانه مثبت کثیف",
+  COLD_ROOM_NEGATIVE: "سردخانه منفی",
+  COLD_ROOM_CLEAN: "سردخانه مثبت تمیز",
+  COLD_ROOM_DIRTY: "سردخانه مثبت کثیف",
   PACKAGING: "بسته‌بندی",
   QC: "کیفیت",
   WASTE: "ضایعات",
+}
+const PW_OPERATIONAL_DESTINATIONS=["FRESH_EXPORT","DRYING","FREEZING","FREEZING_SLICED","FREEZE_DRYING","QC","WASTE"]
+function pwRouteFor(destination:string){
+  const routes:Record<string,{processes:string[];physicalAfterSorting:string;physicalAfterWashing?:string}>={
+    FRESH_EXPORT:{processes:["PACKAGING"],physicalAfterSorting:"COLD_ROOM_POSITIVE_DIRTY"},
+    DRYING:{processes:["WASHING","SLICING","DRYING","PACKAGING"],physicalAfterSorting:"COLD_ROOM_POSITIVE_DIRTY",physicalAfterWashing:"COLD_ROOM_POSITIVE_CLEAN"},
+    FREEZING:{processes:["WASHING","FREEZING","PACKAGING"],physicalAfterSorting:"COLD_ROOM_POSITIVE_DIRTY",physicalAfterWashing:"COLD_ROOM_NEGATIVE"},
+    FREEZING_SLICED:{processes:["WASHING","SLICING","FREEZING","PACKAGING"],physicalAfterSorting:"COLD_ROOM_POSITIVE_DIRTY",physicalAfterWashing:"COLD_ROOM_POSITIVE_CLEAN"},
+    FREEZE_DRYING:{processes:["WASHING","SLICING","FREEZING","FREEZE_DRYING","PACKAGING"],physicalAfterSorting:"COLD_ROOM_POSITIVE_DIRTY",physicalAfterWashing:"COLD_ROOM_POSITIVE_CLEAN"},
+    QC:{processes:["QC"],physicalAfterSorting:"COLD_ROOM_POSITIVE_DIRTY"},
+    WASTE:{processes:[],physicalAfterSorting:"COLD_ROOM_POSITIVE_DIRTY"},
+  }
+  return routes[destination]||{processes:[],physicalAfterSorting:"COLD_ROOM_POSITIVE_DIRTY"}
 }
 const PW_STAGES: Record<string, string> = {
   SORTED: "سورت‌شده",
@@ -132,7 +149,7 @@ const pwEmpty = (): PWLedger => ({
   consumedInputs: [],
   machines: { ...PW_DEFAULT_MACHINES },
 })
-function pwNormalizeItem(item:PWItem):PWItem{const currentLocation=item.currentLocation||item.zone||"SORTING",currentState=item.currentState||item.stage||"READY",destination=item.nextZone||item.destination||null,nextAction=item.nextAction||(destination&&destination!==currentLocation?`اسکن ورود به ${PW_ZONES[destination]||destination}`:"انجام عملیات جاری");return {...item,zone:currentLocation,currentLocation,currentState,destination:item.destination??null,nextAction}}
+function pwNormalizeItem(item:PWItem):PWItem{const currentLocation=item.currentLocation||item.zone||"SORTING",currentState=item.currentState||item.stage||"READY",destination=item.nextZone||item.destination||null,nextAction=item.nextAction||(destination&&destination!==currentLocation?`اسکن ورود به ${PW_ZONES[destination]||destination}`:"انجام عملیات جاری");return {...item,zone:currentLocation,currentLocation,currentState,physicalLocation:item.physicalLocation||(pwColdStorageLocation(currentLocation)?currentLocation:"COLD_ROOM_POSITIVE_DIRTY"),operationalDestination:item.operationalDestination??item.destination??null,destination:item.destination??null,nextAction}}
 function pwAssertWashCompatibility(session:any,item:PWItem){if(session&&(session.grade!==item.grade||session.size!==item.size))throw Error(`نشست فعال شست‌وشو شامل گرید ${session.grade} / اندازه ${session.size} است. ابتدا تمام محصول را در سبدهای خروجی ثبت و واحد را خالی و تکمیل کنید.`);return true}
 function ScanOptionalWeighTransition({
   scan,
@@ -459,7 +476,8 @@ function recordSortingOutputs(
     throw Error(
       "گرید، اندازه، وزن و مقصد معتبر همه خروجی‌ها و توازن وزن الزامی است.",
     )
-  if (new Set(outputs.map((x) => pwCode(x.code))).size !== outputs.length)
+  const carrierOutputs=outputs.filter((x)=>x.destination!=="WASTE")
+  if (new Set(carrierOutputs.map((x) => pwCode(x.code))).size !== carrierOutputs.length)
     throw Error("سبد خروجی تکراری است.")
   if (
     loss > 0 &&
@@ -473,6 +491,7 @@ function recordSortingOutputs(
   )
     throw Error("برای هر مقدار افت، یک علت طبقه‌بندی‌شده انتخاب کنید.")
   outputs.forEach((output) => {
+    if(output.destination==="WASTE")return
     const carrier = pwCarrier(output.code, "basket")
     if (selected.some((code) => pwCode(code) === carrier.code))
       throw Error("سبد ورودی نمی‌تواند خروجی همان عملیات باشد.")
@@ -500,9 +519,9 @@ function recordSortingOutputs(
     const contributed = output.parentContributions.map((row: any) =>
         pwCode(row.batchId),
       ),
-      processing = ["DRYING", "FREEZING", "FREEZE_DRYING"].includes(
-        output.destination,
-      )
+      route=pwRouteFor(output.destination),
+      sourcePhysical=String(sources[0]?.physicalLocation||sources[0]?.sortingOrigin||"COLD_ROOM_POSITIVE_DIRTY"),
+      isWaste=output.destination==="WASTE"
     const code = pwId(ledger, "B"),
       item: PWItem = {
         id: code,
@@ -524,10 +543,15 @@ function recordSortingOutputs(
         size: output.size,
         weightKg: pwNumber(output.weight),
         stage: "SORTED",
-        zone: "SORTING",
+        zone: isWaste?"WASTE":sourcePhysical,
+        currentLocation:isWaste?"WASTE":sourcePhysical,
+        physicalLocation:isWaste?"WASTE":sourcePhysical,
         destination: output.destination,
-        nextZone: processing ? "WASHING" : output.destination,
-        containerCode: pwCode(output.code),
+        operationalDestination:output.destination,
+        nextZone: isWaste?null:(route.processes[0]||null),
+        nextAction:isWaste?"ثبت پایان دفع":`اسکن ورود به ${PW_ZONES[route.processes[0]]||route.processes[0]}`,
+        qualityCheckRequired:!!output.qualityCheckRequired,
+        containerCode: isWaste?"":pwCode(output.code),
         trays: [],
         allocated: false,
         consumed: false,
@@ -670,6 +694,7 @@ function WashingSessionScreen({
     [entryWeight, setEntryWeight] = useState(""),
     [outputCode, setOutputCode] = useState(""),
     [outputWeight, setOutputWeight] = useState(""),
+    [qualityCheckRequired,setQualityCheckRequired]=useState(false),
     [lossReason, setLossReason] = useState(""),
     [empty, setEmpty] = useState(false),
     [outputScanOpen, setOutputScanOpen] = useState(false),
@@ -787,6 +812,7 @@ function WashingSessionScreen({
       session.outputs.push({
         containerCode: carrier.code,
         weightKg: weight,
+        qualityCheckRequired,
         at: new Date().toISOString(),
       })
       pwEvent(next, "ثبت سبد خروجی شست‌وشو", session.id, {
@@ -796,6 +822,7 @@ function WashingSessionScreen({
       saveProductionLedger(next)
       setOutputCode("")
       setOutputWeight("")
+      setQualityCheckRequired(false)
       onChange(next, "سبد خروجی ثبت شد؛ برای باقی محصول ادامه دهید.")
     } catch (failure: any) {
       setError(failure.message)
@@ -825,7 +852,7 @@ function WashingSessionScreen({
       if (difference < 0) throw Error("وزن خروجی از ورودی بیشتر است.")
       if (difference > 0 && !lossReason.trim())
         throw Error("برای اختلاف وزن نشست، علت ثبت کنید.")
-      const destination = parents[0]?.destination || "SLICING"
+      const destination = parents[0]?.destination || "DRYING",route=pwRouteFor(destination),physicalAfterWashing=route.physicalAfterWashing||"COLD_ROOM_POSITIVE_CLEAN",nextProcess=route.processes[1]||"PACKAGING"
       const children = session.outputs.map((row: any) => {
         const id = pwId(next, "B"),
           contributions = parents.map((parent) => ({
@@ -845,8 +872,14 @@ function WashingSessionScreen({
           weightKg: row.weightKg,
           stage: "WASHED",
           zone: "WASHING",
+          currentLocation:"WASHING",
+          physicalLocation:parents[0]?.physicalLocation||"COLD_ROOM_POSITIVE_DIRTY",
           destination,
-          nextZone: "SLICING",
+          operationalDestination:destination,
+          nextZone: physicalAfterWashing,
+          nextProcess,
+          nextAction:`اسکن انتقال به ${PW_ZONES[physicalAfterWashing]}`,
+          qualityCheckRequired:!!row.qualityCheckRequired,
           containerCode: row.containerCode,
           trays: [],
           allocated: false,
@@ -883,7 +916,7 @@ function WashingSessionScreen({
       setLossReason("")
       onChange(
         next,
-        "نشست شست‌وشو تکمیل و واحد خالی شد؛ گروه گرید/اندازه بعدی اکنون مجاز است.",
+        "نشست شست‌وشو تکمیل شد؛ خروجی‌ها به محل فیزیکی مناسب می‌روند و سپس فرایند بعدی آغاز می‌شود.",
       )
     } catch (failure: any) {
       setError(failure.message)
@@ -977,6 +1010,7 @@ function WashingSessionScreen({
                 style={pwInput}
               />
             </PWField>
+            <label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,margin:"10px 0",padding:10,border:"1px solid #d5e3dd",borderRadius:9}}><input type="checkbox" checked={qualityCheckRequired} onChange={event=>setQualityCheckRequired(event.target.checked)}/><span><b>نیازمند کنترل کیفیت در خروج شست‌وشو</b><small style={{display:"block",color:"#718079"}}>تا تصمیم مدیر، اقدام بعدی برای این سبد متوقف می‌شود.</small></span></label>
             <PWButton
               disabled={!outputCode || !outputWeight}
               onClick={addOutput}
@@ -1125,7 +1159,13 @@ function ProductionScreen(props: any) {
       item.zone = destination
       item.currentLocation = destination
       item.currentState = "IN_PROCESS"
-      item.nextAction = destination === item.destination ? "انجام عملیات مقصد" : `اسکن ورود به ${item.nextZone || item.destination}`
+      if(pwColdStorageLocation(destination)){
+        item.physicalLocation=destination
+        item.nextZone=item.nextProcess||null
+        item.nextAction=item.qualityCheckRequired?"در انتظار تصمیم مدیر کنترل کیفیت":item.nextZone?`اسکن ورود به ${PW_ZONES[item.nextZone]||item.nextZone}`:"ادامه مسیر عملیاتی"
+      }else{
+        item.nextAction=item.qualityCheckRequired?"در انتظار تصمیم مدیر کنترل کیفیت":"انجام عملیات جاری"
+      }
       pwEvent(next, "انتقال فیزیکی", item.code, {
         from: before,
         to: destination,
@@ -1166,12 +1206,17 @@ function ProductionScreen(props: any) {
           observed ? Number(observed) : undefined,
         )
         item.stage = process === "WASH" ? "WASHED" : "SLICED"
-        item.nextZone =
-          process === "WASH"
-            ? "SLICING"
-            : item.destination === "DRYING"
-              ? "DRYING"
-              : "FREEZING"
+        const route=pwRouteFor(item.destination||"")
+        if(process==="WASH"){
+          item.nextZone=route.physicalAfterWashing||"COLD_ROOM_POSITIVE_CLEAN"
+          item.nextProcess=route.processes[1]||"PACKAGING"
+        }else{
+          const nextProcess=route.processes[route.processes.indexOf("SLICING")+1]||"PACKAGING"
+          item.nextZone=nextProcess==="FREEZING"?"COLD_ROOM_NEGATIVE":nextProcess
+          item.nextProcess=nextProcess==="FREEZING"?"FREEZING":null
+        }
+        item.qualityCheckRequired=data.get("qualityCheckRequired")==="on"
+        item.nextAction=item.qualityCheckRequired?"در انتظار تصمیم مدیر کنترل کیفیت":`اسکن ورود به ${PW_ZONES[item.nextZone]||item.nextZone}`
         pwEvent(
           next,
           process === "WASH" ? "ثبت شست‌وشو" : "ثبت اسلایس",
@@ -1599,10 +1644,10 @@ function ProductionScreen(props: any) {
       {tab === "overview" && (
         <>
           <PWNotice>
-            مقصد نهایی هنگام توزین هر خروجی توسط کارشناس سورت تعیین می‌شود. خشک،
-            فریز و فریزدرای همگی از شست‌وشو و اسلایس عبور می‌کنند؛ ارسال تازه هرگز
-            شسته نمی‌شود. مدیر فقط بعداً با ثبت علت می‌تواند مقصد را اصلاح کند.
-            مقصد کاری و انتقال فیزیکی همچنان دو ثبت جدا هستند.
+            مقصد عملیاتی هنگام توزین هر خروجی توسط کارشناس سورت تعیین می‌شود و
+            محل فیزیکی با آن یکی نیست. ارسال تازه مستقیم به بسته‌بندی می‌رود؛ خشک،
+            فریز، فریز اسلایس و فریز درای مسیرهای اجباری متفاوت دارند. کنترل کیفیت
+            می‌تواند در خروج هر مرحله فعال شود و انتقال فیزیکی با اسکن ثبت می‌شود.
           </PWNotice>
           <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
             {[
@@ -1667,13 +1712,8 @@ function ProductionScreen(props: any) {
                                 throw Error("مقصد تغییری نکرده است.")
                               const previous = row.destination
                               row.destination = destination
-                              row.nextZone = [
-                                "DRYING",
-                                "FREEZING",
-                                "FREEZE_DRYING",
-                              ].includes(destination)
-                                ? "WASHING"
-                                : destination
+                              row.operationalDestination=destination
+                              row.nextZone=pwRouteFor(destination).processes[0]||null
                               pwEvent(next, "اصلاح مقصد", row.code, {
                                 previous,
                                 destination,
@@ -1694,10 +1734,9 @@ function ProductionScreen(props: any) {
                             "FRESH_EXPORT",
                             "DRYING",
                             "FREEZING",
+                            "FREEZING_SLICED",
                             "FREEZE_DRYING",
                             "QC",
-                            "COLD_ROOM_CLEAN",
-                            "COLD_ROOM_DIRTY",
                             "WASTE",
                           ].map((zone) => (
                             <option key={zone} value={zone}>
@@ -1775,6 +1814,7 @@ function ProductionScreen(props: any) {
                   style={pwInput}
                 />
               </PWField>
+              <label style={{display:"flex",gap:8,fontSize:12,margin:"10px 0"}}><input name="qualityCheckRequired" type="checkbox"/>نیازمند کنترل کیفیت در خروج اسلایس</label>
               <PWButton disabled={!current || current.stage !== "WASHED"}>
                 تأیید پایان اسلایس
               </PWButton>

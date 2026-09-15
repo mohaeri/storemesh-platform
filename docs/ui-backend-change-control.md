@@ -1,6 +1,6 @@
 # UI / Backend Change Control
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 ## Standing rule
 
@@ -13,6 +13,16 @@ Last updated: 2026-09-14
 - Finalized documentation changes must be committed and pushed. Unrelated local changes must not be included.
 
 ## Open UI/backend alignment notes
+
+### 2026-09-15 — Physical locations, operational destinations, and required processes (UI prototype only)
+
+- Mohamad defined three separate concepts: physical storage location, operational destination, and required process. The prototype now keeps them separate instead of using one overloaded destination field.
+- Physical locations are limited to `COLD_ROOM_POSITIVE_DIRTY`, `COLD_ROOM_POSITIVE_CLEAN`, and `COLD_ROOM_NEGATIVE`. Receiving selects only one of these. Receiving QC is an independent checkbox; a checked load remains in its selected cold room and waits for a manager decision.
+- Operational destinations are configurable in Base Data with per-process applicability: QC, Fresh Export, Freezing, Freeze Sliced, Waste/Disposal, Drying, and Freeze Drying. Sorting, Washing, Slicing, and Packaging are processes, not destinations.
+- Sorting returns output to its prior physical cold room, records final grade/size, and selects an operational destination. Waste output records weight without a basket. A QC checkbox is available at process output and pauses the next action for manager routing.
+- UI route plans: Fresh Export goes to Packaging and remains in positive dirty cold storage; Drying goes through Washing, Slicing, Dryer, Packaging and becomes positive clean after Washing; Freezing goes through Washing, negative cold storage, Packaging; Freeze Sliced goes through Washing, Slicing, negative cold storage, Packaging; Freeze Drying goes through Washing, Slicing, negative cold storage, Freeze Dryer, Packaging.
+- Backend/API/contract/database impact in this change: none. No backend or contract repository was changed. The current backend model does not yet expose this complete two-axis physical/operational taxonomy, `FREEZING_SLICED` route, per-stage QC hold, or basketless disposal as one coherent public workflow. Those remain explicit backend-alignment work requiring Mohamad's separate approval before implementation.
+- This decision supersedes conflicting route descriptions in the 2026-09-11 note below for the Figma prototype. It must not be presented as proof that the production backend already supports every route.
 
 ### 2026-09-14 — Persian sidebar and Washing scan suggestion (UI only)
 

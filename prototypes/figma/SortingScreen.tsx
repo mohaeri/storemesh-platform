@@ -14,6 +14,7 @@ function SortingScreen() {
     [grade, setGrade] = useState("A"),
     [size, setSize] = useState("درشت"),
     [destination, setDestination] = useState("FRESH_EXPORT"),
+    [qualityCheckRequired, setQualityCheckRequired] = useState(false),
     [lossReason, setLossReason] = useState(""),
     [outputs, setOutputs] = useState<any[]>([]),
     [error, setError] = useState(""),
@@ -111,14 +112,13 @@ function SortingScreen() {
     primary =
       "rounded-lg bg-[#176b50] px-4 py-3 text-white text-[12px] font-bold disabled:opacity-40"
   const destinationLabel: Record<string, string> = {
-    FRESH_EXPORT: "ارسال تازه · بدون شست‌وشو",
-    DRYING: "خشک · شست‌وشو ← اسلایس ← خشک",
-    FREEZING: "فریز · شست‌وشو ← اسلایس ← فریز",
-    FREEZE_DRYING: "فریزدرای · شست‌وشو ← اسلایس ← فریز ← فریزدرای",
+    FRESH_EXPORT: "ارسال تازه · بسته‌بندی · سردخانه مثبت کثیف",
+    DRYING: "خشک · شست‌وشو ← اسلایس ← خشک‌کن ← بسته‌بندی",
+    FREEZING: "فریز · شست‌وشو ← سردخانه منفی ← بسته‌بندی",
+    FREEZING_SLICED: "فریز اسلایس · شست‌وشو ← اسلایس ← سردخانه منفی ← بسته‌بندی",
+    FREEZE_DRYING: "فریز درای · شست‌وشو ← اسلایس ← سردخانه منفی ← فریز درای ← بسته‌بندی",
     QC: "کنترل کیفیت",
-    COLD_ROOM_CLEAN: "سردخانه تمیز",
-    COLD_ROOM_DIRTY: "سردخانه کثیف",
-    WASTE: "دفع",
+    WASTE: "دفع / امحاء · فقط ثبت وزن",
   }
   const productGrades = readMasterData().products.find(
     (item) => item.name === sources[0]?.product,
@@ -184,7 +184,7 @@ function SortingScreen() {
         destination: undefined,
         baskets: current.baskets.map((basket: any) =>
           inputCodes.some((code) => pwCode(code) === pwCode(basket.code))
-            ? { ...basket, status: "IN_SORTING", currentState: "IN_SORTING", currentLocation: "SORTING", zone: "SORTING", destination: null, nextAction: "ثبت خروجی سورتینگ" }
+            ? { ...basket, sortingOrigin: basket.physicalLocation||basket.currentLocation||basket.zone, physicalLocation:basket.physicalLocation||basket.currentLocation||basket.zone, status: "IN_SORTING", currentState: "IN_SORTING", currentLocation: "SORTING", zone: "SORTING", destination: null, nextAction: "ثبت خروجی سورتینگ" }
             : basket,
         ),
         events: [...current.events, { time: new Date().toLocaleTimeString("fa-IR"), title: "شروع نشست سورتینگ", detail: `${inputCodes.length} سبد قفل شد و در وضعیت در حال سورت قرار گرفت.` }],
@@ -206,6 +206,7 @@ function SortingScreen() {
     setError("")
   }
   function scanOutput(rawCode = outputCode) {
+    if(destination==="WASTE")return setError("برای دفع سبد تخصیص داده نمی‌شود؛ فقط وزن را ثبت کنید.")
     const code = pwCode(rawCode),
       selected = pool.find((c) => pwCode(c.qr || c.code) === code)
     if (
@@ -219,20 +220,21 @@ function SortingScreen() {
     setError("")
   }
   function add() {
+    const waste=destination==="WASTE"
     if (
-      !carrier ||
+      (!waste&&!carrier) ||
       outputs.some((o) => o.code === outputCode) ||
-      inputCodes.includes(outputCode)
+      (!waste&&inputCodes.includes(outputCode))
     )
       return setError("سبد خروجی باید موجود، خالی و غیرتکراری باشد.")
-    if (!staged.includes(outputCode))
+    if (!waste&&!staged.includes(outputCode))
       return setError("حضور فیزیکی سبد خروجی در سورتینگ را تأیید کنید.")
     if (scale !== "STABLE")
       return setError("ترازو قطع است یا وزن ناپایدار است.")
     if (
       !Number.isFinite(net) ||
       net <= 0 ||
-      net > Number(carrier.capacity ?? carrier.capacityKg ?? Infinity) ||
+      (!waste&&net > Number(carrier.capacity ?? carrier.capacityKg ?? Infinity)) ||
       total + net > inputWeight + 0.001
     )
       return setError(
@@ -246,19 +248,21 @@ function SortingScreen() {
     setOutputs([
       ...outputs,
       {
-        code: outputCode,
+        code: waste?"":outputCode,
         grade,
         size,
         gross: Number(gross),
         tare,
         weight: net,
         destination,
+        qualityCheckRequired,
         parentContributions,
         designationWarning: !!warning,
       },
     ])
     setOutputCode("")
     setGross("")
+    setQualityCheckRequired(false)
     setError("")
   }
   function finish() {
@@ -419,7 +423,8 @@ function SortingScreen() {
                     <input
                       aria-label="کد سبد خروجی سورت"
                       className={field + " font-mono"}
-                      value={outputCode}
+                      value={destination==="WASTE"?"بدون تخصیص سبد":outputCode}
+                      disabled={destination==="WASTE"}
                       onChange={(e) => setOutputCode(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") scanOutput()
@@ -429,6 +434,7 @@ function SortingScreen() {
                     <button
                       type="button"
                       className="shrink-0 rounded-lg border border-[#176b50] px-3 text-[11px] font-bold text-[#176b50]"
+                      disabled={destination==="WASTE"}
                       onClick={() => setOutputScanOpen(true)}
                     >
                       شبیه‌ساز اسکن
@@ -453,6 +459,7 @@ function SortingScreen() {
                       ))}
                     </select>
                   </label>
+                  <label className="col-span-2 flex items-center gap-2 rounded-xl border border-[#d4e2db] bg-[#f8fbfa] p-3 text-[12px]"><input type="checkbox" checked={qualityCheckRequired} onChange={e=>setQualityCheckRequired(e.target.checked)}/><span><b>نیازمند کنترل کیفیت در خروج این مرحله</b><small className="block text-[#718079]">مسیر بعدی تا تصمیم مدیر متوقف و این خروجی علامت‌گذاری می‌شود.</small></span></label>
                   <label className="text-[12px]">
                     گرید نهایی
                     <select
@@ -546,7 +553,7 @@ function SortingScreen() {
                 <p className="mb-3 rounded-lg border border-[#cde3da] bg-[#edf7f3] p-3 text-[12px] text-[#176b50]">
                   شجره والد این خروجی خودکار و متناسب با وزن ثبت‌شده سبدهای ورودی نشست محاسبه می‌شود.
                 </p>
-                {carrier && (
+                {carrier && destination!=="WASTE" && (
                   <label className="flex gap-2 text-[12px] mb-3">
                     <input
                       type="checkbox"
@@ -570,10 +577,10 @@ function SortingScreen() {
                 <button
                   className={primary + " w-full"}
                   disabled={
-                    !carrier ||
+                    (destination!=="WASTE"&&!carrier) ||
                     !gross ||
                     scale !== "STABLE" ||
-                    !staged.includes(outputCode)
+                    (destination!=="WASTE"&&!staged.includes(outputCode))
                   }
                   onClick={add}
                 >
@@ -582,10 +589,10 @@ function SortingScreen() {
                 <div className="mt-4 divide-y">
                   {outputs.map((o, n) => (
                     <div
-                      key={o.code}
+                      key={o.code||`waste-${n}`}
                       className="grid grid-cols-[1fr_1fr_2fr_auto] gap-2 py-3 text-[12px]"
                     >
-                      <b>{o.code}</b>
+                      <b>{o.code||"بدون سبد"}</b>
                       <span>{o.weight.toFixed(3)} kg</span>
                       <span>{destinationLabel[o.destination]}</span>
                       <button
