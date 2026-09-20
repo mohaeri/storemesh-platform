@@ -91,6 +91,36 @@ const pwCode = (value: any) =>
   String(value ?? "")
     .trim()
     .toUpperCase()
+type SortingEntryWeightState = "PENDING" | "CAPTURED" | "PREVIOUS"
+function pwSelectSortingEntryWeightState(
+  states: Record<string, SortingEntryWeightState>,
+  currentCode: string,
+  nextCode: string,
+  entryWeights: Record<string, number>,
+) {
+  const next = { ...states },
+    current = pwCode(currentCode),
+    selected = pwCode(nextCode)
+  if (
+    current &&
+    current !== selected &&
+    next[current] === "PENDING" &&
+    entryWeights[current] === undefined
+  )
+    next[current] = "PREVIOUS"
+  if (selected && entryWeights[selected] === undefined)
+    next[selected] = "PENDING"
+  return next
+}
+function pwCaptureSortingEntryWeightState(
+  states: Record<string, SortingEntryWeightState>,
+  code: string,
+) {
+  const key = pwCode(code)
+  return key
+    ? { ...states, [key]: "CAPTURED" as SortingEntryWeightState }
+    : states
+}
 function pwProportionalParentContributions(
   sources: any[],
   outputWeightKg: number,

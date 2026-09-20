@@ -516,6 +516,36 @@ const pwCode = (value: any) =>
   String(value ?? "")
     .trim()
     .toUpperCase()
+type SortingEntryWeightState = "PENDING" | "CAPTURED" | "PREVIOUS"
+function pwSelectSortingEntryWeightState(
+  states: Record<string, SortingEntryWeightState>,
+  currentCode: string,
+  nextCode: string,
+  entryWeights: Record<string, number>,
+) {
+  const next = { ...states },
+    current = pwCode(currentCode),
+    selected = pwCode(nextCode)
+  if (
+    current &&
+    current !== selected &&
+    next[current] === "PENDING" &&
+    entryWeights[current] === undefined
+  )
+    next[current] = "PREVIOUS"
+  if (selected && entryWeights[selected] === undefined)
+    next[selected] = "PENDING"
+  return next
+}
+function pwCaptureSortingEntryWeightState(
+  states: Record<string, SortingEntryWeightState>,
+  code: string,
+) {
+  const key = pwCode(code)
+  return key
+    ? { ...states, [key]: "CAPTURED" as SortingEntryWeightState }
+    : states
+}
 function pwProportionalParentContributions(
   sources: any[],
   outputWeightKg: number,
@@ -2727,6 +2757,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
     [inputCodes, setInputCodes] = useState<string[]>(() => initialStep === "output" ? [...(activeSortingSession?.inputCodes || [])] : []),
     [scanCode, setScanCode] = useState(""),
     [entryWeights, setEntryWeights] = useState<Record<string, number>>(() => initialStep === "output" ? { ...(activeSortingSession?.entryWeights || {}) } : {}),
+    [entryWeightStates, setEntryWeightStates] = useState<Record<string, SortingEntryWeightState>>({}),
     [outputCode, setOutputCode] = useState(""),
     [gross, setGross] = useState(""),
     [grade, setGrade] = useState("A"),
@@ -2857,6 +2888,14 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
     if (sources.length && sources[0]?.product !== source.product)
       return setError("همه ورودی‌های یک نوبت سورت باید یک محصول باشند.")
     setInputCodes([...inputCodes, source.code])
+    setEntryWeightStates(
+      pwSelectSortingEntryWeightState(
+        entryWeightStates,
+        weighingCode,
+        source.code,
+        entryWeights,
+      ),
+    )
     setWeighingCode(source.code)
     setScanCode("")
     setError("")
@@ -2865,6 +2904,9 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
     const measured = Number((Number(source.gross) - Number(source.tare || 0)).toFixed(3))
     if (!(measured > 0)) return setError("ترازو وزن معتبر دریافت نکرد.")
     setEntryWeights({ ...entryWeights, [pwCode(source.code)]: measured })
+    setEntryWeightStates(
+      pwCaptureSortingEntryWeightState(entryWeightStates, source.code),
+    )
     setError("")
   }
   function start() {
@@ -2913,6 +2955,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
       setStep("entry-done")
       setInputCodes([])
       setEntryWeights({})
+      setEntryWeightStates({})
       setWeighingCode("")
       setError("")
     } catch (failure: any) {
@@ -3066,7 +3109,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                   className={`grid grid-cols-[1.15fr_1.25fr_1.2fr_.45fr] items-center gap-4 border-b border-[#e6eeea] px-5 py-3 text-[12px] last:border-b-0 ${pwCode(weighingSource?.code) === pwCode(source.code) ? "bg-[#f7fcf9]" : "bg-white"}`}
                 >
                   <b className="font-mono text-[13px]">{source.code}</b>
-                  <button onClick={() => setWeighingCode(source.code)} className={`mx-auto min-w-[150px] rounded-xl border px-3 py-1.5 text-[10px] font-bold ${entryWeights[pwCode(source.code)] !== undefined ? "border-[#72d9ad] bg-[#ebfff6] text-[#176b50]" : pwCode(weighingCode) === pwCode(source.code) ? "border-[#efbd4e] bg-[#fff9e9] text-[#9a6420]" : "border-[#cfd9d5] bg-[#f5f7f6] text-[#718079]"}`}>{entryWeights[pwCode(source.code)] !== undefined ? "✓ وزن جدید ثبت شد" : pwCode(weighingCode) === pwCode(source.code) ? "وزن قبلی انتخاب شد" : "در انتظار ثبت وزن"}</button>
+                  <button onClick={() => {setEntryWeightStates(pwSelectSortingEntryWeightState(entryWeightStates,weighingCode,source.code,entryWeights));setWeighingCode(source.code)}} className={`mx-auto min-w-[150px] rounded-xl border px-3 py-1.5 text-[10px] font-bold ${entryWeightStates[pwCode(source.code)] === "CAPTURED" ? "border-[#72d9ad] bg-[#ebfff6] text-[#176b50]" : entryWeightStates[pwCode(source.code)] === "PENDING" ? "border-[#efbd4e] bg-[#fff9e9] text-[#9a6420]" : "border-[#cfd9d5] bg-[#f5f7f6] text-[#718079]"}`}>{entryWeightStates[pwCode(source.code)] === "CAPTURED" ? "✓ وزن جدید ثبت شد" : entryWeightStates[pwCode(source.code)] === "PENDING" ? "در انتظار ثبت وزن" : "وزن قبلی انتخاب شد"}</button>
                   <span className="text-[#718079]">آخرین وزن: <b className="rounded bg-[#f1f3f2] px-2 py-1 font-mono text-[#18302a]">{(source.gross - source.tare).toFixed(3)} kg</b></span>
                   <button
                     onClick={() => {
@@ -3076,6 +3119,11 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                       const next = { ...entryWeights }
                       delete next[pwCode(source.code)]
                       setEntryWeights(next)
+                      const nextStates = { ...entryWeightStates }
+                      delete nextStates[pwCode(source.code)]
+                      setEntryWeightStates(nextStates)
+                      if (pwCode(weighingCode) === pwCode(source.code))
+                        setWeighingCode("")
                     }}
                     className="text-red-700"
                     disabled={step !== "input"}
