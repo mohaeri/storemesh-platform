@@ -36,7 +36,7 @@ function SortingScaleConsole({
         <div className="flex justify-between border-t border-white/10 pt-2 text-[10px]"><span>{mode === "entry" ? "اختلاف" : "وضعیت"}</span><b className="font-mono text-[#62e5ad]">{mode === "entry" ? `${number(net - (previousNet || 0))} kg` : "READY"}</b></div>
       </div>
       <div className="col-span-3 flex flex-col justify-between gap-2 rounded-xl border border-[#1b5a46] bg-[#0a3326] p-3">
-        <button type="button" onClick={onRead} className="rounded-xl border border-[#2b765b] bg-[#14513d] px-3 py-3 text-[11px] font-bold">↻ {mode === "entry" ? "ثبت وزن جدید" : "دریافت وزن خروجی"}</button>
+        {mode === "entry" ? <button type="button" onClick={onRead} className="rounded-xl border border-[#2b765b] bg-[#14513d] px-3 py-3 text-[11px] font-bold">↻ ثبت وزن جدید</button> : <div className="rounded-xl border border-[#2b765b] bg-[#061f17] px-3 py-3 text-center text-[11px] font-bold text-[#62e5ad]">● وزن آنلاین پس از اسکن سبد</div>}
         <div className="grid grid-cols-2 gap-2"><button type="button" className="rounded-lg border border-[#1b5a46] bg-[#061f17] py-2 text-[10px]">صفر (Zero)</button><button type="button" className="rounded-lg border border-[#1b5a46] bg-[#061f17] py-2 text-[10px]">تار (Tare)</button></div>
         <div className="rounded-lg border border-[#1b5a46] bg-[#061f17] px-3 py-2 text-[10px]"><span className="text-[#8eb8a8]">پورت اتصال: </span><b className="font-mono text-[#62e5ad]">COM 4</b></div>
       </div>
@@ -265,8 +265,12 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
       inputCodes.some((inputCode) => pwCode(inputCode) === code)
     )
       return setError("سبد خروجی باید موجود، خالی و غیرتکراری باشد.")
-    setOutputCode(selected.qr || selected.code)
-    setStaged([...new Set([...staged, selected.qr || selected.code])])
+    const selectedCode = selected.qr || selected.code,
+      selectedTare = Number(selected.tare ?? selected.tareWeightKg ?? 0),
+      measuredNet = Math.min(18.5, Math.max(0, inputWeight - total))
+    setOutputCode(selectedCode)
+    setGross((measuredNet + selectedTare).toFixed(3))
+    setStaged([...new Set([...staged, selectedCode])])
     setError("")
   }
   function add() {
@@ -383,19 +387,16 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
             {step === "input" && (
               <><div aria-label="سبدهای شناسایی‌شده برای سورت" className="mb-3 rounded-lg bg-[#edf8f3] p-3 text-[11px] text-[#365c4f]"><b>{eligibleSources.length} سبد موجود در سردخانه و آماده ورود به سورت شناسایی شد.</b>{eligibleSources.length>0?<span className="block mt-1 font-mono">سبد بعدی: {eligibleSources[0].code} · {eligibleSources[0].product}</span>:<span className="block mt-1">سبد آزاد و قابل‌استفاده‌ای در سردخانه وجود ندارد.</span>}</div><div className="flex gap-2"><input aria-label="اسکن QR ورود سورتینگ" className={field + " font-mono"} value={scanCode} onChange={(event) => setScanCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") scanInput() }} placeholder="اسکن QR سبد ورودی"/><button className={primary} disabled={!scanCode.trim()} onClick={() => scanInput()}>افزودن سبد</button><button className="rounded-lg border border-[#176b50] px-4 text-[12px] font-bold text-[#176b50]" onClick={() => setInputScanOpen(true)}>⌗ شبیه‌ساز اسکن</button></div><ScanSimulator open={inputScanOpen} title="اسکن سبد ورودی سورتینگ" suggestedCode={eligibleSources[0]?.code || ""} onClose={() => setInputScanOpen(false)} onScan={scanInput}/></>
             )}
-            <div className="mt-4 overflow-hidden rounded-xl border border-[#d8e4df]">
-              <div className="grid grid-cols-[.55fr_1fr_1.2fr_1fr_1fr] gap-3 bg-[#eef4f1] px-4 py-2 text-[10px] font-bold text-[#62776f]">
-                <span>عملیات</span><span>وضعیت وزن</span><span>محصول</span><span>گرید / اندازه</span><span>کد سبد</span>
-              </div>
+            <div className="mt-4 overflow-hidden rounded-xl border border-[#d8e4df] bg-white">
               {sources.map((source: any) => (
                 <div
                   key={source.code}
-                  className={`grid grid-cols-[.55fr_1fr_1.2fr_1fr_1fr] items-center gap-3 border-t px-4 py-3 text-[12px] ${pwCode(weighingSource?.code) === pwCode(source.code) ? "bg-[#f0faf5]" : "bg-white"}`}
+                  className={`grid grid-cols-[1.15fr_1.25fr_1.2fr_.45fr] items-center gap-4 border-b border-[#e6eeea] px-5 py-3 text-[12px] last:border-b-0 ${pwCode(weighingSource?.code) === pwCode(source.code) ? "bg-[#f7fcf9]" : "bg-white"}`}
                 >
-                  <div className="flex gap-2"><button
-                    onClick={() => setWeighingCode(source.code)}
-                    className="rounded-lg border border-[#176b50] px-2 py-1 text-[10px] font-bold text-[#176b50]"
-                  >نمایش در باسکول</button><button
+                  <b className="font-mono text-[13px]">{source.code}</b>
+                  <button onClick={() => setWeighingCode(source.code)} className={`mx-auto min-w-[150px] rounded-xl border px-3 py-1.5 text-[10px] font-bold ${entryWeights[pwCode(source.code)] !== undefined ? "border-[#72d9ad] bg-[#ebfff6] text-[#176b50]" : pwCode(weighingCode) === pwCode(source.code) ? "border-[#efbd4e] bg-[#fff9e9] text-[#9a6420]" : "border-[#cfd9d5] bg-[#f5f7f6] text-[#718079]"}`}>{entryWeights[pwCode(source.code)] !== undefined ? "✓ وزن جدید ثبت شد" : pwCode(weighingCode) === pwCode(source.code) ? "وزن قبلی انتخاب شد" : "در انتظار ثبت وزن"}</button>
+                  <span className="text-[#718079]">آخرین وزن: <b className="rounded bg-[#f1f3f2] px-2 py-1 font-mono text-[#18302a]">{(source.gross - source.tare).toFixed(3)} kg</b></span>
+                  <button
                     onClick={() => {
                       setInputCodes(
                         inputCodes.filter((code) => code !== source.code),
@@ -408,15 +409,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                     disabled={step !== "input"}
                   >
                     حذف
-                  </button></div>
-                  <span>
-                    {entryWeights[pwCode(source.code)] !== undefined
-                      ? `وزن ورود ${entryWeights[pwCode(source.code)].toFixed(3)} kg`
-                      : `آخرین وزن ${(source.gross - source.tare).toFixed(3)} kg`}
-                  </span>
-                  <span>{source.product}</span>
-                  <span>{source.grade} / {source.size}</span>
-                  <b className="font-mono">{source.code}</b>
+                  </button>
                 </div>
               ))}
             </div>
@@ -446,7 +439,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
               gross={Number(gross || 0)}
               tare={tare}
               net={gross && net > 0 ? net : 0}
-              onRead={() => carrier && scale === "STABLE" && setGross((Math.min(18.5, Math.max(0, inputWeight - total)) + tare).toFixed(3))}
+              onRead={undefined}
             />
             <div className="grid grid-cols-[2fr_1fr] gap-4">
               <Card className="p-4">
@@ -478,7 +471,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                     </button>
                     </div>
                     <span className="mt-1 block text-[10px] text-[#718079]">
-                      اسکن سخت‌افزاری و شبیه‌ساز هر دو همین اعتبارسنجی را اجرا می‌کنند.
+                      با اسکن سبد روی باسکول، وزن پایدار همان لحظه به‌صورت آنلاین ثبت می‌شود.
                     </span>
                   </label>
                   <label className="text-[12px]">
@@ -543,26 +536,10 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                   onClose={() => setOutputScanOpen(false)}
                   onScan={scanOutput}
                 />
-                <div className="my-3 rounded-xl border border-[#cde3da] bg-[#edf7f3] p-3 text-[12px] text-[#176b50]">وزن خروجی فقط از کنسول باسکول بالای صفحه دریافت می‌شود؛ خالص فعلی <b className="font-mono">{gross && net > 0 ? net.toFixed(3) : "0.000"} kg</b> است.</div>
+                <div className="my-3 rounded-xl border border-[#cde3da] bg-[#edf7f3] p-3 text-[12px] text-[#176b50]">وزن خروجی پس از اسکن سبد به‌صورت آنلاین از باسکول خوانده می‌شود؛ خالص فعلی <b className="font-mono">{gross && net > 0 ? net.toFixed(3) : "0.000"} kg</b> است.</div>
                 <p className="mb-3 rounded-lg border border-[#cde3da] bg-[#edf7f3] p-3 text-[12px] text-[#176b50]">
                   شجره والد این خروجی خودکار و متناسب با وزن ثبت‌شده سبدهای ورودی نشست محاسبه می‌شود.
                 </p>
-                {carrier && destination!=="WASTE" && (
-                  <label className="flex gap-2 text-[12px] mb-3">
-                    <input
-                      type="checkbox"
-                      checked={staged.includes(outputCode)}
-                      onChange={(e) =>
-                        setStaged(
-                          e.target.checked
-                            ? [...staged, outputCode]
-                            : staged.filter((x) => x !== outputCode),
-                        )
-                      }
-                    />
-                    حضور فیزیکی این سبد در سورتینگ تأیید شد
-                  </label>
-                )}
                 {warning && (
                   <p className="p-3 bg-[#fff3d6] rounded-lg text-[12px] mb-3">
                     هشدار زون ظرف ثبت می‌شود.
