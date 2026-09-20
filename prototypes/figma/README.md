@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source prepared for Figma Make as Version 32 on 2026-09-20.
+This folder keeps the reproducible source prepared for Figma Make as Version 33 on 2026-09-21.
 
 ## What is included
 
@@ -22,7 +22,7 @@ node --test prototypes/figma/production.test.mjs
 
 The assembled source must also pass the downloaded Figma project's TypeScript check and `pnpm build` before it is installed through the Figma Make code editor.
 
-Version 32 adapts the Production Workbench to the supplied Stitch visual reference while keeping StoreMesh behavior authoritative. The workbench is grouped by operational stage, removes Physical Merge navigation, separates Washing Entry and Exit, makes Freeze and Dryer views output-and-packaging actions, and separates Freeze-Dry Entry from Freeze-Dry Exit and Packaging. No Stitch behavior was copied. Version 31's Receiving visual refresh remains intact.
+Version 33 completes the Production Workbench split into independent Sorting Entry, Sorting Exit, Washing Entry, and Washing Exit stations. Optional/new sorting-entry weight and all sorting/washing exit weight capture now live exclusively in the top scale console, with cleaner input tables and no duplicated lower load-cell controls. The supplied Stitch screens were used only as visual references; StoreMesh state, validation, persistence, scanning, genealogy, and workflow behavior remain authoritative. Version 32's operation map and Version 31's Receiving refresh remain intact.
 
 ## Scope boundary
 

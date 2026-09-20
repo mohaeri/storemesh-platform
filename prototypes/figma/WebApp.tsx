@@ -1109,14 +1109,28 @@ function PWEmpty({ children }: any) {
     </div>
   )
 }
+function WashingScaleConsole({mode,code,net,previousNet,tare,onRead}:{mode:"ENTRY"|"EXIT";code?:string;net:number;previousNet:number;tare:number;onRead:()=>void}) {
+  const n=(value:number)=>Number.isFinite(value)?value.toFixed(3):"0.000"
+  const gross=pwNumber(net+tare)
+  return <section aria-label={`کنسول باسکول ${mode==="ENTRY"?"ورود":"خروج"} شست‌وشو`} style={{background:"#06291f",border:"1px solid #1b5a46",borderRadius:18,padding:16,color:"white",boxShadow:"0 12px 28px #173f3524"}}>
+    <div style={{display:"grid",gridTemplateColumns:"1.05fr 1.45fr 1.15fr 1fr",gap:12}} dir="rtl">
+      <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:13,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11}}><b style={{color:"#c9f7e4"}}>● باسکول رومیزی ۱</b><span style={{color:"#62e5ad",fontFamily:"monospace"}}>10 Hz</span></div><div style={{marginTop:12,padding:9,borderRadius:9,background:"#0b382a",fontSize:10}}><div style={{display:"flex",justifyContent:"space-between"}}><span>لودسل آنلاین</span><b style={{color:"#62e5ad"}}>RS485</b></div><div style={{display:"flex",justifyContent:"space-between",marginTop:8,color:"#91b9aa"}}><span>قرائت پایدار</span><b>± 0.002 kg</b></div></div><div style={{marginTop:10,padding:8,border:"1px solid #1b5a46",borderRadius:8,textAlign:"center",fontSize:10,color:"#62e5ad"}}>✓ ثبات سیگنال حسگر تأیید شد</div>{code&&<div style={{marginTop:10,padding:8,borderRadius:8,background:"#03160f",textAlign:"center"}}><small style={{display:"block",color:"#91b9aa"}}>سریال سبد جاری</small><b style={{fontFamily:"monospace",fontSize:20,color:"#62e5ad"}}>{code}</b></div>}</div>
+      <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:15,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#c9f7e4"}}><b>{mode==="ENTRY"?"وزن خالص جدید":"وزن خالص خروجی"}</b><span style={{fontFamily:"monospace",color:"#62e5ad"}}>SENS: HIGH</span></div><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:8,margin:"18px 0"}} dir="ltr"><strong style={{fontFamily:"monospace",fontSize:40,letterSpacing:4}}>{n(net)}</strong><span style={{background:"#0b382a",padding:"4px 8px",borderRadius:6,fontSize:10,color:"#62e5ad"}}>kg</span></div><div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #ffffff18",paddingTop:8,fontSize:10}}><span>وزن ظرف (Tare)</span><b style={{color:"#62e5ad",fontFamily:"monospace"}}>{n(tare)} kg</b></div></div>
+      <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:15,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#c9f7e4"}}><b>{mode==="ENTRY"?"وزن خالص قبلی":"وزن ناخالص"}</b><span style={{fontFamily:"monospace",color:"#62e5ad"}}>GROSS</span></div><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:8,margin:"18px 0"}} dir="ltr"><strong style={{fontFamily:"monospace",fontSize:36,letterSpacing:3}}>{n(mode==="ENTRY"?previousNet:gross)}</strong><span style={{background:"#0b382a",padding:"4px 8px",borderRadius:6,fontSize:10,color:"#62e5ad"}}>kg</span></div><div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #ffffff18",paddingTop:8,fontSize:10}}><span>{mode==="ENTRY"?"اختلاف":"وضعیت"}</span><b style={{color:"#62e5ad",fontFamily:"monospace"}}>{mode==="ENTRY"?`${n(net-previousNet)} kg`:"READY"}</b></div></div>
+      <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:13,background:"#0a3326",display:"flex",flexDirection:"column",justifyContent:"space-between",gap:9}}><button type="button" onClick={onRead} style={{border:"1px solid #2b765b",background:"#14513d",color:"white",borderRadius:11,padding:12,fontWeight:800,cursor:"pointer"}}>↻ {mode==="ENTRY"?"ثبت وزن جدید":"دریافت وزن خروجی"}</button><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><button type="button" style={{border:"1px solid #1b5a46",background:"#041d16",color:"white",borderRadius:8,padding:8}}>صفر (Zero)</button><button type="button" style={{border:"1px solid #1b5a46",background:"#041d16",color:"white",borderRadius:8,padding:8}}>تار (Tare)</button></div><div style={{border:"1px solid #1b5a46",background:"#041d16",borderRadius:8,padding:8,fontSize:10}}><span style={{color:"#91b9aa"}}>پورت اتصال: </span><b style={{fontFamily:"monospace",color:"#62e5ad"}}>COM 4</b></div></div>
+    </div>
+  </section>
+}
 function WashingSessionScreen({
   ledger,
   onChange,
+  initialMode = "ENTRY",
 }: {
   ledger: PWLedger
   onChange: (next: PWLedger, message: string) => void
+  initialMode?: "ENTRY" | "EXIT"
 }) {
-  const [mode, setMode] = useState<"ENTRY" | "EXIT">("ENTRY"),
+  const mode = initialMode,
     [scan, setScan] = useState(""),
     [entryWeight, setEntryWeight] = useState(""),
     [outputCode, setOutputCode] = useState(""),
@@ -1124,6 +1138,7 @@ function WashingSessionScreen({
     [qualityCheckRequired,setQualityCheckRequired]=useState(false),
     [lossReason, setLossReason] = useState(""),
     [empty, setEmpty] = useState(false),
+    [inputScanOpen, setInputScanOpen] = useState(false),
     [outputScanOpen, setOutputScanOpen] = useState(false),
     [error, setError] = useState("")
   const active = ledger.washSessions.find(
@@ -1362,158 +1377,26 @@ function WashingSessionScreen({
   const scanned = ledger.items.find(
     (item) => item.containerCode === pwCode(scan),
   )
-  return (
-    <div style={{ display: "grid", gap: 18 }}>
-      <div style={{...pwBox,display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        <PWButton type="button" onClick={()=>setMode("ENTRY")} secondary={mode!=="ENTRY"}><b>ثبت ورود به شست‌وشو</b><small style={{display:"block",marginTop:5,opacity:.8}}>اسکن چند سبد هم‌گرید و هم‌اندازه و قفل نشست</small></PWButton>
-        <PWButton type="button" onClick={()=>setMode("EXIT")} secondary={mode!=="EXIT"}><b>ثبت خروج از شست‌وشو</b><small style={{display:"block",marginTop:5,opacity:.8}}>ثبت سبدهای تازه، وزن و مسیر بعدی</small></PWButton>
-      </div>
-      {mode === "ENTRY" && <div style={pwBox}>
-        <h2>ورود به نشست شست‌وشوی چندسبدی</h2>
-        <PWNotice>
-          چند سبد هم‌گرید و هم‌اندازه وارد یک نشست می‌شوند. تا ثبت تمام خروجی‌ها و
-          خالی‌شدن واحد، گرید یا اندازه دیگر پذیرفته نمی‌شود.
-        </PWNotice>
-        {error && (
-          <div
-            role="alert"
-            style={{
-              background: "#fff0f0",
-              color: "#9f2323",
-              padding: 12,
-              borderRadius: 9,
-              marginBottom: 12,
-            }}
-          >
-            {error}
-          </div>
-        )}
-        <ScanOptionalWeighTransition
-          scan={scan}
-          setScan={setScan}
-          onScan={addInput}
-          suggestedCode={eligible[0]?.containerCode || ""}
-          lastWeight={scanned?.weightKg}
-          weight={entryWeight}
-          setWeight={setEntryWeight}
-          action="ثبت سبد در نشست شست‌وشو"
-        />
-        <div style={{ marginTop: 16 }}>
-          {sources.map((item) => (
-            <div
-              key={item.id}
-              style={{
-                padding: "10px 0",
-                borderTop: "1px solid #e1eae6",
-                fontSize: 13,
-              }}
-            >
-              <b>{item.containerCode}</b> · {item.code} · {item.grade}/
-              {item.size} · {item.weightKg} kg
-            </div>
-          ))}
-        </div>
-        {active && (
-          <div
-            style={{
-              marginTop: 14,
-              background: "#fff8e3",
-              padding: 12,
-              borderRadius: 9,
-              fontSize: 12,
-            }}
-          >
-            نشست {active.id} · قفل سازگاری:{" "}
-            <b>
-              {active.grade} / {active.size}
-            </b>
-          </div>
-        )}
-        {active && <PWNotice>ورودی‌ها ذخیره شده‌اند و پس از خاموش و روشن شدن سیستم نیز نشست {active.id} فعال می‌ماند. برای ثبت محصول شسته‌شده «خروج از شست‌وشو» را انتخاب کنید.</PWNotice>}
-      </div>}
-      {mode === "EXIT" && <div style={pwBox}>
-        <h2>خروج از نشست شست‌وشو</h2>
-        {!active ? (
-          <PWEmpty>با اسکن اولین ورودی، نشست ساخته می‌شود.</PWEmpty>
-        ) : (
-          <>
-            <PWField label="اسکن سبد خالی خروجی">
-              <div style={{display:"flex",gap:8}}><input value={outputCode} onChange={(event) => setOutputCode(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();addOutput()}}} style={pwInput} placeholder="سبد جدید؛ مستقل از ورودی‌ها"/><PWButton secondary onClick={()=>setOutputScanOpen(true)}>⌗ اسکن</PWButton></div>
-            </PWField>
-            <PWField label="وزن خالص خروجی (kg)">
-              <input
-                type="number"
-                min="0.001"
-                step="0.001"
-                value={outputWeight}
-                onChange={(event) => setOutputWeight(event.target.value)}
-                style={pwInput}
-              />
-            </PWField>
-            <label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,margin:"10px 0",padding:10,border:"1px solid #d5e3dd",borderRadius:9}}><input type="checkbox" checked={qualityCheckRequired} onChange={event=>setQualityCheckRequired(event.target.checked)}/><span><b>نیازمند کنترل کیفیت در خروج شست‌وشو</b><small style={{display:"block",color:"#718079"}}>تا تصمیم مدیر، اقدام بعدی برای این سبد متوقف می‌شود.</small></span></label>
-            <PWButton
-              disabled={!outputCode || !outputWeight}
-              onClick={addOutput}
-            >
-              ثبت این خروجی
-            </PWButton>
-            <ScanSimulator open={outputScanOpen} title="اسکن سبد خروجی شست‌وشو" suggestedCode={outputCode||"CTR-003"} onClose={()=>setOutputScanOpen(false)} onScan={code=>setOutputCode(code)}/>
-            <div style={{ margin: "15px 0" }}>
-              {active.outputs.map((row: any, index: number) => (
-                <p key={row.containerCode}>
-                  {index + 1}. {row.containerCode} · {row.weightKg} kg
-                </p>
-              ))}
-            </div>
-            <div
-              style={{
-                background: "#eff8f5",
-                padding: 12,
-                borderRadius: 9,
-                fontSize: 12,
-              }}
-            >
-              ورودی {inputTotal} kg · خروجی {outputTotal} kg · مانده/افت {loss}{" "}
-              kg
-            </div>
-            <PWField label="علت افت یا مانده (در صورت اختلاف)">
-              <input
-                value={lossReason}
-                onChange={(event) => setLossReason(event.target.value)}
-                style={pwInput}
-              />
-            </PWField>
-            <label
-              style={{
-                display: "flex",
-                gap: 8,
-                fontSize: 12,
-                margin: "12px 0",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={empty}
-                onChange={(event) => setEmpty(event.target.checked)}
-              />
-              تمام محصول در خروجی‌ها ثبت شده و واحد شست‌وشو کاملاً خالی است.
-            </label>
-            <PWButton
-              disabled={
-                !active.outputs.length ||
-                !empty ||
-                loss < 0 ||
-                (loss > 0 && !lossReason.trim())
-              }
-              onClick={complete}
-            >
-              تکمیل نشست و ساخت شجره خروجی‌ها
-            </PWButton>
-          </>
-        )}
-      </div>}
-    </div>
-  )
+  const entryCandidate = scanned || eligible[0]
+  const outputCarrier = (()=>{try{return outputCode?pwCarrier(outputCode,"basket"):null}catch{return null}})()
+  const outputTare = Number(outputCarrier?.tareWeightKg || 0)
+  return <div style={{display:"grid",gap:18}}>
+    <div><h2 style={{margin:0}}>{mode==="ENTRY"?"ورود به شست‌وشو":"خروج از شست‌وشو"}</h2><p style={{margin:"5px 0 0",fontSize:12,color:"#718079"}}>{mode==="ENTRY"?"سبدهای هم‌گرید و هم‌اندازه را اسکن کنید و وزن تازه را فقط از باسکول ثبت کنید.":"سبدهای تازه خروجی را تک‌به‌تک اسکن کنید؛ وزن هر خروجی فقط از باسکول دریافت می‌شود."}</p></div>
+    <WashingScaleConsole mode={mode} code={mode==="ENTRY"?entryCandidate?.containerCode:outputCode} net={mode==="ENTRY"?Number(entryWeight||entryCandidate?.weightKg||0):Number(outputWeight||0)} previousNet={mode==="ENTRY"?Number(entryCandidate?.weightKg||0):0} tare={mode==="ENTRY"?0:outputTare} onRead={()=>{if(mode==="ENTRY"){if(!entryCandidate)return setError("ابتدا سبد ورودی را اسکن کنید.");setEntryWeight(Number(entryCandidate.weightKg).toFixed(3));setError("")}else{if(!outputCarrier)return setError("ابتدا سبد خالی خروجی را اسکن کنید.");setOutputWeight(Math.min(18.5,Math.max(0,inputTotal-outputTotal)).toFixed(3));setError("")}}}/>
+    {error&&<div role="alert" style={{background:"#fff0f0",color:"#9f2323",padding:12,borderRadius:9}}>{error}</div>}
+    {mode==="ENTRY"?<div style={pwBox}>
+      <h3 style={{marginTop:0}}>اسکن سبدهای ورودی شست‌وشو</h3>
+      <PWNotice>چند سبد هم‌گرید و هم‌اندازه وارد یک نشست می‌شوند. تا خالی‌شدن کامل واحد، گرید یا اندازه متفاوت پذیرفته نمی‌شود.</PWNotice>
+      <div style={{display:"flex",gap:8,marginTop:14}}><input aria-label="اسکن QR ورود شست‌وشو" value={scan} onChange={event=>setScan(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();addInput()}}} style={{...pwInput,flex:1,fontFamily:"monospace"}} placeholder="اسکن QR سبد ورودی یا ورود دستی"/><PWButton disabled={!scan.trim()} onClick={()=>addInput()}>افزودن سبد</PWButton><PWButton secondary onClick={()=>setInputScanOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton></div>
+      <ScanSimulator open={inputScanOpen} title="اسکن سبد ورودی شست‌وشو" suggestedCode={eligible[0]?.containerCode||""} onClose={()=>setInputScanOpen(false)} onScan={addInput}/>
+      <div style={{border:"1px solid #d8e4df",borderRadius:12,overflow:"hidden",marginTop:16}}><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1.2fr 1fr",gap:10,background:"#eef4f1",padding:"9px 13px",fontSize:11,fontWeight:800,color:"#62776f"}}><span>کد سبد</span><span>گرید / اندازه</span><span>وزن ثبت‌شده</span><span>وضعیت نشست</span></div>{sources.length?sources.map(item=><div key={item.id} style={{display:"grid",gridTemplateColumns:"1fr 1fr 1.2fr 1fr",gap:10,padding:"11px 13px",borderTop:"1px solid #e1eae6",fontSize:12,alignItems:"center"}}><b style={{fontFamily:"monospace"}}>{item.containerCode}</b><span>{item.grade} / {item.size}</span><span><b>{item.weightKg.toFixed(3)} kg</b><small style={{display:"block",color:"#718079"}}>وزن از باسکول بالای صفحه</small></span><span style={{color:"#176b50",fontWeight:800}}>ثبت‌شده در نشست</span></div>):<PWEmpty>هنوز سبدی وارد نشست نشده است.</PWEmpty>}</div>
+      <div style={{marginTop:14,background:"#eaf6f0",padding:13,borderRadius:10,fontSize:12,display:"flex",justifyContent:"space-between"}}><span>{sources.length} سبد آماده شست‌وشو</span><b>مجموع {inputTotal.toFixed(3)} kg</b></div>
+      {active&&<><div style={{marginTop:12,background:"#fff8e3",padding:12,borderRadius:9,fontSize:12}}>نشست {active.id} · قفل سازگاری: <b>{active.grade} / {active.size}</b></div><PWNotice>ورودی‌ها ذخیره شده‌اند و پس از خاموش و روشن شدن سیستم نیز نشست {active.id} فعال می‌ماند. ثبت محصول شسته‌شده از صفحه مستقل «خروج از شست‌وشو» انجام می‌شود.</PWNotice></>}
+    </div>:<div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:16}}>
+      <div style={pwBox}><h3 style={{marginTop:0}}>اسکن و ثبت سبدهای تازه خروجی</h3>{!active?<PWEmpty>هیچ نشست فعال شست‌وشویی برای ثبت خروج وجود ندارد.</PWEmpty>:<><div style={{display:"flex",gap:8}}><input aria-label="اسکن سبد خالی خروجی شست‌وشو" value={outputCode} onChange={event=>setOutputCode(event.target.value)} style={{...pwInput,flex:1,fontFamily:"monospace"}} placeholder="اسکن QR سبد خالی"/><PWButton secondary onClick={()=>setOutputScanOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton></div><p style={{fontSize:11,color:"#718079"}}>پس از اسکن، «دریافت وزن خروجی» را در نوار باسکول بالای صفحه بزنید.</p><label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,margin:"12px 0",padding:10,border:"1px solid #d5e3dd",borderRadius:9}}><input type="checkbox" checked={qualityCheckRequired} onChange={event=>setQualityCheckRequired(event.target.checked)}/><span><b>نیازمند کنترل کیفیت در خروج شست‌وشو</b><small style={{display:"block",color:"#718079"}}>تا تصمیم مدیر، اقدام بعدی این سبد متوقف می‌شود.</small></span></label><PWButton disabled={!outputCode||!outputWeight} onClick={addOutput}>ثبت این خروجی و ادامه</PWButton><ScanSimulator open={outputScanOpen} title="اسکن سبد خروجی شست‌وشو" suggestedCode={outputCode||"CTR-003"} onClose={()=>setOutputScanOpen(false)} onScan={code=>setOutputCode(code)}/><div style={{border:"1px solid #d8e4df",borderRadius:11,overflow:"hidden",marginTop:16}}><div style={{display:"grid",gridTemplateColumns:".4fr 1fr 1fr",background:"#eef4f1",padding:9,fontSize:11,fontWeight:800}}><span>#</span><span>کد سبد</span><span>وزن خالص</span></div>{active.outputs.map((row:any,index:number)=><div key={row.containerCode} style={{display:"grid",gridTemplateColumns:".4fr 1fr 1fr",padding:10,borderTop:"1px solid #e1eae6",fontSize:12}}><span>{index+1}</span><b style={{fontFamily:"monospace"}}>{row.containerCode}</b><b>{row.weightKg.toFixed(3)} kg</b></div>)}</div></>}</div>
+      <div style={pwBox}><h3 style={{marginTop:0}}>تراز وزن نشست</h3><div style={{display:"grid",gap:12,fontSize:13}}><div style={{display:"flex",justifyContent:"space-between"}}><span>ورودی</span><b>{inputTotal.toFixed(3)} kg</b></div><div style={{display:"flex",justifyContent:"space-between"}}><span>خروجی</span><b>{outputTotal.toFixed(3)} kg</b></div><div style={{display:"flex",justifyContent:"space-between",paddingTop:10,borderTop:"1px solid #e1eae6"}}><span>مانده / افت</span><b>{loss.toFixed(3)} kg</b></div></div><PWField label="علت افت یا مانده (در صورت اختلاف)"><input value={lossReason} onChange={event=>setLossReason(event.target.value)} style={pwInput}/></PWField><label style={{display:"flex",gap:8,fontSize:12,margin:"12px 0"}}><input type="checkbox" checked={empty} onChange={event=>setEmpty(event.target.checked)}/>تمام محصول ثبت شده و واحد شست‌وشو کاملاً خالی است.</label><PWButton disabled={!active?.outputs.length||!empty||loss<0||(loss>0&&!lossReason.trim())} onClick={complete}>تکمیل شست‌وشو و ساخت مسیرها</PWButton></div>
+    </div>}
+  </div>
 }
 function ProductionScreen(props: any) {
   const [tab, setTab] = useState("overview"),
@@ -1525,7 +1408,8 @@ function ProductionScreen(props: any) {
     ["overview", "صف کار و مسیر"],
     ["sorting-entry", "ورود به سورتینگ"],
     ["sorting-exit", "خروج از سورتینگ"],
-    ["wash", "شست‌وشو"],
+    ["wash-entry", "ورود به شست‌وشو"],
+    ["wash-exit", "خروج از شست‌وشو"],
     ["slice", "ثبت اسلایس"],
     ["FREEZE", "خروج فریز و بسته‌بندی"],
     ["DRY", "خروج خشک‌کن و بسته‌بندی"],
@@ -2112,8 +1996,20 @@ function ProductionScreen(props: any) {
       )}
       {tab === "sorting-entry" && <SortingScreen initialStep="input" {...props} />}
       {tab === "sorting-exit" && <SortingScreen initialStep="output" {...props} />}
-      {tab === "wash" && (
+      {tab === "wash-entry" && (
         <WashingSessionScreen
+          initialMode="ENTRY"
+          ledger={ledger}
+          onChange={(next, message) => {
+            setLedger(next)
+            setNotice(message)
+            setError("")
+          }}
+        />
+      )}
+      {tab === "wash-exit" && (
+        <WashingSessionScreen
+          initialMode="EXIT"
           ledger={ledger}
           onChange={(next, message) => {
             setLedger(next)
@@ -2127,7 +2023,7 @@ function ProductionScreen(props: any) {
           {[
             {title:"عملیات نظارتی",hint:"نظارت بر صف و نتیجه فرایندها",items:[["overview","صف کار و مسیر","↯"],["results","نتایج و رویدادها","▣"]]},
             {title:"عملیات سورتینگ",hint:"ورودی و خروجی در دو ایستگاه مستقل",items:[["sorting-entry","ورود به سورتینگ","⇥"],["sorting-exit","خروج از سورتینگ","⇤"]]},
-            {title:"عملیات شست‌وشو",hint:"نشست چندسبدی و خروجی‌های تازه",items:[["wash","ثبت ورود یا خروج شست‌وشو","◉"]]},
+            {title:"عملیات شست‌وشو",hint:"ورودی و خروجی در دو ایستگاه مستقل",items:[["wash-entry","ورود به شست‌وشو","⇥"],["wash-exit","خروج از شست‌وشو","⇤"]]},
             {title:"عملیات فریزینگ",hint:"ثبت خروج، وزن و بسته‌بندی",items:[["FREEZE","ثبت خروج از فریز و بسته‌بندی","❄"]]},
             {title:"عملیات اسلایس و خشک‌کن",hint:"تأیید اسلایس و ثبت محصول خشک‌شده",items:[["slice","ثبت ورود به اسلایس","▦"],["DRY","ثبت خروج از خشک‌کن و بسته‌بندی","♨"]]},
             {title:"عملیات فریزدرای",hint:"ورود سینی از فریزر و خروج محصول نهایی",items:[["FREEZE_DRY_ENTRY","ثبت ورود به فریزدرای","✣"],["FREEZE_DRY_EXIT","ثبت خروج از فریزدرای و بسته‌بندی","⇥"]]},
@@ -2799,7 +2695,7 @@ function SortingScaleConsole({
         <div className="flex justify-between border-t border-white/10 pt-2 text-[10px]"><span>{mode === "entry" ? "اختلاف" : "وضعیت"}</span><b className="font-mono text-[#62e5ad]">{mode === "entry" ? `${number(net - (previousNet || 0))} kg` : "READY"}</b></div>
       </div>
       <div className="col-span-3 flex flex-col justify-between gap-2 rounded-xl border border-[#1b5a46] bg-[#0a3326] p-3">
-        <button type="button" onClick={onRead} className="rounded-xl border border-[#2b765b] bg-[#14513d] px-3 py-3 text-[11px] font-bold">↻ دریافت وزن از سنسور</button>
+        <button type="button" onClick={onRead} className="rounded-xl border border-[#2b765b] bg-[#14513d] px-3 py-3 text-[11px] font-bold">↻ {mode === "entry" ? "ثبت وزن جدید" : "دریافت وزن خروجی"}</button>
         <div className="grid grid-cols-2 gap-2"><button type="button" className="rounded-lg border border-[#1b5a46] bg-[#061f17] py-2 text-[10px]">صفر (Zero)</button><button type="button" className="rounded-lg border border-[#1b5a46] bg-[#061f17] py-2 text-[10px]">تار (Tare)</button></div>
         <div className="rounded-lg border border-[#1b5a46] bg-[#061f17] px-3 py-2 text-[10px]"><span className="text-[#8eb8a8]">پورت اتصال: </span><b className="font-mono text-[#62e5ad]">COM 4</b></div>
       </div>
@@ -2827,10 +2723,11 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
     [lossReason, setLossReason] = useState(""),
     [outputs, setOutputs] = useState<any[]>([]),
     [error, setError] = useState(initialStep === "output" && !activeSortingSession ? "هیچ نشست سورتینگ فعالی برای ثبت خروج وجود ندارد." : ""),
-    [scale, setScale] = useState("STABLE"),
     [staged, setStaged] = useState<string[]>([]),
+    [weighingCode, setWeighingCode] = useState(""),
     [outputScanOpen, setOutputScanOpen] = useState(false),
     [inputScanOpen, setInputScanOpen] = useState(false)
+  const scale = "STABLE"
   const defaultFleet = [
     {
       qr: "CTR-001",
@@ -2882,6 +2779,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
   const sources = inputCodes
       .map((code) => batch.baskets.find((b: any) => b.code === code))
       .filter(Boolean),
+    weighingSource = sources.find((source: any) => pwCode(source.code) === pwCode(weighingCode)) || sources[sources.length - 1],
     inputWeight = Number(
       sources
         .reduce(
@@ -2946,6 +2844,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
     if (sources.length && sources[0]?.product !== source.product)
       return setError("همه ورودی‌های یک نوبت سورت باید یک محصول باشند.")
     setInputCodes([...inputCodes, source.code])
+    setWeighingCode(source.code)
     setScanCode("")
     setError("")
   }
@@ -3001,6 +2900,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
       setStep("entry-done")
       setInputCodes([])
       setEntryWeights({})
+      setWeighingCode("")
       setError("")
     } catch (failure: any) {
       setError(failure.message || "نشست سورتینگ ذخیره نشد.")
@@ -3130,25 +3030,31 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
           {step === "input" && <>
             <SortingScaleConsole
               mode="entry"
-              code={sources[sources.length - 1]?.code || eligibleSources[0]?.code}
-              gross={Number(sources[sources.length - 1]?.gross || 0)}
-              tare={Number(sources[sources.length - 1]?.tare || 0)}
-              net={Number(entryWeights[pwCode(sources[sources.length - 1]?.code)] ?? ((sources[sources.length - 1]?.gross || 0) - (sources[sources.length - 1]?.tare || 0)))}
-              previousNet={Number((sources[sources.length - 1]?.gross || 0) - (sources[sources.length - 1]?.tare || 0))}
-              onRead={() => sources[sources.length - 1] && captureEntryWeight(sources[sources.length - 1])}
+              code={weighingSource?.code || eligibleSources[0]?.code}
+              gross={Number(weighingSource?.gross || 0)}
+              tare={Number(weighingSource?.tare || 0)}
+              net={Number(entryWeights[pwCode(weighingSource?.code)] ?? ((weighingSource?.gross || 0) - (weighingSource?.tare || 0)))}
+              previousNet={Number((weighingSource?.gross || 0) - (weighingSource?.tare || 0))}
+              onRead={() => weighingSource && captureEntryWeight(weighingSource)}
             />
             <Card className="p-5">
             <h3 className="font-bold mb-3">ورود به سورتینگ · اسکن سبدهای ورودی</h3>
             {step === "input" && (
               <><div aria-label="سبدهای شناسایی‌شده برای سورت" className="mb-3 rounded-lg bg-[#edf8f3] p-3 text-[11px] text-[#365c4f]"><b>{eligibleSources.length} سبد موجود در سردخانه و آماده ورود به سورت شناسایی شد.</b>{eligibleSources.length>0?<span className="block mt-1 font-mono">سبد بعدی: {eligibleSources[0].code} · {eligibleSources[0].product}</span>:<span className="block mt-1">سبد آزاد و قابل‌استفاده‌ای در سردخانه وجود ندارد.</span>}</div><div className="flex gap-2"><input aria-label="اسکن QR ورود سورتینگ" className={field + " font-mono"} value={scanCode} onChange={(event) => setScanCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") scanInput() }} placeholder="اسکن QR سبد ورودی"/><button className={primary} disabled={!scanCode.trim()} onClick={() => scanInput()}>افزودن سبد</button><button className="rounded-lg border border-[#176b50] px-4 text-[12px] font-bold text-[#176b50]" onClick={() => setInputScanOpen(true)}>⌗ شبیه‌ساز اسکن</button></div><ScanSimulator open={inputScanOpen} title="اسکن سبد ورودی سورتینگ" suggestedCode={eligibleSources[0]?.code || ""} onClose={() => setInputScanOpen(false)} onScan={scanInput}/></>
             )}
-            <div className="mt-3 divide-y">
+            <div className="mt-4 overflow-hidden rounded-xl border border-[#d8e4df]">
+              <div className="grid grid-cols-[.55fr_1fr_1.2fr_1fr_1fr] gap-3 bg-[#eef4f1] px-4 py-2 text-[10px] font-bold text-[#62776f]">
+                <span>عملیات</span><span>وضعیت وزن</span><span>محصول</span><span>گرید / اندازه</span><span>کد سبد</span>
+              </div>
               {sources.map((source: any) => (
                 <div
                   key={source.code}
-                  className="flex justify-between py-2 text-[12px]"
+                  className={`grid grid-cols-[.55fr_1fr_1.2fr_1fr_1fr] items-center gap-3 border-t px-4 py-3 text-[12px] ${pwCode(weighingSource?.code) === pwCode(source.code) ? "bg-[#f0faf5]" : "bg-white"}`}
                 >
-                  <button
+                  <div className="flex gap-2"><button
+                    onClick={() => setWeighingCode(source.code)}
+                    className="rounded-lg border border-[#176b50] px-2 py-1 text-[10px] font-bold text-[#176b50]"
+                  >نمایش در باسکول</button><button
                     onClick={() => {
                       setInputCodes(
                         inputCodes.filter((code) => code !== source.code),
@@ -3161,13 +3067,14 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                     disabled={step !== "input"}
                   >
                     حذف
-                  </button>
-                  <span className="flex items-center gap-2">
+                  </button></div>
+                  <span>
                     {entryWeights[pwCode(source.code)] !== undefined
                       ? `وزن ورود ${entryWeights[pwCode(source.code)].toFixed(3)} kg`
                       : `آخرین وزن ${(source.gross - source.tare).toFixed(3)} kg`}
-                    <button onClick={() => captureEntryWeight(source)} className="rounded-lg border border-[#176b50] px-3 py-1 text-[#176b50]">⚖ دریافت وزن از ترازو (اختیاری)</button>
                   </span>
+                  <span>{source.product}</span>
+                  <span>{source.grade} / {source.size}</span>
                   <b className="font-mono">{source.code}</b>
                 </div>
               ))}
@@ -3273,28 +3180,6 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                       ))}
                     </select>
                   </label>
-                  <label className="text-[12px]">
-                    وزن ناخالص (kg)
-                    <input
-                      type="number"
-                      step="0.001"
-                      className={field}
-                      value={gross}
-                      onChange={(e) => setGross(e.target.value)}
-                    />
-                  </label>
-                  <label className="text-[12px]">
-                    وضعیت لودسل
-                    <select
-                      className={field}
-                      value={scale}
-                      onChange={(e) => setScale(e.target.value)}
-                    >
-                      <option value="STABLE">متصل · پایدار</option>
-                      <option value="UNSTABLE">ناپایدار</option>
-                      <option value="OFFLINE">قطع</option>
-                    </select>
-                  </label>
                 </div>
                 <ScanSimulator
                   open={outputScanOpen}
@@ -3317,28 +3202,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                   onClose={() => setOutputScanOpen(false)}
                   onScan={scanOutput}
                 />
-                <div className="flex items-center justify-between rounded-xl bg-[#102f29] text-white p-4 my-3">
-                  <span className="text-[12px]">
-                    خالص = ناخالص − وزن خالی ({tare.toFixed(3)})
-                  </span>
-                  <b className="text-xl font-mono">
-                    {gross && net > 0 ? net.toFixed(3) : "0.000"} kg
-                  </b>
-                  <button
-                    className="border border-white/40 rounded-lg px-3 py-2 text-[11px]"
-                    disabled={!carrier || scale !== "STABLE"}
-                    onClick={() =>
-                      setGross(
-                        (
-                          Math.min(18.5, Math.max(0, inputWeight - total)) +
-                          tare
-                        ).toFixed(3),
-                      )
-                    }
-                  >
-                    دریافت از ترازو
-                  </button>
-                </div>
+                <div className="my-3 rounded-xl border border-[#cde3da] bg-[#edf7f3] p-3 text-[12px] text-[#176b50]">وزن خروجی فقط از کنسول باسکول بالای صفحه دریافت می‌شود؛ خالص فعلی <b className="font-mono">{gross && net > 0 ? net.toFixed(3) : "0.000"} kg</b> است.</div>
                 <p className="mb-3 rounded-lg border border-[#cde3da] bg-[#edf7f3] p-3 text-[12px] text-[#176b50]">
                   شجره والد این خروجی خودکار و متناسب با وزن ثبت‌شده سبدهای ورودی نشست محاسبه می‌شود.
                 </p>
