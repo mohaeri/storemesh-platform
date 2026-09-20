@@ -2,6 +2,17 @@
 
 Last updated: 2026-09-20
 
+## 2026-09-20 — Stitch-inspired Production Workbench visual and flow alignment
+
+- Used the supplied `میز کار تولید` Stitch export strictly as a visual layout reference; its HTML and interaction logic were not copied.
+- Replaced the crowded Production navigation row with a grouped operator workbench for monitoring, Sorting, Washing, Freezing, Slicing/Drying, and Freeze Drying.
+- Removed Physical Merge from Production navigation.
+- Split Washing into independently selectable Entry and Exit views while retaining the persisted multi-input session, Grade/Size lock, fresh output baskets, weighing, mass balance, and genealogy.
+- Recast Freeze as `Freeze Output + Packaging`; Freeze-Dry-bound material remains unpackaged and is routed to Freeze-Dry Entry.
+- Recast Slicing as a confirmation step whose next process is derived from the already-selected operational destination.
+- Recast Dryer as `Dryer Output + Packaging` and separated Freeze-Dry Entry (frozen trays entering the machine) from Freeze-Dry Exit (final weighing and packaging).
+- No backend, database, API route, request/response shape, or shared contract changed. The new controls are prototype-only behavior over the existing local production ledger and must be contract-reviewed before production implementation.
+
 ## 2026-09-20 — Stitch-inspired Receiving visual refresh
 
 - Updated Receiving → Container Registration and Weighing to follow the supplied Stitch mockup's visual hierarchy only: full-width scale telemetry, separate container/product registration card, action bar, and registered-container table.

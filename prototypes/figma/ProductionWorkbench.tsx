@@ -73,6 +73,7 @@ const PW_STAGES: Record<string, string> = {
   FROZEN: "منجمد",
   FREEZE_DRIED: "فریزدرای‌شده",
   DRIED: "خشک‌شده",
+  PACKAGED: "بسته‌بندی‌شده",
   CONSUMED: "مصرف‌شده",
   WASTED: "ضایعات",
   READY: "آماده",
@@ -690,7 +691,8 @@ function WashingSessionScreen({
   ledger: PWLedger
   onChange: (next: PWLedger, message: string) => void
 }) {
-  const [scan, setScan] = useState(""),
+  const [mode, setMode] = useState<"ENTRY" | "EXIT">("ENTRY"),
+    [scan, setScan] = useState(""),
     [entryWeight, setEntryWeight] = useState(""),
     [outputCode, setOutputCode] = useState(""),
     [outputWeight, setOutputWeight] = useState(""),
@@ -936,11 +938,13 @@ function WashingSessionScreen({
     (item) => item.containerCode === pwCode(scan),
   )
   return (
-    <div
-      style={{ display: "grid", gridTemplateColumns: "1.15fr .85fr", gap: 18 }}
-    >
-      <div style={pwBox}>
-        <h2>نشست شست‌وشوی چندسبدی</h2>
+    <div style={{ display: "grid", gap: 18 }}>
+      <div style={{...pwBox,display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <PWButton type="button" onClick={()=>setMode("ENTRY")} secondary={mode!=="ENTRY"}><b>ثبت ورود به شست‌وشو</b><small style={{display:"block",marginTop:5,opacity:.8}}>اسکن چند سبد هم‌گرید و هم‌اندازه و قفل نشست</small></PWButton>
+        <PWButton type="button" onClick={()=>setMode("EXIT")} secondary={mode!=="EXIT"}><b>ثبت خروج از شست‌وشو</b><small style={{display:"block",marginTop:5,opacity:.8}}>ثبت سبدهای تازه، وزن و مسیر بعدی</small></PWButton>
+      </div>
+      {mode === "ENTRY" && <div style={pwBox}>
+        <h2>ورود به نشست شست‌وشوی چندسبدی</h2>
         <PWNotice>
           چند سبد هم‌گرید و هم‌اندازه وارد یک نشست می‌شوند. تا ثبت تمام خروجی‌ها و
           خالی‌شدن واحد، گرید یا اندازه دیگر پذیرفته نمی‌شود.
@@ -1000,9 +1004,10 @@ function WashingSessionScreen({
             </b>
           </div>
         )}
-      </div>
-      <div style={pwBox}>
-        <h2>خروجی‌های نشست</h2>
+        {active && <PWNotice>ورودی‌ها ذخیره شده‌اند و پس از خاموش و روشن شدن سیستم نیز نشست {active.id} فعال می‌ماند. برای ثبت محصول شسته‌شده «خروج از شست‌وشو» را انتخاب کنید.</PWNotice>}
+      </div>}
+      {mode === "EXIT" && <div style={pwBox}>
+        <h2>خروج از نشست شست‌وشو</h2>
         {!active ? (
           <PWEmpty>با اسکن اولین ورودی، نشست ساخته می‌شود.</PWEmpty>
         ) : (
@@ -1081,7 +1086,7 @@ function WashingSessionScreen({
             </PWButton>
           </>
         )}
-      </div>
+      </div>}
     </div>
   )
 }
@@ -1095,11 +1100,11 @@ function ProductionScreen(props: any) {
     ["overview", "صف کار و مسیر"],
     ["sorting", "سورتینگ"],
     ["wash", "شست‌وشو"],
-    ["slice", "اسلایس و سینی"],
-    ["FREEZE", "فریز"],
-    ["FREEZE_DRY", "فریزدرای"],
-    ["DRY", "خشک‌کن"],
-    ["merge", "ادغام فیزیکی"],
+    ["slice", "ثبت اسلایس"],
+    ["FREEZE", "خروج فریز و بسته‌بندی"],
+    ["DRY", "خروج خشک‌کن و بسته‌بندی"],
+    ["FREEZE_DRY_ENTRY", "ورود به فریزدرای"],
+    ["FREEZE_DRY_EXIT", "خروج فریزدرای و بسته‌بندی"],
     ["results", "نتایج و رویدادها"],
   ]
   const allItems = ledger.items.filter((x) => !x.demo),
@@ -1448,6 +1453,7 @@ function ProductionScreen(props: any) {
             item.nextZone = item.zone
           } else {
             const measured = Number(data.get(`weight-${item.id}`))
+            const packageCode=String(data.get(`package-${item.id}`)||"").trim().toUpperCase()
             if (
               !Number.isFinite(measured) ||
               !(measured > 0) ||
@@ -1456,15 +1462,20 @@ function ProductionScreen(props: any) {
               throw Error(
                 `وزن نهایی معتبر برای ${item.code} لازم است؛ حداکثر ${item.weightKg} kg.`,
               )
+            if(!packageCode) throw Error(`کد بسته یا لیبل خروجی برای ${item.code} لازم است.`)
             item.beforeDryWeightKg = item.weightKg
             item.weightKg = pwNumber(measured)
             item.yieldPercent = pwNumber(
               (measured / item.beforeDryWeightKg) * 100,
             )
-            item.stage = cycle.type === "DRY" ? "DRIED" : "FREEZE_DRIED"
-            item.zone = "PACKAGING"
-            item.nextZone = "PACKAGING"
-            item.containerCode = ""
+            item.machineOutputStage = cycle.type === "DRY" ? "DRIED" : "FREEZE_DRIED"
+            item.stage = "PACKAGED"
+            item.zone = item.physicalLocation||"COLD_ROOM_POSITIVE_CLEAN"
+            item.currentLocation=item.zone
+            item.currentState="COMPLETED"
+            item.nextZone = null
+            item.nextAction="آماده نگهداری یا ارسال"
+            item.containerCode = packageCode
             item.trays = []
             item.allocated = false
           }
@@ -1572,19 +1583,55 @@ function ProductionScreen(props: any) {
       },
     )
   }
-  const cycleType = ["FREEZE", "FREEZE_DRY", "DRY"].includes(tab) ? tab : ""
+  const finishMachineOutput = (event:any,type:"FREEZE"|"DRY") => {
+    const data=form(event)
+    execute(type==="FREEZE"?"خروج از فریز ثبت شد.":"خروج از خشک‌کن ثبت شد و محصول بسته‌بندی شد.",(next)=>{
+      const item=next.items.find((row)=>row.id===chosen)
+      pwUsable(next,item)
+      const isFreezeDry=type==="FREEZE"&&item.destination==="FREEZE_DRYING"
+      const valid=type==="FREEZE"
+        ? item.nextZone==="FREEZING"&&["WASHED","SLICED"].includes(item.stage)
+        : item.nextZone==="DRYING"&&item.stage==="SLICED"&&item.destination==="DRYING"
+      if(!valid) throw Error("این بچ برای خروجی انتخاب‌شده آماده نیست.")
+      const measured=Number(data.get("weight")),packageCode=String(data.get("packageCode")||"").trim().toUpperCase()
+      if(!Number.isFinite(measured)||!(measured>0)||measured>item.weightKg) throw Error(`وزن خروجی باید مثبت و حداکثر ${item.weightKg} کیلوگرم باشد.`)
+      if(!isFreezeDry&&!packageCode) throw Error("کد بسته یا لیبل خروجی لازم است.")
+      const before=item.weightKg
+      item.weightKg=pwNumber(measured)
+      item.beforeMachineWeightKg=before
+      item.yieldPercent=pwNumber((measured/before)*100)
+      item.containerCode=isFreezeDry?item.containerCode:packageCode
+      item.currentState="COMPLETED"
+      item.blocked=data.get("qualityCheckRequired")==="on"
+      if(type==="FREEZE"){
+        item.physicalLocation="COLD_ROOM_NEGATIVE"
+        item.zone="COLD_ROOM_NEGATIVE"
+        item.currentLocation="COLD_ROOM_NEGATIVE"
+        item.stage=isFreezeDry?"FROZEN":"PACKAGED"
+        item.nextZone=isFreezeDry?"FREEZE_DRYING":null
+        item.nextAction=item.blocked?"در انتظار تصمیم مدیر کنترل کیفیت":isFreezeDry?"ثبت ورود سینی‌ها به فریزدرای":"آماده نگهداری یا ارسال"
+      }else{
+        item.physicalLocation="COLD_ROOM_POSITIVE_CLEAN"
+        item.zone="COLD_ROOM_POSITIVE_CLEAN"
+        item.currentLocation="COLD_ROOM_POSITIVE_CLEAN"
+        item.stage="PACKAGED"
+        item.nextZone=null
+        item.nextAction=item.blocked?"در انتظار تصمیم مدیر کنترل کیفیت":"آماده نگهداری یا ارسال"
+      }
+      pwEvent(next,type==="FREEZE"?"ثبت خروج از فریز":"ثبت خروج از خشک‌کن",item.code,{beforeWeightKg:before,outputWeightKg:item.weightKg,packageCode:packageCode||null,nextZone:item.nextZone})
+    })
+  }
+  const cycleType = tab==="FREEZE_DRY_ENTRY"||tab==="FREEZE_DRY_EXIT" ? "FREEZE_DRY" : ""
   const cycleEligible = live.filter(
     (item) =>
       !pwBusy(ledger, item) &&
       !item.blocked &&
-      (cycleType === "FREEZE"
-        ? item.stage === "SLICED" && item.allocated && (item.zone === "FREEZING" || item.nextZone === "FREEZING")
-        : cycleType === "FREEZE_DRY"
+      (cycleType === "FREEZE_DRY"
           ? item.stage === "FROZEN" && (item.zone === "FREEZE_DRYING" || item.nextZone === "FREEZE_DRYING")
-          : item.stage === "SLICED" &&
-            item.destination === "DRYING" &&
-            (item.zone === "DRYING" || item.nextZone === "DRYING")),
+          : false),
   )
+  const freezeOutputEligible=live.filter(item=>!pwBusy(ledger,item)&&!item.blocked&&item.nextZone==="FREEZING"&&["WASHED","SLICED"].includes(item.stage))
+  const dryOutputEligible=live.filter(item=>!pwBusy(ledger,item)&&!item.blocked&&item.nextZone==="DRYING"&&item.stage==="SLICED"&&item.destination==="DRYING")
   return (
     <div
       dir="rtl"
@@ -1614,19 +1661,10 @@ function ProductionScreen(props: any) {
           </p>
         </div>
       </div>
-      <div
-        style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 16 }}
-      >
-        {tabs.map(([id, name]) => (
-          <PWButton
-            key={id}
-            secondary={tab !== id}
-            onClick={() => switchTab(id)}
-          >
-            {name}
-          </PWButton>
-        ))}
-      </div>
+      {tab !== "overview" && <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16,padding:"12px 14px",background:"#eaf3ef",borderRadius:12}}>
+        <b>{tabs.find(([id])=>id===tab)?.[1]}</b>
+        <PWButton secondary onClick={()=>switchTab("overview")}>بازگشت به میز کار تولید</PWButton>
+      </div>}
       {(error || ledger.storageError) && (
         <div
           role="alert"
@@ -1658,6 +1696,26 @@ function ProductionScreen(props: any) {
         />
       )}
       {tab === "overview" && (
+        <div style={{display:"grid",gap:22}}>
+          {[
+            {title:"عملیات نظارتی",hint:"نظارت بر صف و نتیجه فرایندها",items:[["overview","صف کار و مسیر","↯"],["results","نتایج و رویدادها","▣"]]},
+            {title:"عملیات سورتینگ",hint:"ورودی و خروجی مستقل سورتینگ",items:[["sorting","ثبت ورود یا خروج سورتینگ","⇄"]]},
+            {title:"عملیات شست‌وشو",hint:"نشست چندسبدی و خروجی‌های تازه",items:[["wash","ثبت ورود یا خروج شست‌وشو","◉"]]},
+            {title:"عملیات فریزینگ",hint:"ثبت خروج، وزن و بسته‌بندی",items:[["FREEZE","ثبت خروج از فریز و بسته‌بندی","❄"]]},
+            {title:"عملیات اسلایس و خشک‌کن",hint:"تأیید اسلایس و ثبت محصول خشک‌شده",items:[["slice","ثبت ورود به اسلایس","▦"],["DRY","ثبت خروج از خشک‌کن و بسته‌بندی","♨"]]},
+            {title:"عملیات فریزدرای",hint:"ورود سینی از فریزر و خروج محصول نهایی",items:[["FREEZE_DRY_ENTRY","ثبت ورود به فریزدرای","✣"],["FREEZE_DRY_EXIT","ثبت خروج از فریزدرای و بسته‌بندی","⇥"]]},
+          ].map((group:any)=><section key={group.title}>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}><b style={{whiteSpace:"nowrap"}}>● {group.title}</b><span style={{height:1,background:"#d8e4df",flex:1}}/><small style={{color:"#718079"}}>{group.hint}</small></div>
+            <div style={{display:"grid",gridTemplateColumns:group.items.length>1?"1fr 1fr":"1fr",gap:16}}>{group.items.map(([id,label,icon]:string[])=><button key={id} type="button" onClick={()=>id==="overview"?document.getElementById("production-queue")?.scrollIntoView({behavior:"smooth"}):switchTab(id)} style={{border:"1px solid #d8e4df",borderRadius:16,background:"white",padding:18,boxShadow:"0 2px 8px #143b2f12",cursor:"pointer"}}><span style={{display:"block",background:id==="overview"?"#17332d":"#115d49",color:"white",borderRadius:11,padding:"13px 16px",fontWeight:800,fontSize:14}}>{icon}　{label}</span></button>)}</div>
+          </section>)}
+          <div id="production-queue" style={{...pwBox,display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+            <div><small>بچ جاری</small><b style={{display:"block",fontSize:24}}>{live.length}</b></div>
+            <div><small>نشست شست‌وشوی فعال</small><b style={{display:"block",fontSize:24}}>{ledger.washSessions.filter((x:any)=>x.status==="ACTIVE").length}</b></div>
+            <div><small>چرخه فعال ماشین</small><b style={{display:"block",fontSize:24}}>{ledger.cycles.filter((x:any)=>PW_ACTIVE.includes(x.status)).length}</b></div>
+          </div>
+        </div>
+      )}
+      {false && tab === "overview" && (
         <>
           <PWNotice>
             مقصد عملیاتی هنگام توزین هر خروجی توسط کارشناس سورت تعیین می‌شود و
@@ -1901,22 +1959,32 @@ function ProductionScreen(props: any) {
           )}
         </div>
       )}
+      {(tab === "FREEZE" || tab === "DRY") && (()=>{
+        const rows=tab==="FREEZE"?freezeOutputEligible:dryOutputEligible
+        const selected=rows.find(item=>item.id===chosen)
+        const freezeDryContinuation=tab==="FREEZE"&&selected?.destination==="FREEZE_DRYING"
+        return <div style={{...pwBox,maxWidth:900}}>
+          <h2>{tab==="FREEZE"?"ثبت خروج از فریز و بسته‌بندی":"ثبت خروج از خشک‌کن و بسته‌بندی"}</h2>
+          <PWNotice>{tab==="FREEZE"?"ورود به فریز قبلاً از مسیر شست‌وشو یا اسلایس مشخص شده است. اینجا فقط خروج محصول، وزن نهایی و بسته‌بندی ثبت می‌شود. محصول مسیر فریزدرای بدون بسته‌بندی به مرحله ورود فریزدرای می‌رود.":"چرخه خشک‌کردن از مسیر اسلایس مشخص شده است. اینجا خروج محصول خشک، وزن نهایی و بسته‌بندی ثبت می‌شود."}</PWNotice>
+          {!rows.length?<PWEmpty>محصول آماده خروج در این مرحله وجود ندارد.</PWEmpty>:<form onSubmit={event=>finishMachineOutput(event,tab as "FREEZE"|"DRY")}>
+            {batchPicker(rows)}
+            {selected&&summary(selected)}
+            <PWField label="وزن نهایی خروجی (kg)"><input name="weight" type="number" min="0.001" step="0.001" max={selected?.weightKg} required style={pwInput}/></PWField>
+            {!freezeDryContinuation&&<PWField label="کد بسته یا لیبل خروجی"><input name="packageCode" placeholder="مثلاً PKG-0001" required style={pwInput}/></PWField>}
+            {freezeDryContinuation&&<PWNotice>این بچ پس از ثبت خروج فریز، در سردخانه منفی باقی می‌ماند و برای «ورود به فریزدرای» آماده می‌شود؛ در این مرحله بسته‌بندی نمی‌شود.</PWNotice>}
+            <label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,margin:"12px 0"}}><input name="qualityCheckRequired" type="checkbox"/>نیازمند کنترل کیفیت در خروج این مرحله</label>
+            <PWButton disabled={!selected}>ثبت وزن و {freezeDryContinuation?"ارسال به فریزدرای":"بسته‌بندی"}</PWButton>
+          </form>}
+        </div>
+      })()}
       {cycleType && (
         <>
-          <div style={pwBox}>
+          {tab === "FREEZE_DRY_ENTRY" && <div style={pwBox}>
             <h2>
-              {cycleType === "FREEZE"
-                ? "ساخت چرخه فریز از سینی‌های تخصیص‌یافته"
-                : cycleType === "FREEZE_DRY"
-                  ? "ساخت چرخه فریزدرای"
-                  : "ساخت چرخه خشک‌کن"}
+              ثبت ورود سینی‌ها به دستگاه فریزدرای
             </h2>
             <PWNotice>
-              {cycleType === "DRY"
-                ? "فقط بچ شسته و اسلایس‌شده با مقصد خشک وارد خشک‌کن می‌شود."
-                : cycleType === "FREEZE"
-                  ? "تمام سینی‌ها اسکن می‌شوند؛ مقصد فریز پس از چرخه به بسته‌بندی می‌رود و مقصد فریزدرای به مرحله فریزدرای."
-                  : "فقط بچی که مقصد نهایی آن فریزدرای است پس از فریز وارد این چرخه می‌شود."}
+              فقط سینی‌های محصولی که ابتدا منجمد شده و مقصد نهایی آن فریزدرای است وارد دستگاه می‌شوند. ثبت این فرم یعنی سینی‌ها واقعاً از فریزر وارد دستگاه شده‌اند.
             </PWNotice>
             {!cycleEligible.length ? (
               <PWEmpty>
@@ -1951,12 +2019,7 @@ function ProductionScreen(props: any) {
                     ))}
                   </div>
                 </PWField>
-                {cycleType === "FREEZE" ? (
-                  <PWField label="کد سینی‌های اسکن‌شده؛ هر کد در یک خط">
-                    <textarea name="trays" rows={3} required style={pwInput} />
-                  </PWField>
-                ) : (
-                  <PWField label="وزن کل ورودی چرخه (kg)">
+                  <PWField label="وزن کل ورودی دستگاه (kg)">
                     <input
                       name="inputWeight"
                       type="number"
@@ -1966,14 +2029,14 @@ function ProductionScreen(props: any) {
                       style={pwInput}
                     />
                   </PWField>
-                )}
-                <PWButton>ایجاد چرخه آماده</PWButton>
+                <PWButton>ثبت ورود و ایجاد چرخه</PWButton>
               </form>
             )}
-          </div>
+          </div>}
           <div style={{ display: "grid", gap: 14, marginTop: 20 }}>
             {ledger.cycles
               .filter((c) => c.type === cycleType && !c.demo)
+              .filter((c)=>tab==="FREEZE_DRY_ENTRY"?["READY"].includes(c.status):["RUNNING","IN_PROGRESS","PAUSED","COMPLETING","FAILED"].includes(c.status))
               .slice()
               .reverse()
               .map((cycle) => (
@@ -1992,10 +2055,10 @@ function ProductionScreen(props: any) {
                     }}
                   >
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {cycle.status === "COMPLETING" &&
+                       {cycle.status === "COMPLETING" &&
                         cycle.type !== "FREEZE" &&
                         cycle.itemIds.map((id: string) => (
-                          <PWField key={id} label={`وزن نهایی ${id} (kg)`}>
+                          <div key={id} style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,width:"100%"}}><PWField label={`وزن نهایی ${id} (kg)`}>
                             <input
                               name={`weight-${id}`}
                               type="number"
@@ -2006,7 +2069,7 @@ function ProductionScreen(props: any) {
                               }
                               style={pwInput}
                             />
-                          </PWField>
+                          </PWField><PWField label={`کد بسته یا لیبل ${id}`}><input name={`package-${id}`} required placeholder="مثلاً PKG-0001" style={pwInput}/></PWField></div>
                         ))}
                       {[
                         "RUNNING",
@@ -2047,7 +2110,7 @@ function ProductionScreen(props: any) {
                               PAUSE: "مکث",
                               RESUME: "ادامه",
                               COMPLETE: "پایان فرآیند؛ آماده تخلیه",
-                              FINISH: "ثبت خروجی و پایان تخلیه",
+                              FINISH: "ثبت خروج، وزن و بسته‌بندی",
                               FAIL: "ثبت خرابی",
                               RESTART: "بازگشت به آماده",
                               SCRAP: "اسقاط محصول",

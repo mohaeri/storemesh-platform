@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source prepared for Figma Make as Version 31 on 2026-09-20.
+This folder keeps the reproducible source prepared for Figma Make as Version 32 on 2026-09-20.
 
 ## What is included
 
@@ -22,7 +22,7 @@ node --test prototypes/figma/production.test.mjs
 
 The assembled source must also pass the downloaded Figma project's TypeScript check and `pnpm build` before it is installed through the Figma Make code editor.
 
-Version 31 adapts the Receiving → Container Registration and Weighing view to the supplied Stitch visual reference: a full-width industrial scale monitor, a separate scan/product card, a compact action bar, and the existing registered-container table. StoreMesh state, scan, weighing, disposable-container, validation, and four-stage receiving handlers remain authoritative; no Stitch behavior was copied. Version 30's station-scan routing remains intact.
+Version 32 adapts the Production Workbench to the supplied Stitch visual reference while keeping StoreMesh behavior authoritative. The workbench is grouped by operational stage, removes Physical Merge navigation, separates Washing Entry and Exit, makes Freeze and Dryer views output-and-packaging actions, and separates Freeze-Dry Entry from Freeze-Dry Exit and Packaging. No Stitch behavior was copied. Version 31's Receiving visual refresh remains intact.
 
 ## Scope boundary
 
