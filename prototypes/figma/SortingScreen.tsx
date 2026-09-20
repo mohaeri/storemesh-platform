@@ -1,14 +1,60 @@
+// Stitch is used only as a visual reference. All behavior below remains StoreMesh logic.
+function SortingScaleConsole({
+  mode,
+  code,
+  gross,
+  tare,
+  net,
+  previousNet,
+  onRead,
+}: {
+  mode: "entry" | "exit"
+  code?: string
+  gross: number
+  tare: number
+  net: number
+  previousNet?: number
+  onRead?: () => void
+}) {
+  const number = (value: number) => Number.isFinite(value) ? value.toFixed(3) : "0.000"
+  return <section className="overflow-hidden rounded-2xl border border-[#1b5a46] bg-[#082b20] p-4 text-white shadow-xl" aria-label={`کنسول توزین ${mode === "entry" ? "ورود" : "خروج"} سورتینگ`}>
+    <div className="grid grid-cols-12 gap-3" dir="rtl">
+      <div className="col-span-3 flex flex-col justify-between rounded-xl border border-[#1b5a46] bg-[#061f17] p-3">
+        <div className="flex items-center justify-between text-[11px]"><b className="text-[#c9f7e4]">● باسکول رومیزی ۱</b><span className="font-mono text-[#62e5ad]">10 Hz</span></div>
+        <div className="mt-3 rounded-lg border border-[#1b5a46] bg-[#0d382a] p-2 text-[10px]"><div className="flex justify-between"><span>لودسل آنلاین</span><b className="font-mono text-[#62e5ad]">RS485</b></div><div className="mt-2 flex justify-between text-[#8eb8a8]"><span>قرائت پایدار</span><b>± 0.002 kg</b></div></div>
+        <div className="mt-3 rounded-lg border border-[#1b5a46] px-3 py-2 text-center text-[10px] text-[#62e5ad]">✓ ثبات سیگنال حسگر تأیید شد</div>
+        {code && <div className="mt-3 rounded-lg bg-[#041711] p-2 text-center"><small className="block text-[#8eb8a8]">سریال سبد جاری</small><b className="font-mono text-xl text-[#62e5ad]">{code}</b></div>}
+      </div>
+      <div className="col-span-3 rounded-xl border border-[#1b5a46] bg-[#061f17] p-4">
+        <div className="flex justify-between text-[11px] text-[#c9f7e4]"><b>{mode === "entry" ? "وزن خالص جدید" : "وزن خالص"}</b><span className="font-mono text-[#62e5ad]">SENS: HIGH</span></div>
+        <div className="my-5 flex items-baseline justify-center gap-2" dir="ltr"><strong className="font-mono text-[38px] tracking-[.12em]">{number(net)}</strong><span className="rounded bg-[#0d382a] px-2 py-1 text-[10px] text-[#62e5ad]">kg</span></div>
+        <div className="flex justify-between border-t border-white/10 pt-2 text-[10px]"><span>وزن ظرف</span><b className="font-mono text-[#62e5ad]">{number(tare)} kg</b></div>
+      </div>
+      <div className="col-span-3 rounded-xl border border-[#1b5a46] bg-[#061f17] p-4">
+        <div className="flex justify-between text-[11px] text-[#c9f7e4]"><b>{mode === "entry" ? "وزن خالص قبلی" : "وزن ناخالص"}</b><span className="font-mono text-[#62e5ad]">GROSS</span></div>
+        <div className="my-5 flex items-baseline justify-center gap-2" dir="ltr"><strong className="font-mono text-[38px] tracking-[.12em]">{number(mode === "entry" ? previousNet || 0 : gross)}</strong><span className="rounded bg-[#0d382a] px-2 py-1 text-[10px] text-[#62e5ad]">kg</span></div>
+        <div className="flex justify-between border-t border-white/10 pt-2 text-[10px]"><span>{mode === "entry" ? "اختلاف" : "وضعیت"}</span><b className="font-mono text-[#62e5ad]">{mode === "entry" ? `${number(net - (previousNet || 0))} kg` : "READY"}</b></div>
+      </div>
+      <div className="col-span-3 flex flex-col justify-between gap-2 rounded-xl border border-[#1b5a46] bg-[#0a3326] p-3">
+        <button type="button" onClick={onRead} className="rounded-xl border border-[#2b765b] bg-[#14513d] px-3 py-3 text-[11px] font-bold">↻ دریافت وزن از سنسور</button>
+        <div className="grid grid-cols-2 gap-2"><button type="button" className="rounded-lg border border-[#1b5a46] bg-[#061f17] py-2 text-[10px]">صفر (Zero)</button><button type="button" className="rounded-lg border border-[#1b5a46] bg-[#061f17] py-2 text-[10px]">تار (Tare)</button></div>
+        <div className="rounded-lg border border-[#1b5a46] bg-[#061f17] px-3 py-2 text-[10px]"><span className="text-[#8eb8a8]">پورت اتصال: </span><b className="font-mono text-[#62e5ad]">COM 4</b></div>
+      </div>
+    </div>
+  </section>
+}
+
 // Figma prototype fragment; assembled into WebApp.tsx. No backend calls.
-function SortingScreen() {
+function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "output" }) {
   const batch = readPrototypeBatch(),
     ledger = readProductionLedger()
   const activeSortingSession = (ledger.sortingSessions || []).find(
     (session: any) => session.status === "IN_PROGRESS",
   )
-  const [step, setStep] = useState("menu"),
-    [inputCodes, setInputCodes] = useState<string[]>([]),
+  const [step, setStep] = useState<"input" | "output" | "entry-done" | "done">(initialStep),
+    [inputCodes, setInputCodes] = useState<string[]>(() => initialStep === "output" ? [...(activeSortingSession?.inputCodes || [])] : []),
     [scanCode, setScanCode] = useState(""),
-    [entryWeights, setEntryWeights] = useState<Record<string, number>>({}),
+    [entryWeights, setEntryWeights] = useState<Record<string, number>>(() => initialStep === "output" ? { ...(activeSortingSession?.entryWeights || {}) } : {}),
     [outputCode, setOutputCode] = useState(""),
     [gross, setGross] = useState(""),
     [grade, setGrade] = useState("A"),
@@ -17,7 +63,7 @@ function SortingScreen() {
     [qualityCheckRequired, setQualityCheckRequired] = useState(false),
     [lossReason, setLossReason] = useState(""),
     [outputs, setOutputs] = useState<any[]>([]),
-    [error, setError] = useState(""),
+    [error, setError] = useState(initialStep === "output" && !activeSortingSession ? "هیچ نشست سورتینگ فعالی برای ثبت خروج وجود ندارد." : ""),
     [scale, setScale] = useState("STABLE"),
     [staged, setStaged] = useState<string[]>([]),
     [outputScanOpen, setOutputScanOpen] = useState(false),
@@ -189,7 +235,7 @@ function SortingScreen() {
         ),
         events: [...current.events, { time: new Date().toLocaleTimeString("fa-IR"), title: "شروع نشست سورتینگ", detail: `${inputCodes.length} سبد قفل شد و در وضعیت در حال سورت قرار گرفت.` }],
       })
-      setStep("menu")
+      setStep("entry-done")
       setInputCodes([])
       setEntryWeights({})
       setError("")
@@ -280,10 +326,12 @@ function SortingScreen() {
     <div className="space-y-4 p-5 bg-[#f4f7f5] text-[#18302a]" dir="rtl">
       <div>
         <h2 className="text-xl font-bold">
-          سورتینگ · ورود و خروج مستقل
+          {initialStep === "input" ? "ورود به سورتینگ" : "خروج از سورتینگ"}
         </h2>
         <p className="text-[12px] text-[#718079] mt-1">
-          ابتدا ورود سبدها را ثبت و نشست را قفل کنید؛ پس از پایان فیزیکی سورت، خروجی‌ها را تک‌به‌تک ثبت کنید.
+          {initialStep === "input"
+            ? "سبدهای ورودی را اسکن کنید، در صورت نیاز وزن تازه بگیرید و نشست را برای شروع سورت قفل کنید."
+            : "پس از پایان فیزیکی سورت، هر خروجی را جداگانه اسکن، توزین و مقصدگذاری کنید."}
         </p>
       </div>
       {error && (
@@ -294,41 +342,13 @@ function SortingScreen() {
           {error}
         </div>
       )}
-      {step === "menu" ? (
-        <div className="grid grid-cols-2 gap-4">
-          <button
-            onClick={() => {
-              if (activeSortingSession) return setError("یک نشست سورتینگ فعال است؛ ابتدا خروج آن را ثبت کنید.")
-              setStep("input")
-              setInputCodes([])
-              setEntryWeights({})
-              setError("")
-            }}
-            className="rounded-2xl border border-[#cfe0d8] bg-white p-7 text-right hover:border-[#176b50]"
-          >
-            <b className="block text-lg text-[#176b50]">ورود به سورتینگ</b>
-            <span className="mt-2 block text-[12px] text-[#718079]">اسکن چند سبد، توزین اختیاری هر سبد و قفل نشست برای شروع عملیات</span>
-          </button>
-          <button
-            onClick={openExit}
-            disabled={!activeSortingSession}
-            className="rounded-2xl border border-[#cfe0d8] bg-white p-7 text-right hover:border-[#176b50] disabled:opacity-45"
-          >
-            <b className="block text-lg text-[#176b50]">خروج از سورتینگ</b>
-            <span className="mt-2 block text-[12px] text-[#718079]">اسکن و توزین تک‌به‌تک سبدهای خروجی و تعیین مقصد هر کدام</span>
-          </button>
-          <Card className="col-span-2 p-4">
-            {activeSortingSession ? (
-              <div className="flex items-center justify-between text-[12px]">
-                <Badge text="در حال سورت" color="#9a6420" bg="#fff0dc" />
-                <span>{activeSortingSession.inputCodes.length} سبد قفل‌شده · نشست {activeSortingSession.id}</span>
-                <b>اقدام بعدی: ثبت خروج از سورتینگ</b>
-              </div>
-            ) : (
-              <p className="text-[12px] text-[#718079]">نشست سورتینگ فعالی وجود ندارد. ابتدا «ورود به سورتینگ» را انتخاب کنید.</p>
-            )}
-          </Card>
-        </div>
+      {step === "entry-done" ? (
+        <Card className="p-7 text-center">
+          <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-full bg-[#176b50] text-2xl text-white">✓</div>
+          <h3 className="text-xl font-bold text-[#176b50]">ورود سبدها ثبت و نشست سورتینگ قفل شد</h3>
+          <p className="my-3 text-[13px]">{inputCodes.length} سبد با وزن ورودی {inputWeight.toFixed(3)} کیلوگرم اکنون در وضعیت «در حال سورت» هستند.</p>
+          <p className="text-[12px] text-[#718079]">خاموش یا روشن‌شدن سیستم وضعیت نشست را از بین نمی‌برد؛ خروج سورتینگ از کلید مستقل میز کار ثبت می‌شود.</p>
+        </Card>
       ) : step === "done" ? (
         <Card className="p-7 text-center">
           <h3 className="text-xl font-bold text-[#176b50]">
@@ -341,23 +361,20 @@ function SortingScreen() {
           <p className="text-[12px]">
             موقعیت، حرکت و شجره همه خروجی‌ها در همان نشست ثبت شد.
           </p>
-          <button
-            className={primary + " mt-5"}
-            onClick={() => {
-              setStep("menu")
-              setInputCodes([])
-              setEntryWeights({})
-              setOutputs([])
-              setLossReason("")
-              setStaged([])
-            }}
-          >
-            بازگشت به انتخاب ورود یا خروج
-          </button>
         </Card>
       ) : (
         <>
-          {step === "input" && <Card className="p-4">
+          {step === "input" && <>
+            <SortingScaleConsole
+              mode="entry"
+              code={sources[sources.length - 1]?.code || eligibleSources[0]?.code}
+              gross={Number(sources[sources.length - 1]?.gross || 0)}
+              tare={Number(sources[sources.length - 1]?.tare || 0)}
+              net={Number(entryWeights[pwCode(sources[sources.length - 1]?.code)] ?? ((sources[sources.length - 1]?.gross || 0) - (sources[sources.length - 1]?.tare || 0)))}
+              previousNet={Number((sources[sources.length - 1]?.gross || 0) - (sources[sources.length - 1]?.tare || 0))}
+              onRead={() => sources[sources.length - 1] && captureEntryWeight(sources[sources.length - 1])}
+            />
+            <Card className="p-5">
             <h3 className="font-bold mb-3">ورود به سورتینگ · اسکن سبدهای ورودی</h3>
             {step === "input" && (
               <><div aria-label="سبدهای شناسایی‌شده برای سورت" className="mb-3 rounded-lg bg-[#edf8f3] p-3 text-[11px] text-[#365c4f]"><b>{eligibleSources.length} سبد موجود در سردخانه و آماده ورود به سورت شناسایی شد.</b>{eligibleSources.length>0?<span className="block mt-1 font-mono">سبد بعدی: {eligibleSources[0].code} · {eligibleSources[0].product}</span>:<span className="block mt-1">سبد آزاد و قابل‌استفاده‌ای در سردخانه وجود ندارد.</span>}</div><div className="flex gap-2"><input aria-label="اسکن QR ورود سورتینگ" className={field + " font-mono"} value={scanCode} onChange={(event) => setScanCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") scanInput() }} placeholder="اسکن QR سبد ورودی"/><button className={primary} disabled={!scanCode.trim()} onClick={() => scanInput()}>افزودن سبد</button><button className="rounded-lg border border-[#176b50] px-4 text-[12px] font-bold text-[#176b50]" onClick={() => setInputScanOpen(true)}>⌗ شبیه‌ساز اسکن</button></div><ScanSimulator open={inputScanOpen} title="اسکن سبد ورودی سورتینگ" suggestedCode={eligibleSources[0]?.code || ""} onClose={() => setInputScanOpen(false)} onScan={scanInput}/></>
@@ -409,8 +426,17 @@ function SortingScreen() {
                 ✓ {inputCodes.length} ورودی قفل شد
               </span>
             )}
-          </Card>}
-          {step === "output" && (
+          </Card></>}
+          {step === "output" && (activeSortingSession ? (
+            <>
+            <SortingScaleConsole
+              mode="exit"
+              code={outputCode || pool.find((c) => !outputs.some((o) => pwCode(o.code) === pwCode(c.qr || c.code)))?.qr}
+              gross={Number(gross || 0)}
+              tare={tare}
+              net={gross && net > 0 ? net : 0}
+              onRead={() => carrier && scale === "STABLE" && setGross((Math.min(18.5, Math.max(0, inputWeight - total)) + tare).toFixed(3))}
+            />
             <div className="grid grid-cols-[2fr_1fr] gap-4">
               <Card className="p-4">
                 <h3 className="font-bold mb-3">
@@ -654,9 +680,17 @@ function SortingScreen() {
                 </p>
               </Card>
             </div>
+            </>
+            ) : (
+              <Card className="p-8 text-center">
+                <h3 className="text-lg font-bold text-[#a43838]">نشست فعالی برای خروج سورتینگ وجود ندارد</h3>
+                <p className="mt-2 text-[12px] text-[#718079]">ابتدا از کلید مستقل «ورود به سورتینگ» سبدها را اسکن و نشست را قفل کنید.</p>
+              </Card>
+            )
           )}
         </>
       )}
     </div>
   )
 }
+

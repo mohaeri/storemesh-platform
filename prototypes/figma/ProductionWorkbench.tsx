@@ -1098,7 +1098,8 @@ function ProductionScreen(props: any) {
     [chosen, setChosen] = useState("")
   const tabs = [
     ["overview", "صف کار و مسیر"],
-    ["sorting", "سورتینگ"],
+    ["sorting-entry", "ورود به سورتینگ"],
+    ["sorting-exit", "خروج از سورتینگ"],
     ["wash", "شست‌وشو"],
     ["slice", "ثبت اسلایس"],
     ["FREEZE", "خروج فریز و بسته‌بندی"],
@@ -1684,7 +1685,8 @@ function ProductionScreen(props: any) {
           <PWNotice>{notice}</PWNotice>
         </div>
       )}
-      {tab === "sorting" && <SortingScreen {...props} />}
+      {tab === "sorting-entry" && <SortingScreen initialStep="input" {...props} />}
+      {tab === "sorting-exit" && <SortingScreen initialStep="output" {...props} />}
       {tab === "wash" && (
         <WashingSessionScreen
           ledger={ledger}
@@ -1699,7 +1701,7 @@ function ProductionScreen(props: any) {
         <div style={{display:"grid",gap:22}}>
           {[
             {title:"عملیات نظارتی",hint:"نظارت بر صف و نتیجه فرایندها",items:[["overview","صف کار و مسیر","↯"],["results","نتایج و رویدادها","▣"]]},
-            {title:"عملیات سورتینگ",hint:"ورودی و خروجی مستقل سورتینگ",items:[["sorting","ثبت ورود یا خروج سورتینگ","⇄"]]},
+            {title:"عملیات سورتینگ",hint:"ورودی و خروجی در دو ایستگاه مستقل",items:[["sorting-entry","ورود به سورتینگ","⇥"],["sorting-exit","خروج از سورتینگ","⇤"]]},
             {title:"عملیات شست‌وشو",hint:"نشست چندسبدی و خروجی‌های تازه",items:[["wash","ثبت ورود یا خروج شست‌وشو","◉"]]},
             {title:"عملیات فریزینگ",hint:"ثبت خروج، وزن و بسته‌بندی",items:[["FREEZE","ثبت خروج از فریز و بسته‌بندی","❄"]]},
             {title:"عملیات اسلایس و خشک‌کن",hint:"تأیید اسلایس و ثبت محصول خشک‌شده",items:[["slice","ثبت ورود به اسلایس","▦"],["DRY","ثبت خروج از خشک‌کن و بسته‌بندی","♨"]]},
@@ -2333,3 +2335,4 @@ function ProductionScreen(props: any) {
     </div>
   )
 }
+
