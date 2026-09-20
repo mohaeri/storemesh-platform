@@ -1,6 +1,15 @@
 # UI / Backend Change Control
 
-Last updated: 2026-09-15
+Last updated: 2026-09-20
+
+## 2026-09-20 — UI-only removal of duplicate transfer confirmation
+
+- Removed the normal-workflow `physical transfer confirmation` action from Production → Work Queue & Route.
+- The queue now displays the next required operation only. The scan performed at the real destination station records entry, state/location change, and traceability in one action.
+- Washing, Slicing, Freezing, Freeze Drying, Drying, and Packaging accept a routed basket directly from its physical cold-room location when the scanned basket's `nextZone` matches that station.
+- Washing completion records the approved post-wash physical cold room and exposes the next required process. Slicing completion similarly records negative storage for freeze-bound product without creating a second queue approval.
+- Exceptional manual relocation between physical stores remains under Inventory Movement.
+- No backend, API contract, or database change was made in this round.
 
 ## Standing rule
 

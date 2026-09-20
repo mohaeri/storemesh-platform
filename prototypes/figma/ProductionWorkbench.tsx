@@ -710,7 +710,7 @@ function WashingSessionScreen({
       !item.consumed &&
       !item.blocked &&
       item.stage === "SORTED" &&
-      item.zone === "WASHING" &&
+      (item.zone === "WASHING" || item.nextZone === "WASHING") &&
       !active?.inputIds.includes(item.id),
   )
   const inputTotal = pwNumber(
@@ -731,7 +731,10 @@ function WashingSessionScreen({
           (row) => row.containerCode === pwCode(rawCode) && !row.consumed,
         )
       pwUsable(next, item)
-      if (item.stage !== "SORTED" || item.zone !== "WASHING")
+      if (
+        item.stage !== "SORTED" ||
+        (item.zone !== "WASHING" && item.nextZone !== "WASHING")
+      )
         throw Error("سبد اسکن‌شده برای ورود به شست‌وشو واجد شرایط نیست.")
       let session = next.washSessions.find((row) => row.status === "ACTIVE")
       pwAssertWashCompatibility(session,item)
@@ -755,12 +758,19 @@ function WashingSessionScreen({
         "WASHING_ENTRY",
         entryWeight === "" ? undefined : Number(entryWeight),
       )
+      const entryLocation = item.zone
+      item.zone = "WASHING"
+      item.currentLocation = "WASHING"
+      item.currentState = "IN_PROCESS"
+      item.nextAction = "انجام عملیات شست‌وشو"
       session.inputIds.push(item.id)
       pwEvent(next, "اسکن ورودی شست‌وشو", session.id, {
         itemId: item.id,
         containerCode: item.containerCode,
         grade: item.grade,
         size: item.size,
+        from: entryLocation,
+        to: "WASHING",
       })
       saveProductionLedger(next)
       setScan("")
@@ -871,14 +881,14 @@ function WashingSessionScreen({
           size: session.size,
           weightKg: row.weightKg,
           stage: "WASHED",
-          zone: "WASHING",
-          currentLocation:"WASHING",
-          physicalLocation:parents[0]?.physicalLocation||"COLD_ROOM_POSITIVE_DIRTY",
+          zone: physicalAfterWashing,
+          currentLocation:physicalAfterWashing,
+          physicalLocation:physicalAfterWashing,
           destination,
           operationalDestination:destination,
-          nextZone: physicalAfterWashing,
+          nextZone: nextProcess,
           nextProcess,
-          nextAction:`اسکن انتقال به ${PW_ZONES[physicalAfterWashing]}`,
+          nextAction:`اسکن ورود به ${PW_ZONES[nextProcess]||nextProcess}`,
           qualityCheckRequired:!!row.qualityCheckRequired,
           containerCode: row.containerCode,
           trays: [],
@@ -1080,8 +1090,7 @@ function ProductionScreen(props: any) {
     [ledger, setLedger] = useState<PWLedger>(() => readProductionLedger()),
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
-    [chosen, setChosen] = useState(""),
-    [moveItem, setMoveItem] = useState<PWItem | null>(null)
+    [chosen, setChosen] = useState("")
   const tabs = [
     ["overview", "صف کار و مسیر"],
     ["sorting", "سورتینگ"],
@@ -1146,32 +1155,6 @@ function ProductionScreen(props: any) {
       {pwBusy(ledger, item) ? " · قفل چرخه" : ""}
     </PWNotice>
   )
-  const move = (id: string, rawCode: string) =>
-    execute("انتقال فیزیکی ثبت شد.", (next) => {
-      const item = next.items.find((x) => x.id === id)
-      pwUsable(next, item)
-      const scan = pwCode(rawCode), validCodes = [item.containerCode,...item.trays.map((tray:any)=>tray.code)].filter(Boolean).map(pwCode)
-      if(!scan || !validCodes.includes(scan)) throw Error("QR اسکن‌شده با ظرف یا سینی‌های همین بچ تطبیق ندارد.")
-      const destination = item.nextZone || item.destination
-      if (!destination) throw Error("برای این بچ مسیر عملیاتی مشخص نشده است.")
-      if (destination === item.zone) throw Error("بچ از قبل در محل مقصد است.")
-      const before = item.zone
-      item.zone = destination
-      item.currentLocation = destination
-      item.currentState = "IN_PROCESS"
-      if(pwColdStorageLocation(destination)){
-        item.physicalLocation=destination
-        item.nextZone=item.nextProcess||null
-        item.nextAction=item.qualityCheckRequired?"در انتظار تصمیم مدیر کنترل کیفیت":item.nextZone?`اسکن ورود به ${PW_ZONES[item.nextZone]||item.nextZone}`:"ادامه مسیر عملیاتی"
-      }else{
-        item.nextAction=item.qualityCheckRequired?"در انتظار تصمیم مدیر کنترل کیفیت":"انجام عملیات جاری"
-      }
-      pwEvent(next, "انتقال فیزیکی", item.code, {
-        from: before,
-        to: destination,
-        containerCode: item.containerCode,
-      })
-    })
   const processBatch = (event: any, process: "WASH" | "SLICE") => {
     const data = form(event)
     execute(
@@ -1183,9 +1166,12 @@ function ProductionScreen(props: any) {
         pwUsable(next, item)
         const required = process === "WASH" ? "SORTED" : "WASHED",
           zone = process === "WASH" ? "WASHING" : "SLICING"
-        if (item.stage !== required || item.zone !== zone)
+        if (
+          item.stage !== required ||
+          (item.zone !== zone && item.nextZone !== zone)
+        )
           throw Error(
-            `بچ باید ${PW_STAGES[required]} و در ${PW_ZONES[zone]} باشد؛ انتقال فیزیکی را در صف کار ثبت کنید.`,
+            `بچ باید ${PW_STAGES[required]} باشد و مسیر بعدی آن ${PW_ZONES[zone]} ثبت شده باشد.`,
           )
         if (
           pwCode(data.get("scan")) !== item.containerCode ||
@@ -1193,6 +1179,16 @@ function ProductionScreen(props: any) {
         )
           throw Error("QR اسکن‌شده با سبد همین بچ تطبیق ندارد.")
         pwCarrier(item.containerCode, "basket")
+        const entryLocation = item.zone
+        item.zone = zone
+        item.currentLocation = zone
+        item.currentState = "IN_PROCESS"
+        item.nextAction = `انجام عملیات ${PW_ZONES[zone]}`
+        pwEvent(next, `اسکن ورود ${PW_ZONES[zone]}`, item.code, {
+          from: entryLocation,
+          to: zone,
+          containerCode: item.containerCode,
+        })
         const observed = String(data.get("observed") || "").trim()
         if (
           observed &&
@@ -1208,12 +1204,18 @@ function ProductionScreen(props: any) {
         item.stage = process === "WASH" ? "WASHED" : "SLICED"
         const route=pwRouteFor(item.destination||"")
         if(process==="WASH"){
-          item.nextZone=route.physicalAfterWashing||"COLD_ROOM_POSITIVE_CLEAN"
+          item.physicalLocation=route.physicalAfterWashing||"COLD_ROOM_POSITIVE_CLEAN"
+          item.zone=item.physicalLocation
+          item.currentLocation=item.physicalLocation
           item.nextProcess=route.processes[1]||"PACKAGING"
+          item.nextZone=item.nextProcess
         }else{
           const nextProcess=route.processes[route.processes.indexOf("SLICING")+1]||"PACKAGING"
-          item.nextZone=nextProcess==="FREEZING"?"COLD_ROOM_NEGATIVE":nextProcess
-          item.nextProcess=nextProcess==="FREEZING"?"FREEZING":null
+          if(nextProcess==="FREEZING") item.physicalLocation="COLD_ROOM_NEGATIVE"
+          item.zone=item.physicalLocation||"COLD_ROOM_POSITIVE_CLEAN"
+          item.currentLocation=item.zone
+          item.nextZone=nextProcess
+          item.nextProcess=null
         }
         item.qualityCheckRequired=data.get("qualityCheckRequired")==="on"
         item.nextAction=item.qualityCheckRequired?"در انتظار تصمیم مدیر کنترل کیفیت":`اسکن ورود به ${PW_ZONES[item.nextZone]||item.nextZone}`
@@ -1323,13 +1325,27 @@ function ProductionScreen(props: any) {
                 : "DRYING"
         items.forEach((item) => {
           pwUsable(next, item)
-          if (item.stage !== expectedStage || item.zone !== expectedZone)
+          if (
+            item.stage !== expectedStage ||
+            (item.zone !== expectedZone && item.nextZone !== expectedZone)
+          )
             throw Error(
               "مرحله یا محل فعلی یکی از بچ‌ها برای این چرخه مناسب نیست.",
             )
         })
         if (items.some((item) => !!item!.demo !== !!items[0]!.demo))
           throw Error("بچ آزمایشی و داده شما نباید در یک چرخه ترکیب شوند.")
+        items.forEach((item) => {
+          const before = item!.zone
+          item!.zone = expectedZone
+          item!.currentLocation = expectedZone
+          item!.currentState = "IN_PROCESS"
+          item!.nextAction = `انجام عملیات ${PW_ZONES[expectedZone]}`
+          pwEvent(next, `ورود به ${PW_ZONES[expectedZone]}`, item!.code, {
+            from: before,
+            to: expectedZone,
+          })
+        })
         const available = pwNumber(
           items.reduce((sum, item) => sum + item!.weightKg, 0),
         )
@@ -1562,12 +1578,12 @@ function ProductionScreen(props: any) {
       !pwBusy(ledger, item) &&
       !item.blocked &&
       (cycleType === "FREEZE"
-        ? item.stage === "SLICED" && item.allocated && item.zone === "FREEZING"
+        ? item.stage === "SLICED" && item.allocated && (item.zone === "FREEZING" || item.nextZone === "FREEZING")
         : cycleType === "FREEZE_DRY"
-          ? item.stage === "FROZEN" && item.zone === "FREEZE_DRYING"
+          ? item.stage === "FROZEN" && (item.zone === "FREEZE_DRYING" || item.nextZone === "FREEZE_DRYING")
           : item.stage === "SLICED" &&
             item.destination === "DRYING" &&
-            item.zone === "DRYING"),
+            (item.zone === "DRYING" || item.nextZone === "DRYING")),
   )
   return (
     <div
@@ -1647,7 +1663,8 @@ function ProductionScreen(props: any) {
             مقصد عملیاتی هنگام توزین هر خروجی توسط کارشناس سورت تعیین می‌شود و
             محل فیزیکی با آن یکی نیست. ارسال تازه مستقیم به بسته‌بندی می‌رود؛ خشک،
             فریز، فریز اسلایس و فریز درای مسیرهای اجباری متفاوت دارند. کنترل کیفیت
-            می‌تواند در خروج هر مرحله فعال شود و انتقال فیزیکی با اسکن ثبت می‌شود.
+            می‌تواند در خروج هر مرحله فعال شود. اسکن ورودی هر ایستگاه، ورود و
+            تغییر وضعیت را همان‌جا ثبت می‌کند و تأیید جداگانه‌ای در صف لازم نیست.
           </PWNotice>
           <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
             {[
@@ -1696,7 +1713,7 @@ function ProductionScreen(props: any) {
                         onSubmit={(event) => {
                           const data = form(event)
                           execute(
-                            "اصلاح مقصد ثبت شد؛ انتقال فیزیکی هنوز انجام نشده است.",
+                            "اصلاح مقصد ثبت شد؛ مرحله بعد در صف به‌روزرسانی شد.",
                             (next) => {
                               const row = next.items.find(
                                 (x) => x.id === item.id,
@@ -1760,26 +1777,14 @@ function ProductionScreen(props: any) {
                       {PW_ZONES[item.nextZone || item.destination || ""] ||
                         "مسیر نامشخص"}
                     </span>
-                    <PWButton
-                      secondary
-                      disabled={
-                        pwBusy(ledger, item) ||
-                        !(item.nextZone || item.destination) ||
-                        item.zone === (item.nextZone || item.destination) ||
-                        (item.stage === "SLICED" &&
-                          item.nextZone === "FREEZING" &&
-                          !item.allocated)
-                      }
-                      onClick={() => setMoveItem(item)}
-                    >
-                      تأیید انتقال فیزیکی
-                    </PWButton>
+                    <span style={{color:"#60746f",fontSize:12}}>
+                      ثبت ورود با اسکن همان ایستگاه انجام می‌شود.
+                    </span>
                   </div>
                 </div>
               ))}
             </div>
           )}
-          <ScanSimulator open={!!moveItem} title="اسکن تأیید گذرگاه عملیاتی" suggestedCode={moveItem?.containerCode||moveItem?.trays?.[0]?.code||""} onClose={()=>setMoveItem(null)} onScan={(code)=>{if(moveItem)move(moveItem.id,code);setMoveItem(null)}}/>
         </>
       )}
       {tab === "slice" && (
@@ -1915,8 +1920,8 @@ function ProductionScreen(props: any) {
             </PWNotice>
             {!cycleEligible.length ? (
               <PWEmpty>
-                بچ آماده با مرحله و محل صحیح وجود ندارد. صف کار و انتقال فیزیکی
-                را بررسی کنید.
+                بچ آماده با مرحله و مسیر صحیح وجود ندارد. ابتدا عملیات قبلی را
+                کامل کنید؛ ورود به این ایستگاه با همان اسکن ثبت می‌شود.
               </PWEmpty>
             ) : (
               <form onSubmit={(event) => createCycle(event, cycleType)}>

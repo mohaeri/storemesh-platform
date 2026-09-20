@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source prepared for Figma Make as Version 29 on 2026-09-15.
+This folder keeps the reproducible source prepared for Figma Make as Version 30 on 2026-09-20.
 
 ## What is included
 
@@ -22,7 +22,7 @@ node --test prototypes/figma/production.test.mjs
 
 The assembled source must also pass the downloaded Figma project's TypeScript check and `pnpm build` before it is installed through the Figma Make code editor.
 
-Version 29 separates physical storage, operational destination, and required process. Receiving offers exactly three cold-room locations and a separate QC hold. Base Data includes configurable operational destinations with applicability. Sorting preserves physical location, selects one of the approved operational outcomes, adds Freeze Sliced, and records disposal weight without allocating a basket. Washing and Slicing use route-aware physical handoffs and expose QC holds. Version 28's persisted Sorting session and automatic proportional parent genealogy remain intact.
+Version 30 removes the redundant physical-transfer confirmation from the normal work queue. A basket remains in its physical cold room while the queue shows its next operation; the real scan at Washing, Slicing, Freezing, Freeze Drying, Drying, or Packaging performs the entry transition and writes traceability. Exceptional cold-room-to-cold-room relocation remains in Inventory Movement. Version 29's separated physical storage, operational destination, required process, QC holds, Freeze Sliced route, and basketless disposal remain intact.
 
 ## Scope boundary
 
