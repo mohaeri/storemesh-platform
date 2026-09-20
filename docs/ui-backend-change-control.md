@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-20
 
+## 2026-09-20 — Stitch-inspired Receiving visual refresh
+
+- Updated Receiving → Container Registration and Weighing to follow the supplied Stitch mockup's visual hierarchy only: full-width scale telemetry, separate container/product registration card, action bar, and registered-container table.
+- Preserved the existing StoreMesh scan simulator, load-cell simulation, tare/net calculations, disposable-container creation, validation, persistence, review, and destination workflow.
+- No Stitch mock behavior was copied, and no backend, API contract, or database change was made.
+
 ## 2026-09-20 — UI-only removal of duplicate transfer confirmation
 
 - Removed the normal-workflow `physical transfer confirmation` action from Production → Work Queue & Route.

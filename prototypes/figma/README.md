@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source prepared for Figma Make as Version 30 on 2026-09-20.
+This folder keeps the reproducible source prepared for Figma Make as Version 31 on 2026-09-20.
 
 ## What is included
 
@@ -22,7 +22,7 @@ node --test prototypes/figma/production.test.mjs
 
 The assembled source must also pass the downloaded Figma project's TypeScript check and `pnpm build` before it is installed through the Figma Make code editor.
 
-Version 30 removes the redundant physical-transfer confirmation from the normal work queue. A basket remains in its physical cold room while the queue shows its next operation; the real scan at Washing, Slicing, Freezing, Freeze Drying, Drying, or Packaging performs the entry transition and writes traceability. Exceptional cold-room-to-cold-room relocation remains in Inventory Movement. Version 29's separated physical storage, operational destination, required process, QC holds, Freeze Sliced route, and basketless disposal remain intact.
+Version 31 adapts the Receiving → Container Registration and Weighing view to the supplied Stitch visual reference: a full-width industrial scale monitor, a separate scan/product card, a compact action bar, and the existing registered-container table. StoreMesh state, scan, weighing, disposable-container, validation, and four-stage receiving handlers remain authoritative; no Stitch behavior was copied. Version 30's station-scan routing remains intact.
 
 ## Scope boundary
 
