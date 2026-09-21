@@ -1162,7 +1162,21 @@ function WashingSessionScreen({
 }) {
   const mode = initialMode,
     [scan, setScan] = useState(""),
-    [entryWeight, setEntryWeight] = useState(""),
+    [entryWeights, setEntryWeights] = useState<Record<string, number>>(() => ({
+      ...(ledger.washSessions.find((session) => session.status === "ACTIVE")
+        ?.entryWeights || {}),
+    })),
+    [entryWeightStates, setEntryWeightStates] = useState<
+      Record<string, SortingEntryWeightState>
+    >(() =>
+      Object.fromEntries(
+        Object.keys(
+          ledger.washSessions.find((session) => session.status === "ACTIVE")
+            ?.entryWeights || {},
+        ).map((code) => [pwCode(code), "CAPTURED"]),
+      ),
+    ),
+    [weighingCode, setWeighingCode] = useState(""),
     [outputCode, setOutputCode] = useState(""),
     [outputWeight, setOutputWeight] = useState(""),
     [qualityCheckRequired,setQualityCheckRequired]=useState(false),
@@ -1219,6 +1233,7 @@ function WashingSessionScreen({
           grade: item.grade,
           size: item.size,
           inputIds: [],
+          entryWeights: {},
           outputs: [],
           startedAt: new Date().toISOString(),
         }
@@ -1228,8 +1243,12 @@ function WashingSessionScreen({
         next,
         item,
         "WASHING_ENTRY",
-        entryWeight === "" ? undefined : Number(entryWeight),
+        entryWeights[pwCode(item.containerCode)],
       )
+      session.entryWeights = session.entryWeights || {}
+      if (entryWeights[pwCode(item.containerCode)] !== undefined)
+        session.entryWeights[pwCode(item.containerCode)] =
+          entryWeights[pwCode(item.containerCode)]
       const entryLocation = item.zone
       item.zone = "WASHING"
       item.currentLocation = "WASHING"
@@ -1245,8 +1264,16 @@ function WashingSessionScreen({
         to: "WASHING",
       })
       saveProductionLedger(next)
+      setEntryWeightStates(
+        pwSelectSortingEntryWeightState(
+          entryWeightStates,
+          weighingCode,
+          item.containerCode,
+          entryWeights,
+        ),
+      )
+      setWeighingCode(item.containerCode)
       setScan("")
-      setEntryWeight("")
       onChange(next, "سبد به نشست فعال شست‌وشو افزوده شد.")
     } catch (failure: any) {
       setError(failure.message)
@@ -1260,7 +1287,12 @@ function WashingSessionScreen({
       session.inputIds=session.inputIds.filter((id:string)=>id!==itemId)
       if(item){item.zone=item.physicalLocation||"COLD_ROOM_POSITIVE_DIRTY";item.currentLocation=item.zone;item.currentState="READY";item.nextAction="اسکن ورود به شست‌وشو"}
       if(!session.inputIds.length)next.washSessions=next.washSessions.filter(row=>row.id!==session.id)
-      saveProductionLedger(next);onChange(next,"سبد از نشست شست‌وشو خارج شد.");setError("")
+      saveProductionLedger(next)
+      const code=pwCode(item?.containerCode),nextWeights={...entryWeights},nextStates={...entryWeightStates}
+      delete nextWeights[code];delete nextStates[code]
+      setEntryWeights(nextWeights);setEntryWeightStates(nextStates)
+      if(pwCode(weighingCode)===code)setWeighingCode("")
+      onChange(next,"سبد از نشست شست‌وشو خارج شد.");setError("")
     }catch(failure:any){setError(failure.message)}
   }
   const addOutput = () => {
@@ -1415,24 +1447,38 @@ function WashingSessionScreen({
       setError(failure.message)
     }
   }
-  const scanned = ledger.items.find(
-    (item) => item.containerCode === pwCode(scan),
+  const entryCandidate = sources.find(
+    (item) => pwCode(item.containerCode) === pwCode(weighingCode),
   )
-  const entryCandidate = scanned || eligible[0]
   const outputCarrier = (()=>{try{return outputCode?pwCarrier(outputCode,"basket"):null}catch{return null}})()
   const outputTare = Number(outputCarrier?.tareWeightKg || 0)
   const washDestination=sources[0]?.destination||"DRYING",washRoute=pwRouteFor(washDestination),washNextProcess=washRoute.processes[1]||"PACKAGING"
+  const captureWashingEntryWeight=()=>{try{
+    if(!entryCandidate)throw Error("ابتدا سبد ورودی را اسکن کنید.")
+    const next=readProductionLedger(),session=next.washSessions.find(row=>row.status==="ACTIVE"),item=next.items.find(row=>row.id===entryCandidate.id)
+    if(!session||!item||!session.inputIds.includes(item.id))throw Error("سبد جاری در نشست فعال شست‌وشو پیدا نشد.")
+    const measured=pwNumber(item.weightKg)
+    if(!(measured>0))throw Error("ترازو وزن معتبر دریافت نکرد.")
+    pwTransitionWeight(next,item,"WASHING_ENTRY",measured)
+    session.entryWeights=session.entryWeights||{}
+    session.entryWeights[pwCode(item.containerCode)]=measured
+    saveProductionLedger(next)
+    setEntryWeights({...entryWeights,[pwCode(item.containerCode)]:measured})
+    setEntryWeightStates(pwCaptureSortingEntryWeightState(entryWeightStates,item.containerCode))
+    onChange(next,"وزن جدید سبد ورودی شست‌وشو ثبت شد.")
+    setError("")
+  }catch(failure:any){setError(failure.message)}}
   const scanWashingOutput=(rawCode:string)=>{try{const carrier=pwCarrier(rawCode,"basket");pwFreeCarrier(ledger,carrier.code);const measured=Math.min(18.5,Math.max(0,inputTotal-outputTotal));setOutputCode(carrier.code);setOutputWeight(measured.toFixed(3));setError("")}catch(failure:any){setError(failure.message)}}
   return <div style={{display:"grid",gap:18}}>
     <div><h2 style={{margin:0}}>{mode==="ENTRY"?"ورود به شست‌وشو":"خروج از شست‌وشو"}</h2><p style={{margin:"5px 0 0",fontSize:12,color:"#718079"}}>{mode==="ENTRY"?"سبدهای هم‌گرید و هم‌اندازه را اسکن کنید و وزن تازه را فقط از باسکول ثبت کنید.":"سبدهای تازه خروجی را تک‌به‌تک اسکن کنید؛ وزن پایدار همان لحظه به‌صورت آنلاین از باسکول خوانده می‌شود."}</p></div>
-    <WashingScaleConsole mode={mode} code={mode==="ENTRY"?entryCandidate?.containerCode:outputCode} net={mode==="ENTRY"?Number(entryWeight||entryCandidate?.weightKg||0):Number(outputWeight||0)} previousNet={mode==="ENTRY"?Number(entryCandidate?.weightKg||0):0} tare={mode==="ENTRY"?0:outputTare} onRead={()=>{if(mode==="ENTRY"){if(!entryCandidate)return setError("ابتدا سبد ورودی را اسکن کنید.");setEntryWeight(Number(entryCandidate.weightKg).toFixed(3));setError("")}}}/>
+    <WashingScaleConsole mode={mode} code={mode==="ENTRY"?entryCandidate?.containerCode:outputCode} net={mode==="ENTRY"?Number(entryWeights[pwCode(entryCandidate?.containerCode)]??entryCandidate?.weightKg??0):Number(outputWeight||0)} previousNet={mode==="ENTRY"?Number(entryCandidate?.weightKg||0):0} tare={mode==="ENTRY"?0:outputTare} onRead={captureWashingEntryWeight}/>
     {error&&<div role="alert" style={{background:"#fff0f0",color:"#9f2323",padding:12,borderRadius:9}}>{error}</div>}
     {mode==="ENTRY"?<div style={pwBox}>
       <h3 style={{marginTop:0}}>اسکن سبدهای ورودی شست‌وشو</h3>
       <PWNotice>چند سبد هم‌گرید و هم‌اندازه وارد یک نشست می‌شوند. تا خالی‌شدن کامل واحد، گرید یا اندازه متفاوت پذیرفته نمی‌شود.</PWNotice>
       <div style={{display:"flex",gap:8,marginTop:14}}><input aria-label="اسکن QR ورود شست‌وشو" value={scan} onChange={event=>setScan(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();addInput()}}} style={{...pwInput,flex:1,fontFamily:"monospace"}} placeholder="اسکن QR سبد ورودی یا ورود دستی"/><PWButton disabled={!scan.trim()} onClick={()=>addInput()}>افزودن سبد</PWButton><PWButton secondary onClick={()=>setInputScanOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton></div>
       <ScanSimulator open={inputScanOpen} title="اسکن سبد ورودی شست‌وشو" suggestedCode={eligible[0]?.containerCode||""} onClose={()=>setInputScanOpen(false)} onScan={addInput}/>
-      <div style={{border:"1px solid #d8e4df",borderRadius:12,overflow:"hidden",marginTop:16,background:"white"}}>{sources.length?sources.map(item=><div key={item.id} style={{display:"grid",gridTemplateColumns:"1.05fr 1.15fr 1.2fr 1.1fr .45fr",gap:12,padding:"12px 16px",borderBottom:"1px solid #e6eeea",fontSize:12,alignItems:"center"}}><b style={{fontFamily:"monospace",fontSize:13}}>{item.containerCode}</b><span style={{border:"1px solid #cde3da",background:"#edf7f3",borderRadius:9,padding:"6px 9px",textAlign:"center"}}><small style={{display:"block",color:"#718079"}}>مقصد بعدی</small><b>{PW_ZONES[item.nextZone||washNextProcess]||item.nextZone||washNextProcess}</b></span><span style={{border:"1px solid #72d9ad",background:"#ebfff6",color:"#176b50",borderRadius:12,padding:"6px 9px",fontWeight:800,textAlign:"center"}}>✓ وزن جدید ثبت شد</span><span style={{color:"#718079"}}>آخرین وزن: <b style={{fontFamily:"monospace",color:"#18302a",background:"#f1f3f2",padding:"4px 7px",borderRadius:5}}>{item.weightKg.toFixed(3)} kg</b></span><button type="button" onClick={()=>removeInput(item.id)} style={{border:0,background:"transparent",color:"#c23d3d",cursor:"pointer"}}>حذف</button></div>):<PWEmpty>هنوز سبدی وارد نشست نشده است.</PWEmpty>}</div>
+      <div style={{border:"1px solid #d8e4df",borderRadius:12,overflow:"hidden",marginTop:16,background:"white"}}>{sources.length?sources.map(item=>{const code=pwCode(item.containerCode),weightState=entryWeightStates[code]||"PREVIOUS",finalDestination=item.operationalDestination||item.destination;return <div key={item.id} style={{display:"grid",gridTemplateColumns:"1.05fr 1.15fr 1.2fr 1.1fr .45fr",gap:12,padding:"12px 16px",borderBottom:"1px solid #e6eeea",fontSize:12,alignItems:"center"}}><b style={{fontFamily:"monospace",fontSize:13}}>{item.containerCode}</b><span style={{border:"1px solid #cde3da",background:"#edf7f3",borderRadius:9,padding:"6px 9px",textAlign:"center"}}><small style={{display:"block",color:"#718079"}}>مقصد نهایی</small><b>{PW_ZONES[finalDestination||""]||finalDestination||"تعیین نشده"}</b></span><button type="button" onClick={()=>{setEntryWeightStates(pwSelectSortingEntryWeightState(entryWeightStates,weighingCode,item.containerCode,entryWeights));setWeighingCode(item.containerCode)}} style={{border:`1px solid ${weightState==="CAPTURED"?"#72d9ad":weightState==="PENDING"?"#efbd4e":"#cfd9d5"}`,background:weightState==="CAPTURED"?"#ebfff6":weightState==="PENDING"?"#fff9e9":"#f5f7f6",color:weightState==="CAPTURED"?"#176b50":weightState==="PENDING"?"#9a6420":"#718079",borderRadius:12,padding:"6px 9px",fontWeight:800,textAlign:"center",cursor:"pointer"}}>{weightState==="CAPTURED"?"✓ وزن جدید ثبت شد":weightState==="PENDING"?"در انتظار ثبت وزن":"وزن قبلی انتخاب شد"}</button><span style={{color:"#718079"}}>آخرین وزن: <b style={{fontFamily:"monospace",color:"#18302a",background:"#f1f3f2",padding:"4px 7px",borderRadius:5}}>{item.weightKg.toFixed(3)} kg</b></span><button type="button" onClick={()=>removeInput(item.id)} style={{border:0,background:"transparent",color:"#c23d3d",cursor:"pointer"}}>حذف</button></div>}):<PWEmpty>هنوز سبدی وارد نشست نشده است.</PWEmpty>}</div>
       <div style={{marginTop:14,background:"#eaf6f0",padding:13,borderRadius:10,fontSize:12,display:"flex",justifyContent:"space-between"}}><span>{sources.length} سبد آماده شست‌وشو</span><b>مجموع {inputTotal.toFixed(3)} kg</b></div>
       {active&&<><div style={{marginTop:12,background:"#fff8e3",padding:12,borderRadius:9,fontSize:12}}>نشست {active.id} · قفل سازگاری: <b>{active.grade} / {active.size}</b></div><PWNotice>ورودی‌ها ذخیره شده‌اند و پس از خاموش و روشن شدن سیستم نیز نشست {active.id} فعال می‌ماند. ثبت محصول شسته‌شده از صفحه مستقل «خروج از شست‌وشو» انجام می‌شود.</PWNotice></>}
     </div>:<div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:16}}>

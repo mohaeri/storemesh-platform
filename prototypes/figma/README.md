@@ -1,6 +1,6 @@
 # StoreMesh Figma Make production prototype
 
-This folder keeps the reproducible source prepared for Figma Make as Version 35 on 2026-09-21.
+This folder keeps the reproducible source prepared for Figma Make as Version 36 on 2026-09-21.
 
 ## What is included
 
@@ -27,6 +27,8 @@ Version 33 completes the Production Workbench split into independent Sorting Ent
 Version 34 aligns the Sorting Entry and Washing Entry basket rows with the supplied Stitch visual hierarchy. Sorting Exit and Washing Exit now treat a successful basket scan as physical placement on the connected scale and capture the stable reading immediately, without a second on-screen weight action. Washing Exit also exposes the computed next process and final operational destination before each output is registered. These are UI/prototype changes only; no backend behavior was changed.
 
 Version 35 fixes the Sorting Entry row logic with an explicit per-basket weight state machine. A newly scanned or reselected basket is «در انتظار ثبت وزن»; a successful scale capture changes it to «وزن جدید ثبت شد»; and scanning the next basket without capturing a new weight changes the previous row to «وزن قبلی انتخاب شد». This is a Figma/prototype-only correction and does not change backend routes, requests, responses, or persistence contracts.
+
+Version 36 applies the same optional three-state weighing behavior to Washing Entry. Scanning a basket leaves it pending until the operator elects to capture a fresh scale reading; moving on without capture records that the previous valid weight was selected. Washing Entry rows now show the final operational destination assigned during Sorting instead of incorrectly repeating Washing as the next step. This is a Figma/prototype-only correction and does not change backend routes, requests, responses, or persistence contracts.
 
 ## Scope boundary
 
