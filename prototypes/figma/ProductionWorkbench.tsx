@@ -181,7 +181,18 @@ const pwEmpty = (): PWLedger => ({
   machines: { ...PW_DEFAULT_MACHINES },
 })
 function pwNormalizeItem(item:PWItem):PWItem{const currentLocation=item.currentLocation||item.zone||"SORTING",currentState=item.currentState||item.stage||"READY",destination=item.nextZone||item.destination||null,nextAction=item.nextAction||(destination&&destination!==currentLocation?`اسکن ورود به ${PW_ZONES[destination]||destination}`:"انجام عملیات جاری");return {...item,zone:currentLocation,currentLocation,currentState,physicalLocation:item.physicalLocation||(pwColdStorageLocation(currentLocation)?currentLocation:"COLD_ROOM_POSITIVE_DIRTY"),operationalDestination:item.operationalDestination??item.destination??null,destination:item.destination??null,nextAction}}
-function pwAssertWashCompatibility(session:any,item:PWItem){if(session&&(session.grade!==item.grade||session.size!==item.size))throw Error(`نشست فعال شست‌وشو شامل گرید ${session.grade} / اندازه ${session.size} است. ابتدا تمام محصول را در سبدهای خروجی ثبت و واحد را خالی و تکمیل کنید.`);return true}
+function pwWashDestination(item:PWItem|undefined|null){
+  const finalDestination=pwCode(item?.destination),legacyDestination=pwCode(item?.operationalDestination)
+  return PW_OPERATIONAL_DESTINATIONS.includes(finalDestination)?finalDestination:legacyDestination
+}
+function pwNormalizeWashSessions(sessions:any[],items:PWItem[]){
+  return sessions.map((session:any)=>{
+    if(session.status==="COMPLETED")return session
+    const destinations=[...new Set((session.inputIds||[]).map((id:string)=>pwWashDestination(items.find((item)=>item.id===id))).filter(Boolean))]
+    return destinations.length===1&&pwCode(session.destination)!==destinations[0]?{...session,destination:destinations[0]}:session
+  })
+}
+function pwAssertWashCompatibility(session:any,item:PWItem){const destination=pwWashDestination(item);if(session&&(session.product!==item.product||session.grade!==item.grade||pwCode(session.destination)!==destination))throw Error(`نشست فعال شست‌وشو برای ${session.product} / گرید ${session.grade} / مقصد ${PW_ZONES[session.destination]||session.destination} قفل است. ابتدا تمام محصول را در سبدهای خروجی ثبت و واحد را خالی و تکمیل کنید.`);return true}
 function ScanOptionalWeighTransition({
   scan,
   setScan,
@@ -309,11 +320,13 @@ function readProductionLedger(): PWLedger {
       throw Error(
         "ساختار دفتر تولید قابل خواندن نیست؛ داده را بازنویسی نکردیم.",
       )
+    const items=value.items.map(pwNormalizeItem)
     return {
       ...pwEmpty(),
       ...value,
       machines: { ...PW_DEFAULT_MACHINES, ...(value.machines || {}) },
-      items: value.items.map(pwNormalizeItem),
+      items,
+      washSessions:pwNormalizeWashSessions(value.washSessions||[],items),
       events: [...value.events].sort((a, b) => a.seq - b.seq),
     }
   } catch (error: any) {
@@ -717,7 +730,7 @@ function PWEmpty({ children }: any) {
 function WashingScaleConsole({mode,code,net,previousNet,tare,onRead}:{mode:"ENTRY"|"EXIT";code?:string;net:number;previousNet:number;tare:number;onRead:()=>void}) {
   const n=(value:number)=>Number.isFinite(value)?value.toFixed(3):"0.000"
   const gross=pwNumber(net+tare)
-  return <section aria-label={`کنسول باسکول ${mode==="ENTRY"?"ورود":"خروج"} شست‌وشو`} style={{background:"#06291f",border:"1px solid #1b5a46",borderRadius:18,padding:16,color:"white",boxShadow:"0 12px 28px #173f3524"}}>
+  return <section aria-label={`کنسول باسکول ${mode==="ENTRY"?"ورود":"خروج"} شست‌وشو`} style={{width:"100%",maxWidth:1240,margin:"0 auto",background:"#06291f",border:"1px solid #1b5a46",borderRadius:18,padding:16,color:"white",boxShadow:"0 12px 28px #173f3524"}}>
     <div style={{display:"grid",gridTemplateColumns:"1.05fr 1.45fr 1.15fr 1fr",gap:12}} dir="rtl">
       <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:13,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11}}><b style={{color:"#c9f7e4"}}>● باسکول رومیزی ۱</b><span style={{color:"#62e5ad",fontFamily:"monospace"}}>10 Hz</span></div><div style={{marginTop:12,padding:9,borderRadius:9,background:"#0b382a",fontSize:10}}><div style={{display:"flex",justifyContent:"space-between"}}><span>لودسل آنلاین</span><b style={{color:"#62e5ad"}}>RS485</b></div><div style={{display:"flex",justifyContent:"space-between",marginTop:8,color:"#91b9aa"}}><span>قرائت پایدار</span><b>± 0.002 kg</b></div></div><div style={{marginTop:10,padding:8,border:"1px solid #1b5a46",borderRadius:8,textAlign:"center",fontSize:10,color:"#62e5ad"}}>✓ ثبات سیگنال حسگر تأیید شد</div>{code&&<div style={{marginTop:10,padding:8,borderRadius:8,background:"#03160f",textAlign:"center"}}><small style={{display:"block",color:"#91b9aa"}}>سریال سبد جاری</small><b style={{fontFamily:"monospace",fontSize:20,color:"#62e5ad"}}>{code}</b></div>}</div>
       <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:15,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#c9f7e4"}}><b>{mode==="ENTRY"?"وزن خالص جدید":"وزن خالص خروجی"}</b><span style={{fontFamily:"monospace",color:"#62e5ad"}}>SENS: HIGH</span></div><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:8,margin:"18px 0"}} dir="ltr"><strong style={{fontFamily:"monospace",fontSize:40,letterSpacing:4}}>{n(net)}</strong><span style={{background:"#0b382a",padding:"4px 8px",borderRadius:6,fontSize:10,color:"#62e5ad"}}>kg</span></div><div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #ffffff18",paddingTop:8,fontSize:10}}><span>وزن ظرف (Tare)</span><b style={{color:"#62e5ad",fontFamily:"monospace"}}>{n(tare)} kg</b></div></div>
@@ -738,7 +751,7 @@ function WashingSessionScreen({
   const mode = initialMode,
     [scan, setScan] = useState(""),
     [entryWeights, setEntryWeights] = useState<Record<string, number>>(() => ({
-      ...(ledger.washSessions.find((session) => session.status === "ACTIVE")
+      ...(ledger.washSessions.find((session) => ["DRAFT","ACTIVE"].includes(session.status))
         ?.entryWeights || {}),
     })),
     [entryWeightStates, setEntryWeightStates] = useState<
@@ -746,7 +759,7 @@ function WashingSessionScreen({
     >(() =>
       Object.fromEntries(
         Object.keys(
-          ledger.washSessions.find((session) => session.status === "ACTIVE")
+          ledger.washSessions.find((session) => ["DRAFT","ACTIVE"].includes(session.status))
             ?.entryWeights || {},
         ).map((code) => [pwCode(code), "CAPTURED"]),
       ),
@@ -759,20 +772,24 @@ function WashingSessionScreen({
     [empty, setEmpty] = useState(false),
     [inputScanOpen, setInputScanOpen] = useState(false),
     [outputScanOpen, setOutputScanOpen] = useState(false),
+    [selectedSessionId,setSelectedSessionId]=useState(()=>ledger.washSessions.find((session)=>session.status==="LOCKED")?.id||""),
+    [labelCounts,setLabelCounts]=useState<Record<string,number>>({}),
+    [lastPrinted,setLastPrinted]=useState<any>(null),
     [error, setError] = useState("")
-  const active = ledger.washSessions.find(
-      (session) => session.status === "ACTIVE",
-    ),
+  const draftSession=ledger.washSessions.find((session)=>["DRAFT","ACTIVE"].includes(session.status)),
+    lockedSessions=ledger.washSessions.filter((session)=>session.status==="LOCKED"),
+    active = mode==="ENTRY"?draftSession:(lockedSessions.find((session)=>session.id===selectedSessionId)||lockedSessions[0]),
     sources = (active?.inputIds || [])
       .map((id: string) => ledger.items.find((item) => item.id === id))
       .filter(Boolean) as PWItem[]
+  const reservedInputIds=new Set(ledger.washSessions.filter((session)=>session.status!=="COMPLETED").flatMap((session)=>session.inputIds||[]))
   const eligible = ledger.items.filter(
     (item) =>
       !item.consumed &&
       !item.blocked &&
       item.stage === "SORTED" &&
       (item.zone === "WASHING" || item.nextZone === "WASHING") &&
-      !active?.inputIds.includes(item.id),
+      !reservedInputIds.has(item.id),
   )
   const inputTotal = pwNumber(
       sources.reduce((sum, item) => sum + item.weightKg, 0),
@@ -797,16 +814,26 @@ function WashingSessionScreen({
         (item.zone !== "WASHING" && item.nextZone !== "WASHING")
       )
         throw Error("سبد اسکن‌شده برای ورود به شست‌وشو واجد شرایط نیست.")
-      let session = next.washSessions.find((row) => row.status === "ACTIVE")
+      let session = next.washSessions.find((row) => ["DRAFT","ACTIVE"].includes(row.status))
+      if (session) {
+        const firstInput = next.items.find((row) => row.id === session.inputIds[0])
+        session.product = session.product || firstInput?.product
+        session.grade = session.grade || firstInput?.grade
+        session.destination = session.destination || pwWashDestination(firstInput)
+        session.sizes = session.sizes || [session.size || firstInput?.size].filter(Boolean)
+      }
       pwAssertWashCompatibility(session,item)
       if (session?.inputIds.includes(item.id))
         throw Error("این سبد قبلاً در نشست فعال ثبت شده است.")
       if (!session) {
         session = {
           id: pwId(next, "WS"),
-          status: "ACTIVE",
+          status: "DRAFT",
+          product: item.product,
           grade: item.grade,
+          destination: pwWashDestination(item),
           size: item.size,
+          sizes: [item.size],
           inputIds: [],
           entryWeights: {},
           outputs: [],
@@ -814,6 +841,8 @@ function WashingSessionScreen({
         }
         next.washSessions.push(session)
       }
+      session.sizes = [...new Set([...(session.sizes || []), item.size].filter(Boolean))]
+      session.size = session.sizes.length === 1 ? session.sizes[0] : "مختلط"
       pwTransitionWeight(
         next,
         item,
@@ -835,6 +864,7 @@ function WashingSessionScreen({
         containerCode: item.containerCode,
         grade: item.grade,
         size: item.size,
+        destination: session.destination,
         from: entryLocation,
         to: "WASHING",
       })
@@ -849,14 +879,14 @@ function WashingSessionScreen({
       )
       setWeighingCode(item.containerCode)
       setScan("")
-      onChange(next, "سبد به نشست فعال شست‌وشو افزوده شد.")
+      onChange(next, "سبد به نشست باز شست‌وشو افزوده شد.")
     } catch (failure: any) {
       setError(failure.message)
     }
   }
   const removeInput = (itemId:string) => {
     try {
-      const next=readProductionLedger(),session=next.washSessions.find(row=>row.status==="ACTIVE")
+      const next=readProductionLedger(),session=next.washSessions.find(row=>["DRAFT","ACTIVE"].includes(row.status))
       if(!session||session.outputs.length)throw Error("پس از ثبت اولین خروجی، حذف ورودی نشست مجاز نیست.")
       const item=next.items.find(row=>row.id===itemId)
       session.inputIds=session.inputIds.filter((id:string)=>id!==itemId)
@@ -870,13 +900,37 @@ function WashingSessionScreen({
       onChange(next,"سبد از نشست شست‌وشو خارج شد.");setError("")
     }catch(failure:any){setError(failure.message)}
   }
+  const lockSession=()=>{
+    setError("")
+    try{
+      const next=readProductionLedger(),session=next.washSessions.find((row)=>["DRAFT","ACTIVE"].includes(row.status))
+      if(!session||!session.inputIds.length)throw Error("حداقل یک سبد برای قفل نشست لازم است.")
+      session.status="LOCKED";session.lockedAt=new Date().toISOString()
+      session.inputIds.forEach((id:string)=>{const item=next.items.find((row)=>row.id===id);if(item){item.currentState="WASH_SESSION_LOCKED";item.nextAction=`انجام شست‌وشوی نشست ${session.id}`}})
+      pwEvent(next,"قفل نشست شست‌وشو",session.id,{product:session.product,grade:session.grade,destination:session.destination,inputIds:session.inputIds})
+      saveProductionLedger(next);setWeighingCode("");setEntryWeights({});setEntryWeightStates({});setSelectedSessionId(session.id)
+      onChange(next,`نشست ${session.id} قفل شد؛ اکنون می‌توانید نشست بعدی را باز کنید.`)
+    }catch(failure:any){setError(failure.message)}
+  }
+  const printSessionLabels=(sessionId:string)=>{
+    setError("")
+    try{
+      const next=readProductionLedger(),session=next.washSessions.find((row)=>row.id===sessionId&&row.status==="LOCKED"),count=Math.floor(Number(labelCounts[sessionId]||1))
+      if(!session)throw Error("نشست قفل‌شده پیدا نشد.")
+      if(!Number.isInteger(count)||count<1||count>100)throw Error("تعداد برچسب باید بین ۱ تا ۱۰۰ باشد.")
+      const destination=PW_ZONES[session.destination]||session.destination
+      pwEvent(next,"چاپ برچسب نشست شست‌وشو",session.id,{count,destination:session.destination,product:session.product,grade:session.grade})
+      saveProductionLedger(next);setLastPrinted({sessionId,count,destination,product:session.product,grade:session.grade})
+      onChange(next,`${count} برچسب برای نشست ${session.id} آماده چاپ شد.`)
+    }catch(failure:any){setError(failure.message)}
+  }
   const addOutput = () => {
     setError("")
     try {
       const next = readProductionLedger(),
-        session = next.washSessions.find((row) => row.status === "ACTIVE")
+        session = next.washSessions.find((row) => row.id===active?.id&&row.status === "LOCKED")
       if (!session || !session.inputIds.length)
-        throw Error("ابتدا حداقل یک سبد ورودی اسکن کنید.")
+        throw Error("ابتدا یک نشست قفل‌شده را انتخاب کنید.")
       const carrier = pwCarrier(outputCode, "basket")
       pwFreeCarrier(next, carrier.code)
       if (
@@ -932,7 +986,7 @@ function WashingSessionScreen({
     setError("")
     try {
       const next = readProductionLedger(),
-        session = next.washSessions.find((row) => row.status === "ACTIVE")
+        session = next.washSessions.find((row) => row.id===active?.id&&row.status === "LOCKED")
       if (!session || !session.outputs.length)
         throw Error("حداقل یک سبد خروجی وزن‌شده لازم است.")
       if (!empty) throw Error("خالی بودن کامل واحد شست‌وشو را تأیید کنید.")
@@ -952,16 +1006,18 @@ function WashingSessionScreen({
       if (difference < 0) throw Error("وزن خروجی از ورودی بیشتر است.")
       if (difference > 0 && !lossReason.trim())
         throw Error("برای اختلاف وزن نشست، علت ثبت کنید.")
-      const destination = parents[0]?.destination || "DRYING",route=pwRouteFor(destination),physicalAfterWashing=route.physicalAfterWashing||"COLD_ROOM_POSITIVE_CLEAN",nextProcess=route.processes[1]||"PACKAGING"
+      const destination = session.destination || pwWashDestination(parents[0]) || "DRYING",route=pwRouteFor(destination),physicalAfterWashing=route.physicalAfterWashing||"COLD_ROOM_POSITIVE_CLEAN",nextProcess=route.processes[1]||"PACKAGING"
+      const washBatchCode=pwId(next,"B")
       const children = session.outputs.map((row: any) => {
-        const id = pwId(next, "B"),
+        const id = pwId(next, "U"),
           contributions = parents.map((parent) => ({
             id: parent.id,
             weightKg: pwNumber(row.weightKg * (parent.weightKg / available)),
           }))
         const child: PWItem = {
           id,
-          code: id,
+          code: washBatchCode,
+          batchCode: washBatchCode,
           parentId: parents.map((parent) => parent.id).join(","),
           parentIds: parents.map((parent) => parent.id),
           parentContributions: contributions,
@@ -1027,10 +1083,10 @@ function WashingSessionScreen({
   )
   const outputCarrier = (()=>{try{return outputCode?pwCarrier(outputCode,"basket"):null}catch{return null}})()
   const outputTare = Number(outputCarrier?.tareWeightKg || 0)
-  const washDestination=sources[0]?.destination||"DRYING",washRoute=pwRouteFor(washDestination),washNextProcess=washRoute.processes[1]||"PACKAGING"
+  const washDestination=active?.destination||pwWashDestination(sources[0])||"DRYING",washRoute=pwRouteFor(washDestination),washNextProcess=washRoute.processes[1]||"PACKAGING"
   const captureWashingEntryWeight=()=>{try{
     if(!entryCandidate)throw Error("ابتدا سبد ورودی را اسکن کنید.")
-    const next=readProductionLedger(),session=next.washSessions.find(row=>row.status==="ACTIVE"),item=next.items.find(row=>row.id===entryCandidate.id)
+    const next=readProductionLedger(),session=next.washSessions.find(row=>["DRAFT","ACTIVE"].includes(row.status)),item=next.items.find(row=>row.id===entryCandidate.id)
     if(!session||!item||!session.inputIds.includes(item.id))throw Error("سبد جاری در نشست فعال شست‌وشو پیدا نشد.")
     const measured=pwNumber(item.weightKg)
     if(!(measured>0))throw Error("ترازو وزن معتبر دریافت نکرد.")
@@ -1045,19 +1101,19 @@ function WashingSessionScreen({
   }catch(failure:any){setError(failure.message)}}
   const scanWashingOutput=(rawCode:string)=>{try{const carrier=pwCarrier(rawCode,"basket");pwFreeCarrier(ledger,carrier.code);const measured=Math.min(18.5,Math.max(0,inputTotal-outputTotal));setOutputCode(carrier.code);setOutputWeight(measured.toFixed(3));setError("")}catch(failure:any){setError(failure.message)}}
   return <div style={{display:"grid",gap:18}}>
-    <div><h2 style={{margin:0}}>{mode==="ENTRY"?"ورود به شست‌وشو":"خروج از شست‌وشو"}</h2><p style={{margin:"5px 0 0",fontSize:12,color:"#718079"}}>{mode==="ENTRY"?"سبدهای هم‌گرید و هم‌اندازه را اسکن کنید و وزن تازه را فقط از باسکول ثبت کنید.":"سبدهای تازه خروجی را تک‌به‌تک اسکن کنید؛ وزن پایدار همان لحظه به‌صورت آنلاین از باسکول خوانده می‌شود."}</p></div>
     <WashingScaleConsole mode={mode} code={mode==="ENTRY"?entryCandidate?.containerCode:outputCode} net={mode==="ENTRY"?Number(entryWeights[pwCode(entryCandidate?.containerCode)]??entryCandidate?.weightKg??0):Number(outputWeight||0)} previousNet={mode==="ENTRY"?Number(entryCandidate?.weightKg||0):0} tare={mode==="ENTRY"?0:outputTare} onRead={captureWashingEntryWeight}/>
     {error&&<div role="alert" style={{background:"#fff0f0",color:"#9f2323",padding:12,borderRadius:9}}>{error}</div>}
     {mode==="ENTRY"?<div style={pwBox}>
       <h3 style={{marginTop:0}}>اسکن سبدهای ورودی شست‌وشو</h3>
-      <PWNotice>چند سبد هم‌گرید و هم‌اندازه وارد یک نشست می‌شوند. تا خالی‌شدن کامل واحد، گرید یا اندازه متفاوت پذیرفته نمی‌شود.</PWNotice>
+      <PWNotice>مواد داخل واحد شست‌وشو با هم مخلوط می‌شوند؛ بنابراین محصول، گرید و مقصد نهایی تمام ورودی‌های یک نشست باید یکسان باشد. اندازه می‌تواند متفاوت باشد.</PWNotice>
       <div style={{display:"flex",gap:8,marginTop:14}}><input aria-label="اسکن QR ورود شست‌وشو" value={scan} onChange={event=>setScan(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();addInput()}}} style={{...pwInput,flex:1,fontFamily:"monospace"}} placeholder="اسکن QR سبد ورودی یا ورود دستی"/><PWButton disabled={!scan.trim()} onClick={()=>addInput()}>افزودن سبد</PWButton><PWButton secondary onClick={()=>setInputScanOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton></div>
       <ScanSimulator open={inputScanOpen} title="اسکن سبد ورودی شست‌وشو" suggestedCode={eligible[0]?.containerCode||""} onClose={()=>setInputScanOpen(false)} onScan={addInput}/>
-      <div style={{border:"1px solid #d8e4df",borderRadius:12,overflow:"hidden",marginTop:16,background:"white"}}>{sources.length?sources.map(item=>{const code=pwCode(item.containerCode),weightState=entryWeightStates[code]||"PREVIOUS",finalDestination=item.operationalDestination||item.destination;return <div key={item.id} style={{display:"grid",gridTemplateColumns:"1.05fr 1.15fr 1.2fr 1.1fr .45fr",gap:12,padding:"12px 16px",borderBottom:"1px solid #e6eeea",fontSize:12,alignItems:"center"}}><b style={{fontFamily:"monospace",fontSize:13}}>{item.containerCode}</b><span style={{border:"1px solid #cde3da",background:"#edf7f3",borderRadius:9,padding:"6px 9px",textAlign:"center"}}><small style={{display:"block",color:"#718079"}}>مقصد نهایی</small><b>{PW_ZONES[finalDestination||""]||finalDestination||"تعیین نشده"}</b></span><button type="button" onClick={()=>{setEntryWeightStates(pwSelectSortingEntryWeightState(entryWeightStates,weighingCode,item.containerCode,entryWeights));setWeighingCode(item.containerCode)}} style={{border:`1px solid ${weightState==="CAPTURED"?"#72d9ad":weightState==="PENDING"?"#efbd4e":"#cfd9d5"}`,background:weightState==="CAPTURED"?"#ebfff6":weightState==="PENDING"?"#fff9e9":"#f5f7f6",color:weightState==="CAPTURED"?"#176b50":weightState==="PENDING"?"#9a6420":"#718079",borderRadius:12,padding:"6px 9px",fontWeight:800,textAlign:"center",cursor:"pointer"}}>{weightState==="CAPTURED"?"✓ وزن جدید ثبت شد":weightState==="PENDING"?"در انتظار ثبت وزن":"وزن قبلی انتخاب شد"}</button><span style={{color:"#718079"}}>آخرین وزن: <b style={{fontFamily:"monospace",color:"#18302a",background:"#f1f3f2",padding:"4px 7px",borderRadius:5}}>{item.weightKg.toFixed(3)} kg</b></span><button type="button" onClick={()=>removeInput(item.id)} style={{border:0,background:"transparent",color:"#c23d3d",cursor:"pointer"}}>حذف</button></div>}):<PWEmpty>هنوز سبدی وارد نشست نشده است.</PWEmpty>}</div>
+      <div style={{border:"1px solid #d8e4df",borderRadius:12,overflow:"hidden",marginTop:16,background:"white"}}>{sources.length?sources.map(item=>{const code=pwCode(item.containerCode),weightState=entryWeightStates[code]||"PREVIOUS",finalDestination=pwWashDestination(item);return <div key={item.id} style={{display:"grid",gridTemplateColumns:"1.05fr 1.15fr 1.2fr 1.1fr .45fr",gap:12,padding:"12px 16px",borderBottom:"1px solid #e6eeea",fontSize:12,alignItems:"center"}}><b style={{fontFamily:"monospace",fontSize:13}}>{item.containerCode}</b><span style={{border:"1px solid #cde3da",background:"#edf7f3",borderRadius:9,padding:"6px 9px",textAlign:"center"}}><small style={{display:"block",color:"#718079"}}>مقصد نهایی</small><b>{PW_ZONES[finalDestination||""]||finalDestination||"تعیین نشده"}</b></span><button type="button" onClick={()=>{setEntryWeightStates(pwSelectSortingEntryWeightState(entryWeightStates,weighingCode,item.containerCode,entryWeights));setWeighingCode(item.containerCode)}} style={{border:`1px solid ${weightState==="CAPTURED"?"#72d9ad":weightState==="PENDING"?"#efbd4e":"#cfd9d5"}`,background:weightState==="CAPTURED"?"#ebfff6":weightState==="PENDING"?"#fff9e9":"#f5f7f6",color:weightState==="CAPTURED"?"#176b50":weightState==="PENDING"?"#9a6420":"#718079",borderRadius:12,padding:"6px 9px",fontWeight:800,textAlign:"center",cursor:"pointer"}}>{weightState==="CAPTURED"?"✓ وزن جدید ثبت شد":weightState==="PENDING"?"در انتظار ثبت وزن":"وزن قبلی انتخاب شد"}</button><span style={{color:"#718079"}}>آخرین وزن: <b style={{fontFamily:"monospace",color:"#18302a",background:"#f1f3f2",padding:"4px 7px",borderRadius:5}}>{item.weightKg.toFixed(3)} kg</b></span><button type="button" onClick={()=>removeInput(item.id)} style={{border:0,background:"transparent",color:"#c23d3d",cursor:"pointer"}}>حذف</button></div>}):<PWEmpty>هنوز سبدی وارد نشست نشده است.</PWEmpty>}</div>
       <div style={{marginTop:14,background:"#eaf6f0",padding:13,borderRadius:10,fontSize:12,display:"flex",justifyContent:"space-between"}}><span>{sources.length} سبد آماده شست‌وشو</span><b>مجموع {inputTotal.toFixed(3)} kg</b></div>
-      {active&&<><div style={{marginTop:12,background:"#fff8e3",padding:12,borderRadius:9,fontSize:12}}>نشست {active.id} · قفل سازگاری: <b>{active.grade} / {active.size}</b></div><PWNotice>ورودی‌ها ذخیره شده‌اند و پس از خاموش و روشن شدن سیستم نیز نشست {active.id} فعال می‌ماند. ثبت محصول شسته‌شده از صفحه مستقل «خروج از شست‌وشو» انجام می‌شود.</PWNotice></>}
+      {active?<><div style={{marginTop:12,background:"#fff8e3",padding:12,borderRadius:9,fontSize:12}}>نشست باز {active.id} · ترکیب: <b>{active.product} / گرید {active.grade} / {PW_ZONES[active.destination]||active.destination}</b></div><PWNotice>پس از اسکن تمام سبدهای همین وان، نشست را قفل کنید. سپس می‌توانید نشست دیگری با محصول، گرید یا مقصد متفاوت باز کنید.</PWNotice><PWButton disabled={!active.inputIds.length} onClick={lockSession}>قفل نشست و آماده‌سازی برای شست‌وشو</PWButton></>:<PWNotice>نشست بازی وجود ندارد؛ با اسکن اولین سبد، یک نشست تازه ساخته می‌شود.</PWNotice>}
+      {!!lockedSessions.length&&<div style={{marginTop:18}}><h3>نشست‌های قفل‌شده آماده شست‌وشو</h3><div style={{display:"grid",gap:10}}>{lockedSessions.map((session:any)=><div key={session.id} style={{border:"1px solid #cfe0d9",borderRadius:12,padding:12,display:"grid",gridTemplateColumns:"1.2fr 1fr .8fr auto",gap:10,alignItems:"center",fontSize:12}}><div><b>{session.id}</b><small style={{display:"block",color:"#718079"}}>{session.inputIds.length} سبد · {session.product} / گرید {session.grade}</small></div><span><small style={{display:"block",color:"#718079"}}>مقصد نهایی روی برچسب</small><b>{PW_ZONES[session.destination]||session.destination}</b></span><input aria-label={`تعداد برچسب ${session.id}`} type="number" min="1" max="100" value={labelCounts[session.id]||1} onChange={(event)=>setLabelCounts({...labelCounts,[session.id]:Number(event.target.value)})} style={pwInput}/><PWButton secondary onClick={()=>printSessionLabels(session.id)}>چاپ برچسب</PWButton></div>)}</div>{lastPrinted&&<div style={{marginTop:10,border:"2px dashed #176b50",borderRadius:12,padding:12,background:"#f2fbf7",fontSize:12}}><b>پیش‌نمایش برچسب · {lastPrinted.sessionId}</b><span style={{display:"block"}}>{lastPrinted.product} · گرید {lastPrinted.grade} · مقصد نهایی: <b>{lastPrinted.destination}</b> · تعداد {lastPrinted.count}</span></div>}</div>}
     </div>:<div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:16}}>
-      <div style={pwBox}><h3 style={{marginTop:0}}>اسکن و ثبت سبدهای تازه خروجی</h3>{!active?<PWEmpty>هیچ نشست فعال شست‌وشویی برای ثبت خروج وجود ندارد.</PWEmpty>:<><div style={{display:"flex",gap:8}}><input aria-label="اسکن سبد خالی خروجی شست‌وشو" value={outputCode} onChange={event=>setOutputCode(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();scanWashingOutput(outputCode)}}} style={{...pwInput,flex:1,fontFamily:"monospace"}} placeholder="اسکن QR سبد خالی"/><PWButton secondary onClick={()=>setOutputScanOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton></div><p style={{fontSize:11,color:"#718079"}}>با اسکن سبد روی باسکول، وزن پایدار همان لحظه به‌صورت آنلاین ثبت می‌شود.</p><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,margin:"12px 0"}}><label style={{fontSize:11,color:"#718079"}}>مقصد بعدی<input readOnly value={PW_ZONES[washNextProcess]||washNextProcess} style={{...pwInput,marginTop:5,background:"#f7f9f8"}}/></label><label style={{fontSize:11,color:"#718079"}}>مقصد نهایی<input readOnly value={PW_ZONES[washDestination]||washDestination} style={{...pwInput,marginTop:5,background:"#f7f9f8"}}/></label></div><label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,margin:"12px 0",padding:10,border:"1px solid #d5e3dd",borderRadius:9}}><input type="checkbox" checked={qualityCheckRequired} onChange={event=>setQualityCheckRequired(event.target.checked)}/><span><b>نیازمند کنترل کیفیت در خروج شست‌وشو</b><small style={{display:"block",color:"#718079"}}>تا تصمیم مدیر، اقدام بعدی این سبد متوقف می‌شود.</small></span></label><PWButton disabled={!outputCode||!outputWeight} onClick={addOutput}>ثبت این خروجی و ادامه</PWButton><ScanSimulator open={outputScanOpen} title="اسکن سبد خروجی شست‌وشو" suggestedCode={outputCode||"CTR-003"} onClose={()=>setOutputScanOpen(false)} onScan={scanWashingOutput}/><div style={{border:"1px solid #d8e4df",borderRadius:11,overflow:"hidden",marginTop:16}}><div style={{display:"grid",gridTemplateColumns:".4fr 1fr 1fr 1.5fr",background:"#eef4f1",padding:9,fontSize:11,fontWeight:800}}><span>#</span><span>کد سبد</span><span>وزن خالص</span><span>مسیر</span></div>{active.outputs.map((row:any,index:number)=><div key={row.containerCode} style={{display:"grid",gridTemplateColumns:".4fr 1fr 1fr 1.5fr",padding:10,borderTop:"1px solid #e1eae6",fontSize:12}}><span>{index+1}</span><b style={{fontFamily:"monospace"}}>{row.containerCode}</b><b>{row.weightKg.toFixed(3)} kg</b><span>{PW_ZONES[washNextProcess]||washNextProcess} ← {PW_ZONES[washDestination]||washDestination}</span></div>)}</div></>}</div>
+      <div style={pwBox}><h3 style={{marginTop:0}}>اسکن و ثبت سبدهای تازه خروجی</h3>{!!lockedSessions.length&&<PWField label="نشست قفل‌شده شست‌وشو"><select value={active?.id||""} onChange={(event)=>{setSelectedSessionId(event.target.value);setOutputCode("");setOutputWeight("");setLossReason("");setEmpty(false)}} style={pwInput}>{lockedSessions.map((session:any)=><option key={session.id} value={session.id}>{session.id} · {session.product} · گرید {session.grade} · {PW_ZONES[session.destination]||session.destination}</option>)}</select></PWField>}{!active?<PWEmpty>هیچ نشست قفل‌شده‌ای برای ثبت خروج وجود ندارد.</PWEmpty>:<><div style={{display:"flex",gap:8}}><input aria-label="اسکن سبد خالی خروجی شست‌وشو" value={outputCode} onChange={event=>setOutputCode(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();scanWashingOutput(outputCode)}}} style={{...pwInput,flex:1,fontFamily:"monospace"}} placeholder="اسکن QR سبد خالی"/><PWButton secondary onClick={()=>setOutputScanOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton></div><p style={{fontSize:11,color:"#718079"}}>با اسکن سبد روی باسکول، وزن پایدار همان لحظه به‌صورت آنلاین ثبت می‌شود.</p><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,margin:"12px 0"}}><label style={{fontSize:11,color:"#718079"}}>مقصد بعدی<input readOnly value={PW_ZONES[washNextProcess]||washNextProcess} style={{...pwInput,marginTop:5,background:"#f7f9f8"}}/></label><label style={{fontSize:11,color:"#718079"}}>مقصد نهایی<input readOnly value={PW_ZONES[washDestination]||washDestination} style={{...pwInput,marginTop:5,background:"#f7f9f8"}}/></label></div><label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,margin:"12px 0",padding:10,border:"1px solid #d5e3dd",borderRadius:9}}><input type="checkbox" checked={qualityCheckRequired} onChange={event=>setQualityCheckRequired(event.target.checked)}/><span><b>نیازمند کنترل کیفیت در خروج شست‌وشو</b><small style={{display:"block",color:"#718079"}}>تا تصمیم مدیر، اقدام بعدی این سبد متوقف می‌شود.</small></span></label><PWButton disabled={!outputCode||!outputWeight} onClick={addOutput}>ثبت این خروجی و ادامه</PWButton><ScanSimulator open={outputScanOpen} title="اسکن سبد خروجی شست‌وشو" suggestedCode={outputCode||"CTR-003"} onClose={()=>setOutputScanOpen(false)} onScan={scanWashingOutput}/><div style={{border:"1px solid #d8e4df",borderRadius:11,overflow:"hidden",marginTop:16}}><div style={{display:"grid",gridTemplateColumns:".4fr 1fr 1fr 1.5fr",background:"#eef4f1",padding:9,fontSize:11,fontWeight:800}}><span>#</span><span>کد سبد</span><span>وزن خالص</span><span>مسیر</span></div>{active.outputs.map((row:any,index:number)=><div key={row.containerCode} style={{display:"grid",gridTemplateColumns:".4fr 1fr 1fr 1.5fr",padding:10,borderTop:"1px solid #e1eae6",fontSize:12}}><span>{index+1}</span><b style={{fontFamily:"monospace"}}>{row.containerCode}</b><b>{row.weightKg.toFixed(3)} kg</b><span>{PW_ZONES[washNextProcess]||washNextProcess} ← {PW_ZONES[washDestination]||washDestination}</span></div>)}</div></>}</div>
       <div style={pwBox}><h3 style={{marginTop:0}}>تراز وزن نشست</h3><div style={{display:"grid",gap:12,fontSize:13}}><div style={{display:"flex",justifyContent:"space-between"}}><span>ورودی</span><b>{inputTotal.toFixed(3)} kg</b></div><div style={{display:"flex",justifyContent:"space-between"}}><span>خروجی</span><b>{outputTotal.toFixed(3)} kg</b></div><div style={{display:"flex",justifyContent:"space-between",paddingTop:10,borderTop:"1px solid #e1eae6"}}><span>مانده / افت</span><b>{loss.toFixed(3)} kg</b></div></div><PWField label="علت افت یا مانده (در صورت اختلاف)"><input value={lossReason} onChange={event=>setLossReason(event.target.value)} style={pwInput}/></PWField><label style={{display:"flex",gap:8,fontSize:12,margin:"12px 0"}}><input type="checkbox" checked={empty} onChange={event=>setEmpty(event.target.checked)}/>تمام محصول ثبت شده و واحد شست‌وشو کاملاً خالی است.</label><PWButton disabled={!active?.outputs.length||!empty||loss<0||(loss>0&&!lossReason.trim())} onClick={complete}>تکمیل شست‌وشو و ساخت مسیرها</PWButton></div>
     </div>}
   </div>
@@ -1068,6 +1124,13 @@ function ProductionScreen(props: any) {
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
     [chosen, setChosen] = useState("")
+  const [sliceInputIds,setSliceInputIds]=useState<string[]>([])
+  const [sliceScan,setSliceScan]=useState("")
+  const [sliceScanOpen,setSliceScanOpen]=useState(false)
+  const [sliceTrayCount,setSliceTrayCount]=useState(1)
+  const [sliceTrayWeights,setSliceTrayWeights]=useState<string[]>([""])
+  const [sliceDifferenceReason,setSliceDifferenceReason]=useState("")
+  const [resetArmed,setResetArmed]=useState(false)
   const tabs = [
     ["overview", "صف کار و مسیر"],
     ["sorting-entry", "ورود به سورتینگ"],
@@ -1084,6 +1147,7 @@ function ProductionScreen(props: any) {
   const allItems = ledger.items.filter((x) => !x.demo),
     live = allItems.filter((x) => !x.consumed),
     current = live.find((x) => x.id === chosen)
+  const sliceEligible=live.filter((item)=>!pwBusy(ledger,item)&&!item.blocked&&item.stage==="WASHED"&&item.nextZone==="SLICING"&&!!item.containerCode)
   const execute = (message: string, work: (next: PWLedger) => void) => {
     setError("")
     setNotice("")
@@ -1109,8 +1173,8 @@ function ProductionScreen(props: any) {
     setNotice("")
     setLedger(readProductionLedger())
   }
-  const batchPicker = (items: PWItem[]) => (
-    <PWField label="بچ ورودی">
+  const batchPicker = (items: PWItem[],label="بچ ورودی") => (
+    <PWField label={label}>
       <select
         required
         value={chosen}
@@ -1120,7 +1184,7 @@ function ProductionScreen(props: any) {
         <option value="">انتخاب بچ…</option>
         {items.map((x) => (
           <option key={x.id} value={x.id}>
-            {x.code} · {x.product} · {x.grade}/{x.size} · {x.weightKg} kg
+            {x.batchCode||x.code} · {x.containerCode?`ظرف ${x.containerCode} · `:""}{x.product} · {x.grade}/{x.size} · {x.weightKg} kg
           </option>
         ))}
       </select>
@@ -1269,6 +1333,43 @@ function ProductionScreen(props: any) {
         })
       },
     )
+  const scanSliceInput=(rawCode:string)=>{
+    setError("")
+    const code=pwCode(rawCode),item=sliceEligible.find((row)=>pwCode(row.containerCode)===code)
+    if(!item){setError("این سبد برای ورود به اسلایس واجد شرایط نیست.");return}
+    if(sliceInputIds.includes(item.id)){setError("این سبد قبلاً وارد شده است.");return}
+    const selected=sliceEligible.filter((row)=>sliceInputIds.includes(row.id)),first=selected[0]
+    if(first&&(first.product!==item.product||first.grade!==item.grade||pwWashDestination(first)!==pwWashDestination(item))){setError("سبدهای یک عملیات اسلایس باید محصول، گرید و مقصد نهایی یکسان داشته باشند.");return}
+    setSliceInputIds([...sliceInputIds,item.id])
+    setSliceScan("")
+  }
+  const resizeSliceTrays=(count:number)=>{
+    const safe=Math.max(1,Math.min(50,Math.floor(count||1)))
+    setSliceTrayCount(safe)
+    setSliceTrayWeights((previous)=>Array.from({length:safe},(_,index)=>previous[index]||""))
+  }
+  const completeSlicing=(event:any)=>{
+    const data=form(event)
+    let completed=false
+    execute("اسلایس و تراز وزن سینی‌ها ثبت شد.",(next)=>{
+      const parents=sliceInputIds.map((id)=>next.items.find((item)=>item.id===id)).filter(Boolean) as PWItem[]
+      if(!parents.length) throw Error("حداقل یک سبد ورودی را اسکن کنید.")
+      parents.forEach((item)=>{pwUsable(next,item);if(item.stage!=="WASHED"||item.nextZone!=="SLICING"||!item.containerCode)throw Error("یکی از سبدهای ورودی دیگر برای اسلایس معتبر نیست.")})
+      const first=parents[0],destination=pwWashDestination(first)
+      if(parents.some((item)=>item.product!==first.product||item.grade!==first.grade||pwWashDestination(item)!==destination))throw Error("محصول، گرید و مقصد نهایی سبدهای ورودی باید یکسان باشد.")
+      const weights=sliceTrayWeights.map(Number)
+      if(weights.length!==sliceTrayCount||weights.some((weight)=>!Number.isFinite(weight)||!(weight>0)))throw Error("وزن تمام سینی‌ها اجباری و باید مثبت باشد.")
+      const inputWeightKg=pwNumber(parents.reduce((sum,item)=>sum+item.weightKg,0)),outputWeightKg=pwNumber(weights.reduce((sum,weight)=>sum+weight,0)),deltaKg=pwNumber(outputWeightKg-inputWeightKg),reason=String(data.get("differenceReason")||"").trim()
+      if(Math.abs(deltaKg)>0.0005&&!reason)throw Error("برای اختلاف وزن ورودی و مجموع سینی‌ها علت را ثبت کنید.")
+      const route=pwRouteFor(destination),nextProcess=route.processes[route.processes.indexOf("SLICING")+1]||"PACKAGING",physicalLocation=nextProcess==="FREEZING"?"COLD_ROOM_NEGATIVE":first.physicalLocation||"COLD_ROOM_POSITIVE_CLEAN",id=pwId(next,"B")
+      const child:PWItem={id,code:id,parentId:parents.map((item)=>item.id).join(","),parentIds:parents.map((item)=>item.id),parentContributions:parents.map((item)=>({id:item.id,weightKg:item.weightKg})),inputCodes:parents.map((item)=>item.containerCode),product:first.product,grade:first.grade,size:[...new Set(parents.map((item)=>item.size))].join("، "),weightKg:outputWeightKg,stage:"SLICED",zone:physicalLocation,currentLocation:physicalLocation,physicalLocation,destination,operationalDestination:destination,nextZone:nextProcess,nextProcess:null,nextAction:`ثبت خروج از ${PW_ZONES[nextProcess]||nextProcess}`,qualityCheckRequired:data.get("qualityCheckRequired")==="on",containerCode:"",trays:weights.map((weight,index)=>({sequence:index+1,quantityKg:pwNumber(weight)})),allocated:true,consumed:false,blocked:data.get("qualityCheckRequired")==="on"}
+      parents.forEach((item)=>{item.consumed=true;item.stage="CONSUMED";item.containerCode="";item.weightKg=0})
+      next.items.push(child)
+      pwEvent(next,"ثبت اسلایس",child.code,{parents:child.parentIds,inputCodes:child.inputCodes,trayCount:sliceTrayCount,trayWeightsKg:child.trays.map((tray:any)=>tray.quantityKg),inputWeightKg,outputWeightKg,deltaKg,differenceReason:reason||null,nextZone:nextProcess})
+      completed=true
+    })
+    if(completed){setSliceInputIds([]);setSliceScan("");setSliceTrayCount(1);setSliceTrayWeights([""]);setSliceDifferenceReason("")}
+  }
   const createCycle = (event: any, type: string) => {
     const data = form(event)
     execute(
@@ -1567,8 +1668,10 @@ function ProductionScreen(props: any) {
         ? item.nextZone==="FREEZING"&&["WASHED","SLICED"].includes(item.stage)
         : item.nextZone==="DRYING"&&item.stage==="SLICED"&&item.destination==="DRYING"
       if(!valid) throw Error("این بچ برای خروجی انتخاب‌شده آماده نیست.")
-      const measured=Number(data.get("weight")),packageCode=String(data.get("packageCode")||"").trim().toUpperCase()
-      if(!Number.isFinite(measured)||!(measured>0)||measured>item.weightKg) throw Error(`وزن خروجی باید مثبت و حداکثر ${item.weightKg} کیلوگرم باشد.`)
+      const measured=Number(data.get("weight")),packageCode=String(data.get("packageCode")||"").trim().toUpperCase(),weightDifferenceReason=String(data.get("weightDifferenceReason")||"").trim()
+      if(!Number.isFinite(measured)||!(measured>0)) throw Error("وزن خروجی باید مثبت باشد.")
+      const weightDeltaKg=pwNumber(measured-item.weightKg)
+      if(Math.abs(weightDeltaKg)>0.0005&&!weightDifferenceReason) throw Error("برای افزایش یا کاهش وزن، علت اختلاف را ثبت کنید.")
       if(!isFreezeDry&&!packageCode) throw Error("کد بسته یا لیبل خروجی لازم است.")
       const before=item.weightKg
       item.weightKg=pwNumber(measured)
@@ -1592,7 +1695,7 @@ function ProductionScreen(props: any) {
         item.nextZone=null
         item.nextAction=item.blocked?"در انتظار تصمیم مدیر کنترل کیفیت":"آماده نگهداری یا ارسال"
       }
-      pwEvent(next,type==="FREEZE"?"ثبت خروج از فریز":"ثبت خروج از خشک‌کن",item.code,{beforeWeightKg:before,outputWeightKg:item.weightKg,packageCode:packageCode||null,nextZone:item.nextZone})
+      pwEvent(next,type==="FREEZE"?"ثبت خروج از فریز":"ثبت خروج از خشک‌کن",item.code,{beforeWeightKg:before,outputWeightKg:item.weightKg,weightDeltaKg,weightDifferenceReason:weightDifferenceReason||null,packageCode:packageCode||null,nextZone:item.nextZone})
     })
   }
   const cycleType = tab==="FREEZE_DRY_ENTRY"||tab==="FREEZE_DRY_EXIT" ? "FREEZE_DRY" : ""
@@ -1629,16 +1732,11 @@ function ProductionScreen(props: any) {
         }}
       >
         <div>
-          <h1 style={{ fontSize: 25, margin: 0 }}>میز کار تولید</h1>
-          <p style={{ color: "#6a817b", margin: "6px 0" }}>
-            از سبد ورودی تا عملیات ماشین، خروجی و رهگیری با داده همین نشست
-          </p>
+          <h1 style={{fontSize:25,margin:0,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}><span>میز کار تولید</span>{tab!=="overview"&&<><span style={{color:"#a8b8b2",fontWeight:400}}>—</span><span style={{fontSize:17,color:"#176b50",fontWeight:800}}>{tabs.find(([id])=>id===tab)?.[1]}</span></>}</h1>
         </div>
+        <button type="button" onClick={()=>setResetArmed(true)} style={{border:"1px solid #c85b5b",background:"#fff7f7",color:"#a43838",borderRadius:10,padding:"10px 14px",fontWeight:800,cursor:"pointer"}}>↺ بازنشانی سناریوی آزمایشی</button>
       </div>
-      {tab !== "overview" && <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16,padding:"12px 14px",background:"#eaf3ef",borderRadius:12}}>
-        <b>{tabs.find(([id])=>id===tab)?.[1]}</b>
-        <PWButton secondary onClick={()=>switchTab("overview")}>بازگشت به میز کار تولید</PWButton>
-      </div>}
+      {resetArmed&&<div role="alertdialog" aria-label="تأیید بازنشانی سناریوی آزمایشی" style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16,padding:"12px 14px",border:"1px solid #e3b0b0",background:"#fff7f7",borderRadius:12,fontSize:12}}><span><b>همه عملیات سورت، شست‌وشو و تولید این سناریو پاک شود؟</b><small style={{display:"block",color:"#718079",marginTop:3}}>محموله ۱۵۰ کیلویی و ۷ سبد اولیه برمی‌گردد؛ کاربران، تنظیمات پایه و فهرست کانتینرها حفظ می‌شوند.</small></span><span style={{display:"flex",gap:8}}><button type="button" onClick={()=>setResetArmed(false)} style={{border:"1px solid #cad7d1",background:"white",borderRadius:8,padding:"8px 12px",cursor:"pointer"}}>انصراف</button><button type="button" onClick={()=>{resetPrototypeOperationalScenario();setLedger(pwEmpty());setTab("overview");setChosen("");setNotice("سناریوی آزمایشی به محموله اولیه ۱۵۰ کیلویی بازنشانی شد.");setError("");setResetArmed(false)}} style={{border:0,background:"#b84242",color:"white",borderRadius:8,padding:"8px 12px",fontWeight:800,cursor:"pointer"}}>بله، بازنشانی شود</button></span></div>}
       {(error || ledger.storageError) && (
         <div
           role="alert"
@@ -1697,7 +1795,7 @@ function ProductionScreen(props: any) {
           </section>)}
           <div id="production-queue" style={{...pwBox,display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
             <div><small>بچ جاری</small><b style={{display:"block",fontSize:24}}>{live.length}</b></div>
-            <div><small>نشست شست‌وشوی فعال</small><b style={{display:"block",fontSize:24}}>{ledger.washSessions.filter((x:any)=>x.status==="ACTIVE").length}</b></div>
+            <div><small>نشست شست‌وشوی باز / قفل‌شده</small><b style={{display:"block",fontSize:24}}>{ledger.washSessions.filter((x:any)=>["DRAFT","ACTIVE","LOCKED"].includes(x.status)).length}</b></div>
             <div><small>چرخه فعال ماشین</small><b style={{display:"block",fontSize:24}}>{ledger.cycles.filter((x:any)=>PW_ACTIVE.includes(x.status)).length}</b></div>
           </div>
         </div>
@@ -1833,117 +1931,22 @@ function ProductionScreen(props: any) {
         </>
       )}
       {tab === "slice" && (
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}
-        >
+        <div style={{display:"grid",gridTemplateColumns:"1.1fr .9fr",gap:20}}>
           <div style={pwBox}>
-            <h2>ثبت اسلایس یک بچ کامل</h2>
-            <PWNotice>
-              ورود با اسکن انجام می‌شود و وزن انتقال اختیاری است؛ در صورت ثبت،
-              اختلاف با آخرین وزن معتبر در تاریخچه ذخیره می‌شود.
-            </PWNotice>
-            <form onSubmit={(event) => processBatch(event, "SLICE")}>
-              {batchPicker(
-                live.filter((x) => x.stage === "WASHED" && !pwBusy(ledger, x)),
-              )}
-              {current && summary(current)}
-              <PWField label="اسکن QR سبد همین بچ">
-                <input
-                  name="scan"
-                  placeholder="اسکن یا ورود کد خوانده‌شده"
-                  required
-                  style={pwInput}
-                />
-              </PWField>
-              <PWField label="وزن خروج از شست‌وشو / ورود به اسلایس (kg، اختیاری)">
-                <input
-                  name="observed"
-                  type="number"
-                  min="0.001"
-                  step="0.001"
-                  style={pwInput}
-                />
-              </PWField>
-              <label style={{display:"flex",gap:8,fontSize:12,margin:"10px 0"}}><input name="qualityCheckRequired" type="checkbox"/>نیازمند کنترل کیفیت در خروج اسلایس</label>
-              <PWButton disabled={!current || current.stage !== "WASHED"}>
-                تأیید پایان اسلایس
-              </PWButton>
-            </form>
+            <h2>ثبت ورود سبدها به اسلایس</h2>
+            <PWNotice>سبدهای هم‌محصول، هم‌گرید و هم‌مقصد را اسکن کنید. سینی‌ها شناسه و QR جداگانه ندارند؛ فقط تعداد و وزن اجباری هر سینی ثبت می‌شود.</PWNotice>
+            <div style={{display:"flex",gap:8}}><input aria-label="اسکن سبد ورودی اسلایس" value={sliceScan} onChange={(event)=>setSliceScan(event.target.value)} onKeyDown={(event)=>{if(event.key==="Enter"){event.preventDefault();scanSliceInput(sliceScan)}}} style={{...pwInput,flex:1,fontFamily:"monospace"}} placeholder="اسکن QR سبد"/><PWButton secondary onClick={()=>setSliceScanOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton><PWButton disabled={!sliceScan} onClick={()=>scanSliceInput(sliceScan)}>افزودن</PWButton></div>
+            <ScanSimulator open={sliceScanOpen} title="اسکن سبد ورودی اسلایس" suggestedCode={sliceEligible.find((item)=>!sliceInputIds.includes(item.id))?.containerCode||""} onClose={()=>setSliceScanOpen(false)} onScan={scanSliceInput}/>
+            <div style={{marginTop:14,border:"1px solid #d8e4df",borderRadius:10,overflow:"hidden"}}><div style={{display:"grid",gridTemplateColumns:".5fr 1fr 1fr 1fr .5fr",padding:9,background:"#eef4f1",fontSize:11,fontWeight:800}}><span>#</span><span>سبد</span><span>محصول / گرید</span><span>وزن ورودی</span><span></span></div>{sliceEligible.filter((item)=>sliceInputIds.includes(item.id)).map((item,index)=><div key={item.id} style={{display:"grid",gridTemplateColumns:".5fr 1fr 1fr 1fr .5fr",padding:10,borderTop:"1px solid #e1eae6",fontSize:12}}><span>{index+1}</span><b style={{fontFamily:"monospace"}}>{item.containerCode}</b><span>{item.product} / {item.grade}</span><b>{item.weightKg.toFixed(3)} kg</b><button type="button" onClick={()=>setSliceInputIds(sliceInputIds.filter((id)=>id!==item.id))} style={{border:0,background:"transparent",color:"#c23d3d"}}>حذف</button></div>)}</div>
           </div>
-          {tab === "slice" && (
-            <div style={pwBox}>
-              <h2>تخصیص سینی‌های خروجی اسلایس</h2>
-              {batchPicker(
-                live.filter(
-                  (x) =>
-                    x.stage === "SLICED" &&
-                    x.destination !== "DRYING" &&
-                    !pwBusy(ledger, x),
-                ),
-              )}
-              {current?.stage === "SLICED" &&
-              current.destination !== "DRYING" ? (
-                <>
-                  {summary(current)}
-                  <PWNotice>
-                    برای مسیر فریز یا فریزدرای، فقط سینی سالم پذیرفته می‌شود.
-                    مسیر خشک در همان سبد به خشک‌کن می‌رود و این مرحله را ندارد.
-                  </PWNotice>
-                  <form onSubmit={allocate}>
-                    <PWField label="اسکن QR سینی موجود">
-                      <input name="scan" required style={pwInput} />
-                    </PWField>
-                    <PWField label="ترتیب سینی">
-                      <input
-                        name="sequence"
-                        type="number"
-                        min="1"
-                        step="1"
-                        defaultValue="1"
-                        required
-                        style={pwInput}
-                      />
-                    </PWField>
-                    <PWField label="مقدار محصول در سینی (kg، اختیاری)">
-                      <input
-                        name="quantity"
-                        type="number"
-                        min="0.001"
-                        step="0.001"
-                        style={pwInput}
-                      />
-                    </PWField>
-                    <PWButton disabled={current.allocated}>
-                      ثبت این سینی
-                    </PWButton>
-                  </form>
-                  <div style={{ margin: "16px 0" }}>
-                    {current.trays.map((tray) => (
-                      <p key={tray.code}>
-                        {tray.sequence}. {tray.code} ·{" "}
-                        {tray.quantityKg === null
-                          ? "بدون وزن مجزا"
-                          : `${tray.quantityKg} kg`}
-                      </p>
-                    ))}
-                  </div>
-                  <PWButton
-                    disabled={current.allocated || !current.trays.length}
-                    onClick={finishAllocation}
-                  >
-                    {current.allocated
-                      ? "تخصیص نهایی شده"
-                      : "تأیید پایان تخصیص و آزادسازی سبد"}
-                  </PWButton>
-                </>
-              ) : (
-                <PWEmpty>
-                  فقط بچ اسلایس‌شده با مقصد فریز یا فریزدرای به سینی تخصیص
-                  می‌یابد.
-                </PWEmpty>
-              )}
-            </div>
-          )}
+          <form onSubmit={completeSlicing} style={pwBox}>
+            <h2>ثبت خروجی روی سینی‌ها</h2>
+            <PWField label="تعداد سینی"><input type="number" min="1" max="50" step="1" value={sliceTrayCount} onChange={(event)=>resizeSliceTrays(Number(event.target.value))} required style={pwInput}/></PWField>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{sliceTrayWeights.map((weight,index)=><PWField key={index} label={`وزن سینی ${index+1} (kg)`}><input aria-label={`وزن سینی ${index+1}`} type="number" min="0.001" step="0.001" value={weight} onChange={(event)=>setSliceTrayWeights(sliceTrayWeights.map((row,rowIndex)=>rowIndex===index?event.target.value:row))} required style={pwInput}/></PWField>)}</div>
+            {(()=>{const inputTotal=sliceEligible.filter((item)=>sliceInputIds.includes(item.id)).reduce((sum,item)=>sum+item.weightKg,0),outputTotal=sliceTrayWeights.reduce((sum,value)=>sum+(Number(value)||0),0),delta=pwNumber(outputTotal-inputTotal);return <><PWNotice>وزن ورودی: <b>{inputTotal.toFixed(3)} kg</b> · مجموع سینی‌ها: <b>{outputTotal.toFixed(3)} kg</b> · اختلاف: <b>{delta.toFixed(3)} kg</b></PWNotice>{Math.abs(delta)>0.0005&&<PWField label="علت اختلاف وزن"><input name="differenceReason" value={sliceDifferenceReason} onChange={(event)=>setSliceDifferenceReason(event.target.value)} required style={pwInput}/></PWField>}</>})()}
+            <label style={{display:"flex",gap:8,fontSize:12,margin:"10px 0"}}><input name="qualityCheckRequired" type="checkbox"/>نیازمند کنترل کیفیت در خروج اسلایس</label>
+            <PWButton disabled={!sliceInputIds.length||sliceTrayWeights.some((weight)=>!(Number(weight)>0))}>ثبت پایان اسلایس و تراز سینی‌ها</PWButton>
+          </form>
         </div>
       )}
       {(tab === "FREEZE" || tab === "DRY") && (()=>{
@@ -1954,9 +1957,10 @@ function ProductionScreen(props: any) {
           <h2>{tab==="FREEZE"?"ثبت خروج از فریز و بسته‌بندی":"ثبت خروج از خشک‌کن و بسته‌بندی"}</h2>
           <PWNotice>{tab==="FREEZE"?"ورود به فریز قبلاً از مسیر شست‌وشو یا اسلایس مشخص شده است. اینجا فقط خروج محصول، وزن نهایی و بسته‌بندی ثبت می‌شود. محصول مسیر فریزدرای بدون بسته‌بندی به مرحله ورود فریزدرای می‌رود.":"چرخه خشک‌کردن از مسیر اسلایس مشخص شده است. اینجا خروج محصول خشک، وزن نهایی و بسته‌بندی ثبت می‌شود."}</PWNotice>
           {!rows.length?<PWEmpty>محصول آماده خروج در این مرحله وجود ندارد.</PWEmpty>:<form onSubmit={event=>finishMachineOutput(event,tab as "FREEZE"|"DRY")}>
-            {batchPicker(rows)}
+            {batchPicker(rows,tab==="FREEZE"?"محموله / نشست ورودی فریز":"محموله ورودی خشک‌کن")}
             {selected&&summary(selected)}
-            <PWField label="وزن نهایی خروجی (kg)"><input name="weight" type="number" min="0.001" step="0.001" max={selected?.weightKg} required style={pwInput}/></PWField>
+            <PWField label="وزن نهایی خروجی (kg)"><input name="weight" type="number" min="0.001" step="0.001" required style={pwInput}/></PWField>
+            <PWField label="علت افزایش یا کاهش وزن (در صورت اختلاف)"><input name="weightDifferenceReason" placeholder="مثلاً جذب رطوبت، برفک یا افت فرایند" style={pwInput}/></PWField>
             {!freezeDryContinuation&&<PWField label="کد بسته یا لیبل خروجی"><input name="packageCode" placeholder="مثلاً PKG-0001" required style={pwInput}/></PWField>}
             {freezeDryContinuation&&<PWNotice>این بچ پس از ثبت خروج فریز، در سردخانه منفی باقی می‌ماند و برای «ورود به فریزدرای» آماده می‌شود؛ در این مرحله بسته‌بندی نمی‌شود.</PWNotice>}
             <label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,margin:"12px 0"}}><input name="qualityCheckRequired" type="checkbox"/>نیازمند کنترل کیفیت در خروج این مرحله</label>
@@ -2001,7 +2005,7 @@ function ProductionScreen(props: any) {
                         <input type="checkbox" name="items" value={item.id} />{" "}
                         {item.code} · {item.weightKg} kg ·{" "}
                         {item.containerCode ||
-                          item.trays.map((t) => t.code).join("، ")}
+                          item.trays.map((t) => `سینی ${t.sequence} · ${t.quantityKg} kg`).join("، ")}
                       </label>
                     ))}
                   </div>
@@ -2222,7 +2226,7 @@ function ProductionScreen(props: any) {
                           `${item.product} / ${item.grade} / ${item.size}`,
                           `${item.parentId} / ${item.inputCodes.join("، ")}`,
                           item.containerCode ||
-                            item.trays.map((t) => t.code).join("، ") ||
+                            item.trays.map((t) => `سینی ${t.sequence} · ${t.quantityKg} kg`).join("، ") ||
                             "—",
                           `${item.weightKg} kg`,
                           item.yieldPercent === undefined

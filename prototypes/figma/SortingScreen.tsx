@@ -17,25 +17,25 @@ function SortingScaleConsole({
   onRead?: () => void
 }) {
   const number = (value: number) => Number.isFinite(value) ? value.toFixed(3) : "0.000"
-  return <section className="overflow-hidden rounded-2xl border border-[#1b5a46] bg-[#082b20] p-4 text-white shadow-xl" aria-label={`کنسول توزین ${mode === "entry" ? "ورود" : "خروج"} سورتینگ`}>
-    <div className="grid grid-cols-12 gap-3" dir="rtl">
-      <div className="col-span-3 flex flex-col justify-between rounded-xl border border-[#1b5a46] bg-[#061f17] p-3">
+  return <section className="mx-auto w-full max-w-[1240px] overflow-hidden rounded-2xl border border-[#1b5a46] bg-[#082b20] p-4 text-white shadow-xl" aria-label={`کنسول توزین ${mode === "entry" ? "ورود" : "خروج"} سورتینگ`}>
+    <div className="grid grid-cols-[1.05fr_1.45fr_1.15fr_1fr] gap-3" dir="rtl">
+      <div className="flex flex-col justify-between rounded-xl border border-[#1b5a46] bg-[#061f17] p-3">
         <div className="flex items-center justify-between text-[11px]"><b className="text-[#c9f7e4]">● باسکول رومیزی ۱</b><span className="font-mono text-[#62e5ad]">10 Hz</span></div>
         <div className="mt-3 rounded-lg border border-[#1b5a46] bg-[#0d382a] p-2 text-[10px]"><div className="flex justify-between"><span>لودسل آنلاین</span><b className="font-mono text-[#62e5ad]">RS485</b></div><div className="mt-2 flex justify-between text-[#8eb8a8]"><span>قرائت پایدار</span><b>± 0.002 kg</b></div></div>
         <div className="mt-3 rounded-lg border border-[#1b5a46] px-3 py-2 text-center text-[10px] text-[#62e5ad]">✓ ثبات سیگنال حسگر تأیید شد</div>
         {code && <div className="mt-3 rounded-lg bg-[#041711] p-2 text-center"><small className="block text-[#8eb8a8]">سریال سبد جاری</small><b className="font-mono text-xl text-[#62e5ad]">{code}</b></div>}
       </div>
-      <div className="col-span-3 rounded-xl border border-[#1b5a46] bg-[#061f17] p-4">
+      <div className="rounded-xl border border-[#1b5a46] bg-[#061f17] p-4">
         <div className="flex justify-between text-[11px] text-[#c9f7e4]"><b>{mode === "entry" ? "وزن خالص جدید" : "وزن خالص"}</b><span className="font-mono text-[#62e5ad]">SENS: HIGH</span></div>
-        <div className="my-5 flex items-baseline justify-center gap-2" dir="ltr"><strong className="font-mono text-[38px] tracking-[.12em]">{number(net)}</strong><span className="rounded bg-[#0d382a] px-2 py-1 text-[10px] text-[#62e5ad]">kg</span></div>
+        <div className="my-[18px] flex items-baseline justify-center gap-2" dir="ltr"><strong className="font-mono text-[40px] tracking-[.1em]">{number(net)}</strong><span className="rounded bg-[#0d382a] px-2 py-1 text-[10px] text-[#62e5ad]">kg</span></div>
         <div className="flex justify-between border-t border-white/10 pt-2 text-[10px]"><span>وزن ظرف</span><b className="font-mono text-[#62e5ad]">{number(tare)} kg</b></div>
       </div>
-      <div className="col-span-3 rounded-xl border border-[#1b5a46] bg-[#061f17] p-4">
+      <div className="rounded-xl border border-[#1b5a46] bg-[#061f17] p-4">
         <div className="flex justify-between text-[11px] text-[#c9f7e4]"><b>{mode === "entry" ? "وزن خالص قبلی" : "وزن ناخالص"}</b><span className="font-mono text-[#62e5ad]">GROSS</span></div>
-        <div className="my-5 flex items-baseline justify-center gap-2" dir="ltr"><strong className="font-mono text-[38px] tracking-[.12em]">{number(mode === "entry" ? previousNet || 0 : gross)}</strong><span className="rounded bg-[#0d382a] px-2 py-1 text-[10px] text-[#62e5ad]">kg</span></div>
+        <div className="my-[18px] flex items-baseline justify-center gap-2" dir="ltr"><strong className="font-mono text-[36px] tracking-[.1em]">{number(mode === "entry" ? previousNet || 0 : gross)}</strong><span className="rounded bg-[#0d382a] px-2 py-1 text-[10px] text-[#62e5ad]">kg</span></div>
         <div className="flex justify-between border-t border-white/10 pt-2 text-[10px]"><span>{mode === "entry" ? "اختلاف" : "وضعیت"}</span><b className="font-mono text-[#62e5ad]">{mode === "entry" ? `${number(net - (previousNet || 0))} kg` : "READY"}</b></div>
       </div>
-      <div className="col-span-3 flex flex-col justify-between gap-2 rounded-xl border border-[#1b5a46] bg-[#0a3326] p-3">
+      <div className="flex flex-col justify-between gap-2 rounded-xl border border-[#1b5a46] bg-[#0a3326] p-3">
         {mode === "entry" ? <button type="button" onClick={onRead} className="rounded-xl border border-[#2b765b] bg-[#14513d] px-3 py-3 text-[11px] font-bold">↻ ثبت وزن جدید</button> : <div className="rounded-xl border border-[#2b765b] bg-[#061f17] px-3 py-3 text-center text-[11px] font-bold text-[#62e5ad]">● وزن آنلاین پس از اسکن سبد</div>}
         <div className="grid grid-cols-2 gap-2"><button type="button" className="rounded-lg border border-[#1b5a46] bg-[#061f17] py-2 text-[10px]">صفر (Zero)</button><button type="button" className="rounded-lg border border-[#1b5a46] bg-[#061f17] py-2 text-[10px]">تار (Tare)</button></div>
         <div className="rounded-lg border border-[#1b5a46] bg-[#061f17] px-3 py-2 text-[10px]"><span className="text-[#8eb8a8]">پورت اتصال: </span><b className="font-mono text-[#62e5ad]">COM 4</b></div>
@@ -345,16 +345,6 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
   }
   return (
     <div className="space-y-4 p-5 bg-[#f4f7f5] text-[#18302a]" dir="rtl">
-      <div>
-        <h2 className="text-xl font-bold">
-          {initialStep === "input" ? "ورود به سورتینگ" : "خروج از سورتینگ"}
-        </h2>
-        <p className="text-[12px] text-[#718079] mt-1">
-          {initialStep === "input"
-            ? "سبدهای ورودی را اسکن کنید، در صورت نیاز وزن تازه بگیرید و نشست را برای شروع سورت قفل کنید."
-            : "پس از پایان فیزیکی سورت، هر خروجی را جداگانه اسکن، توزین و مقصدگذاری کنید."}
-        </p>
-      </div>
       {error && (
         <div
           role="alert"
