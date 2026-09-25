@@ -1,6 +1,52 @@
 # UI / Backend Change Control
 
-Last updated: 2026-09-20
+Last updated: 2026-09-25
+
+## 2026-09-25 — Sorting entry locks product and grade; output reclassifies (local UI proposal)
+
+- The first scanned Sorting input now locks both product and incoming grade for that Sorting session. A basket with a different product or grade is rejected and must be handled in a separate session.
+- The entry queue and scan simulator only propose cold-room baskets compatible with the current session's locked product and grade. The locked values are persisted on the local Sorting session and included in its start event.
+- Sorting output remains a transformation: each output basket independently receives its final grade and size, so an incoming Grade A session may legitimately produce A+, A, B, Industrial, or different size classes without weakening the entry-mixing guard.
+- No backend, API, contract, migration, or database change was made. Verification: prototype tests 79 passed, 0 failed, 0 skipped; Vite production build passed with 19 transformed modules. No visual browser test was requested.
+
+## 2026-09-25 — Shared scale focus and two-stage freeze-dry output (local UI proposal)
+
+- Dryer Output now presents one physical scale console shared by grade splitting and per-package weighing. Selecting a dryer batch focuses the scale on net grade output; selecting a locked grade source or packaging consumable moves the same scale to package mode. Switching modes clears the operational context instead of pretending that two physical scales exist.
+- Freeze-Dry Output now follows the same two-stage pattern. A completed machine cycle enters `COMPLETING`; its total output is split into one or more final grades and locked as `FREEZE_DRIED / READY_FOR_PACKAGING` before any retail package can be created. Compatible same-product/same-grade current output and prior remainder can then be weighed, labelled, and closed one package at a time with the shared scale.
+- Freeze-dry remainders require a scanned reusable basket and return to positive clean cold storage for a later packaging session. Parent contribution, cycle identity, scale-derived net weight, pouch/absorber tare, gross weight, and label time are retained by the local prototype.
+- Logic correction: the previous generic cycle `FINISH` path could directly turn freeze-dry input items into packaged output with a manually entered package code. That shortcut is now rejected in the prototype; freeze-dry output must pass grade lock and per-package weighing. Freeze-dry entry and cycle failure/pause/resume controls remain unchanged.
+- Backend alignment warning: this remains browser-local prototype behavior. The current UNIT-package backend restriction still does not represent a package composed from multiple compatible parent batches, and no atomic freeze-dry grade-lock/package session route exists. No backend, API, contract, migration, or database change was made.
+- Verification for this increment is superseded by the later Sorting-entry verification above. No visual browser test was requested for this round.
+
+## 2026-09-25 — Two-stage dryer output grading and per-package weighing (local UI proposal)
+
+- The local Production → Dryer Output screen now has two explicit stages. On the right, the operator records the dryer's output as one or more final-grade rows with separate weights, reviews input/output/loss, and locks those graded outputs before packaging.
+- On the left, the operator may combine compatible dried stock from the new run and earlier carryover, selects a configured metallized pouch and moisture absorber whose tare weights are known, and creates exactly one package per connected-scale cycle. Net product, packaging tare, gross target, package identity, label time, and all contributing parents are retained by the local prototype.
+- Both dryer scales now use the same compact console: device/connection telemetry is one slim horizontal line, live-scan/Zero/Tare/COM controls are a second centered horizontal line, and local test weights feed the same UI handlers. The grade-locking scale intentionally shows net product weight only; package weighing still shows packaging tare and calculated gross weight.
+- Closing the packaging session requires a scanned reusable basket whenever product remains. The remainder returns to positive clean cold storage and stays available for a later compatible packaging session.
+- Backend alignment warning: `createPackage()` currently requires one batch allocation for each UNIT package (`UNIT_PACKAGE_SINGLE_BATCH_REQUIRED`). The production backend therefore does not yet represent a retail package built from multiple compatible old/new parent batches, nor this atomic grade-lock + per-package scale session. This is a local UI proposal only; no backend, API, contract, migration, or database change was made. Production support requires Mohamad's explicit approval.
+- Verification at the end of this increment is superseded by the shared-scale/freeze-dry verification above. No visual browser test was requested for this round.
+
+## 2026-09-24 — Dryer output packaging, prior carryover, and reusable remainder (local UI proposal)
+
+- The local Production → Dryer Output screen now follows the normative drying/packaging specification: it records the dryer's finished scale weight and yield, supports multiple package rows with independent count/unit weight/grade, creates individually traceable package identities, and displays the prepared-package list.
+- A compatible dried remainder from an earlier packaging session can be selected alongside the new dryer output. Every resulting package and any new remainder keeps all contributing parent batches in its genealogy.
+- Unpacked material must balance exactly into a scanned reusable basket. That remainder remains `DRIED`, returns to positive clean cold storage, and is offered in a later packaging session.
+- Backend alignment warning: the current server supports partial packaging by decrementing a batch and retaining its remaining weight, but `createPackage()` explicitly requires a UNIT package to contain exactly one batch allocation (`UNIT_PACKAGE_SINGLE_BATCH_REQUIRED`). It does not currently expose the proposed atomic dryer-output session that mixes old and new batch allocations into one retail package and creates a scanned remainder basket. This screen is therefore a local UI proposal, not proof of production backend support. No backend, API, database, or contract change was made; implementing the mixed-parent unit-package behavior requires Mohamad's explicit approval.
+- Verification: prototype tests 73 passed, 0 failed, 0 skipped; Vite production build passed with 19 transformed modules. No visual test was run, per Mohamad's instruction.
+
+## 2026-09-24 — Inventory aging warning drives operator work priority
+
+- Approval and decision: Mohamad explicitly approved connecting the existing inventory-aging warning to real operator work while preserving the existing configured threshold and priority system.
+- UI requirement: Inventory must show aging units without opening the ledger, rank warned/older units first, and expose a clear operator action rather than a decorative `در حال پیر شدن` badge.
+- Existing backend/contract mismatch: Fix Request 62 already calculated aging and raised `STORAGE_AGING_WARNING`; Fix Requests 43 and 116 already supplied configurable task priority. The warning was not linked to an operator task, and task-priority changes plus aging-link metadata were not fully persisted by the PostgreSQL task upsert.
+- Approved backend behavior: Crossing the active aging threshold promotes the relevant open task, or creates one `Review aging inventory` task for `STORAGE_OPERATOR` when none exists. Priority increases with overdue age, repeated reads remain idempotent, and clearing the condition resolves the warning and cancels the generated task or restores the prior task priority.
+- Repositories and files: `storemesh-site-server` domain, PostgreSQL repository, migration, and tests; `storemesh-contracts` inventory response documentation/tests; `storemesh-web` inventory presentation/tests; `storemesh-platform` local Figma-source prototype, tests, and this change-control record.
+- Routes, requests, responses, or events: no new route or request shape. `GET /api/inventory` adds optional additive fields `agingTaskId` and `agingTaskPriority`; the linked task retains internal storage-aging metadata used for idempotence and priority restoration.
+- Database/migration impact: migration `078_task_storage_aging.sql` adds nullable `tasks.storage_aging JSONB`; the task upsert now persists this metadata and updates `priority` on conflict.
+- Tests and real PostgreSQL result: `storemesh-site-server` 546 passed, 0 failed, 0 skipped against PostgreSQL 17 with `DATABASE_URL` set; `storemesh-contracts` 78 passed, 0 failed, 0 skipped with parity for 160 site and 8 cloud method/route templates; `storemesh-web` 100 passed, 0 failed, 0 skipped with its PostgreSQL-backed form test enabled; `storemesh-platform` prototype 73 passed, 0 failed, 0 skipped and Vite production build passed with 19 transformed modules.
+- Commit SHAs and PR links: none yet. This round is intentionally local-only until Mohamad asks to publish it; no commit, push, PR, or Figma update has been made.
+- Compatibility/deployment notes: inventory response changes are additive. Deploy migration 078 before the updated site server. Existing tasks without `storage_aging` remain valid, and an aging warning is linked lazily during inventory evaluation.
 
 ## 2026-09-20 — Stitch-inspired Production Workbench visual and flow alignment
 

@@ -28,6 +28,12 @@ function inventoryStageName(value: any) {
   return PW_STAGES[key] || inventoryStatusNames[key] || key || "ثبت اولیه"
 }
 
+function inventoryActionName(value:any){const action=String(value||"").trim();if(!action)return "فعلاً اقدام دیگری لازم نیست";if(/ثبت خروج اسلایس نشست|انجام عملیات اسلایس/.test(action))return "در مرحله اسلایس و منتظر ثبت خروج";if(/اسکن ورود به اسلایس|منتظر ورود دوباره به اسلایس/.test(action))return "در انتظار اسلایس";if(/ثبت خروج از فریز و بسته‌بندی|انجام عملیات فریز/.test(action))return "در حال فریزینگ و منتظر ثبت خروج و بسته‌بندی";if(/ثبت خروج از خشک‌کن و بسته‌بندی|انجام عملیات خشک‌کن/.test(action))return "در حال خشک‌شدن و منتظر ثبت خروج و بسته‌بندی";if(/ثبت ورود به دستگاه فریزدرای|ثبت ورود سینی‌ها به فریزدرای/.test(action))return "در انتظار ورود به دستگاه فریزدرای";if(/اسکن ورود به شست‌وشو/.test(action))return "در انتظار شست‌وشو";if(/انجام شست‌وشوی نشست|انجام عملیات شست‌وشو/.test(action))return "در مرحله شست‌وشو و منتظر ثبت خروج";if(/اسکن ورود به بسته‌بندی/.test(action))return "در انتظار بسته‌بندی";return action}
+
+const PROTOTYPE_AGING_WARNING_DAYS=7
+function prototypeAgingDays(item:any){if(Number.isFinite(Number(item?.agingDays)))return Math.max(0,Math.floor(Number(item.agingDays)));const since=Date.parse(item?.storedAt||item?.updatedAt||item?.createdAt||"");return Number.isFinite(since)?Math.max(0,Math.floor((Date.now()-since)/86400000)):0}
+function prototypeAgingState(items:any[]){const agingDays=Math.max(0,...items.map(prototypeAgingDays)),agingWarning=items.some(item=>item.agingWarning===true)||agingDays>=PROTOTYPE_AGING_WARNING_DAYS;return{agingDays,agingWarning}}
+
 function buildInventoryModel(history = false) {
   const receipt = readPrototypeBatch()
   const ledger = readProductionLedger()
@@ -48,8 +54,8 @@ function buildInventoryModel(history = false) {
     stage: receipt.status,
     locations: [...new Set(receiptBaskets.map((basket: any) => inventoryLocationName(basket.currentLocation || basket.zone)))],
     containers: receiptBaskets.map((basket: any) => basket.code), parents: [],
-    nextActions: [...new Set(receiptBaskets.map((basket: any) => basket.nextAction).filter(Boolean))],
-    destination: [...new Set(receiptBaskets.map((basket: any) => basket.destination).filter(Boolean))].map(inventoryLocationName), rows: receiptBaskets,
+    nextActions: [...new Set(receiptBaskets.map((basket: any) => inventoryActionName(basket.nextAction)).filter(Boolean))],
+    destination: [...new Set(receiptBaskets.map((basket: any) => basket.destination).filter(Boolean))].map(inventoryLocationName), rows: receiptBaskets, ...prototypeAgingState(receiptBaskets),
   })
   productGroups.forEach((items: any[], code: string) => {
     const parents = [...new Set(items.flatMap((item: any) => item.parentIds || String(item.parentId || "").split(",")).filter(Boolean))]
@@ -61,8 +67,8 @@ function buildInventoryModel(history = false) {
       stage: [...new Set(items.map((item: any) => inventoryStageName(item.stage)))].join("، "),
       locations: [...new Set(items.map((item: any) => inventoryLocationName(item.currentLocation || item.zone)))],
       containers: [...new Set(items.flatMap((item: any) => [item.containerCode, ...(item.trays || []).map((tray: any) => tray.code)].filter(Boolean)))],
-      parents, nextActions: [...new Set(items.map((item: any) => item.nextAction).filter(Boolean))],
-      destination: [...new Set(items.map((item: any) => item.destination).filter(Boolean))].map(inventoryLocationName), rows: items,
+      parents, nextActions: [...new Set(items.map((item: any) => inventoryActionName(item.nextAction)).filter(Boolean))],
+      destination: [...new Set(items.map((item: any) => item.destination).filter(Boolean))].map(inventoryLocationName), rows: items, ...prototypeAgingState(items),
     })
   })
   const containers = [
@@ -77,6 +83,7 @@ function buildInventoryModel(history = false) {
     ...(ledger.washSessions || []).map((session: any) => ({ code: session.id, kind: "SESSION", title: "نشست شست‌وشو", status: session.status, inputs: session.inputIds || [], outputs: session.childIds || session.outputs || [], machine: `${session.product || "محصول"} · گرید ${session.grade || "—"}` })),
     ...(ledger.cycles || []).map((cycle: any) => ({ code: cycle.id, kind: "CYCLE", title: cycle.type === "FREEZE_DRY" ? "چرخه فریزدرای" : cycle.type === "DRY" ? "چرخه خشک‌کن" : "چرخه فریز", status: cycle.status, inputs: cycle.itemIds || [], outputs: [], machine: cycle.machineId || "دستگاه تعیین نشده" })),
   ]
+  batches.sort((a,b)=>Number(b.agingWarning)-Number(a.agingWarning)||Number(b.agingDays)-Number(a.agingDays)||String(a.code).localeCompare(String(b.code)))
   return { receipt, ledger, batches, containers, operations }
 }
 
@@ -91,12 +98,12 @@ function InventoryBatchDetails({ row }: { row: any }) {
 
 function InventoryBatchRow({ row }: { row: any }) {
   return <details className="border border-[#d8e4df] rounded-xl bg-white overflow-hidden">
-    <summary className="cursor-pointer list-none grid grid-cols-[1.1fr_.8fr_.8fr_.7fr_.9fr_auto] gap-3 items-center p-4">
+    <summary className={`cursor-pointer list-none grid grid-cols-[1.1fr_.8fr_1.2fr_.7fr_.7fr_auto] gap-3 items-center p-4 ${row.agingWarning?"bg-[#fffaf2]":""}`}>
       <div><InventoryKindBadge kind={row.kind} /><b className="block font-mono mt-2 text-[#183e38]">{row.code}</b></div>
       <span><small className="block text-[#718079]">محصول / گرید</small><b>{row.product || "—"} · {row.grade || "—"}</b></span>
-      <span><small className="block text-[#718079]">مرحله فعلی</small><b>{inventoryStageName(row.stage)}</b></span>
+      <span><small className="block text-[#718079]">موقعیت / مرحله فعلی</small><b>{row.locations.join("، ")} / {inventoryStageName(row.stage)}</b></span>
       <span><small className="block text-[#718079]">وزن خالص</small><b>{row.weightKg.toFixed(3)} kg</b></span>
-      <span><small className="block text-[#718079]">موقعیت فیزیکی</small><b>{row.locations.join("، ")}</b></span>
+      <span><small className="block text-[#718079]">سن نگهداری</small><b>{row.agingDays} روز</b>{row.agingWarning&&<small className="block text-[#c67518]">در حال پیرشدن</small>}</span>
       <span className="text-[#176b50] font-bold">بازکردن ←</span>
     </summary><InventoryBatchDetails row={row} />
   </details>

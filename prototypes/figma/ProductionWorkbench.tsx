@@ -25,6 +25,7 @@ type PWLedger = {
   items: PWItem[]
   cycles: any[]
   washSessions: any[]
+  slicingSessions: any[]
   sortingSessions: any[]
   events: any[]
   consumedInputs: string[]
@@ -66,6 +67,7 @@ function pwRouteFor(destination:string){
   }
   return routes[destination]||{processes:[],physicalAfterSorting:"COLD_ROOM_POSITIVE_DIRTY"}
 }
+function pwNextOperatorAction(destination:string|null|undefined,stage:string,nextZone:string|null|undefined){if(nextZone==="FREEZING")return destination==="FREEZE_DRYING"&&stage==="SLICED"?"در انتظار ورود به دستگاه فریزدرای":"در حال فریزینگ و منتظر ثبت خروج و بسته‌بندی";if(nextZone==="DRYING")return "در حال خشک‌شدن و منتظر ثبت خروج و بسته‌بندی";if(nextZone==="SLICING")return "در انتظار اسلایس";if(nextZone==="WASHING")return "در انتظار شست‌وشو";if(nextZone==="PACKAGING")return "در انتظار بسته‌بندی";if(nextZone==="QC")return "در انتظار کنترل کیفیت";return nextZone?`در انتظار ${PW_ZONES[nextZone]||nextZone}`:"فعلاً اقدام دیگری لازم نیست"}
 const PW_STAGES: Record<string, string> = {
   SORTED: "سورت‌شده",
   WASHED: "شسته‌شده",
@@ -175,12 +177,13 @@ const pwEmpty = (): PWLedger => ({
   items: [],
   cycles: [],
   washSessions: [],
+  slicingSessions: [],
   sortingSessions: [],
   events: [],
   consumedInputs: [],
   machines: { ...PW_DEFAULT_MACHINES },
 })
-function pwNormalizeItem(item:PWItem):PWItem{const currentLocation=item.currentLocation||item.zone||"SORTING",currentState=item.currentState||item.stage||"READY",destination=item.nextZone||item.destination||null,nextAction=item.nextAction||(destination&&destination!==currentLocation?`اسکن ورود به ${PW_ZONES[destination]||destination}`:"انجام عملیات جاری");return {...item,zone:currentLocation,currentLocation,currentState,physicalLocation:item.physicalLocation||(pwColdStorageLocation(currentLocation)?currentLocation:"COLD_ROOM_POSITIVE_DIRTY"),operationalDestination:item.operationalDestination??item.destination??null,destination:item.destination??null,nextAction}}
+function pwNormalizeItem(item:PWItem):PWItem{const routedDirectlyToDryer=item.stage==="SLICED"&&(item.destination==="DRYING"||item.operationalDestination==="DRYING")&&(item.nextZone==="DRYING"||item.nextProcess==="DRYING"),currentLocation=routedDirectlyToDryer?"DRYING":item.currentLocation||item.zone||"SORTING",currentState=item.currentState||item.stage||"READY",destination=item.nextZone||item.destination||null,workflowAction=pwNextOperatorAction(item.destination??item.operationalDestination,item.stage,item.nextZone),repairWorkflowAction=item.nextZone==="FREEZING"||item.nextZone==="DRYING",nextAction=repairWorkflowAction?workflowAction:item.nextAction||(destination&&destination!==currentLocation?`اسکن ورود به ${PW_ZONES[destination]||destination}`:"انجام عملیات جاری");return {...item,zone:currentLocation,currentLocation,currentState,physicalLocation:routedDirectlyToDryer?"DRYING":item.physicalLocation||(pwColdStorageLocation(currentLocation)?currentLocation:"COLD_ROOM_POSITIVE_DIRTY"),operationalDestination:item.operationalDestination??item.destination??null,destination:item.destination??null,nextAction}}
 function pwWashDestination(item:PWItem|undefined|null){
   const finalDestination=pwCode(item?.destination),legacyDestination=pwCode(item?.operationalDestination)
   return PW_OPERATIONAL_DESTINATIONS.includes(finalDestination)?finalDestination:legacyDestination
@@ -189,10 +192,45 @@ function pwNormalizeWashSessions(sessions:any[],items:PWItem[]){
   return sessions.map((session:any)=>{
     if(session.status==="COMPLETED")return session
     const destinations=[...new Set((session.inputIds||[]).map((id:string)=>pwWashDestination(items.find((item)=>item.id===id))).filter(Boolean))]
-    return destinations.length===1&&pwCode(session.destination)!==destinations[0]?{...session,destination:destinations[0]}:session
+    const normalized=destinations.length===1&&pwCode(session.destination)!==destinations[0]?{...session,destination:destinations[0]}:{...session}
+    if(normalized.status==="LOCKED"){
+      const remembered=new Map((normalized.inputCarriers||[]).map((row:any)=>[row.itemId,pwCode(row.containerCode)]))
+      normalized.inputCarriers=(normalized.inputIds||[]).map((id:string)=>{
+        const item=items.find((row)=>row.id===id),containerCode=remembered.get(id)||pwCode(item?.containerCode)
+        if(item)item.containerCode=""
+        return {itemId:id,containerCode}
+      }).filter((row:any)=>row.containerCode)
+    }
+    return normalized
   })
 }
 function pwAssertWashCompatibility(session:any,item:PWItem){const destination=pwWashDestination(item);if(session&&(session.product!==item.product||session.grade!==item.grade||pwCode(session.destination)!==destination))throw Error(`نشست فعال شست‌وشو برای ${session.product} / گرید ${session.grade} / مقصد ${PW_ZONES[session.destination]||session.destination} قفل است. ابتدا تمام محصول را در سبدهای خروجی ثبت و واحد را خالی و تکمیل کنید.`);return true}
+function pwLockWashingSession(ledger:PWLedger,session:any){
+  if(!session||!session.inputIds?.length)throw Error("حداقل یک سبد برای قفل نشست لازم است.")
+  const remembered=new Map((session.inputCarriers||[]).map((row:any)=>[row.itemId,pwCode(row.containerCode)]))
+  session.status="LOCKED";session.lockedAt=new Date().toISOString()
+  session.inputCarriers=session.inputIds.map((id:string)=>{
+    const item=ledger.items.find((row)=>row.id===id),containerCode=remembered.get(id)||pwCode(item?.containerCode)
+    if(item){item.currentState="WASH_SESSION_LOCKED";item.nextAction=`انجام شست‌وشوی نشست ${session.id}`;item.containerCode=""}
+    return {itemId:id,containerCode}
+  }).filter((row:any)=>row.containerCode)
+  pwEvent(ledger,"قفل نشست شست‌وشو",session.id,{product:session.product,grade:session.grade,destination:session.destination,inputIds:session.inputIds,releasedContainerCodes:session.inputCarriers.map((row:any)=>row.containerCode)})
+  return session
+}
+function pwLockSlicingSession(ledger:PWLedger,inputIds:string[]){
+  if(!inputIds.length||new Set(inputIds).size!==inputIds.length)throw Error("حداقل یک سبد ورودی غیرتکراری برای قفل نشست اسلایس لازم است.")
+  if((ledger.slicingSessions||[]).some((row:any)=>row.status==="LOCKED"))throw Error("یک نشست اسلایس قفل‌شده در حال انجام است؛ ابتدا همان نشست را تکمیل کنید.")
+  const parents=inputIds.map((id)=>ledger.items.find((item)=>item.id===id)).filter(Boolean) as PWItem[]
+  if(parents.length!==inputIds.length)throw Error("یکی از سبدهای انتخابی دیگر موجود نیست.")
+  parents.forEach((item)=>{pwUsable(ledger,item);if(item.stage!=="WASHED"||item.nextZone!=="SLICING"||!item.containerCode)throw Error("یکی از سبدهای ورودی برای اسلایس معتبر نیست.")})
+  const first=parents[0],destination=pwWashDestination(first)
+  if(parents.some((item)=>item.product!==first.product||item.grade!==first.grade||pwWashDestination(item)!==destination))throw Error("محصول، گرید و مقصد نهایی سبدهای ورودی باید یکسان باشد.")
+  const session={id:pwId(ledger,"SLC"),status:"LOCKED",lockedAt:new Date().toISOString(),inputIds:[...inputIds],inputCarriers:parents.map((item)=>({itemId:item.id,containerCode:item.containerCode})),product:first.product,grade:first.grade,destination,outputIds:[]}
+  parents.forEach((item)=>{item.zone="SLICING";item.currentLocation="SLICING";item.currentState="IN_SLICING";item.nextAction="در مرحله اسلایس و منتظر ثبت خروج"})
+  ledger.slicingSessions.push(session)
+  pwEvent(ledger,"قفل نشست اسلایس",session.id,{inputIds:session.inputIds,inputCarriers:session.inputCarriers,product:session.product,grade:session.grade,destination:session.destination})
+  return session
+}
 function ScanOptionalWeighTransition({
   scan,
   setScan,
@@ -413,7 +451,7 @@ function pwCarrier(code: string, type: "tray" | "basket") {
 function pwBusy(ledger: PWLedger, item: PWItem) {
   return !!ledger.cycles.find(
     (c) => PW_ACTIVE.includes(c.status) && c.itemIds.includes(item.id),
-  )
+  )||!!(ledger.slicingSessions||[]).find((session:any)=>session.status==="LOCKED"&&session.inputIds.includes(item.id))
 }
 function pwUsable(
   ledger: PWLedger,
@@ -559,6 +597,7 @@ function recordSortingOutputs(
     )
       throw Error("شجره وزنی هر خروجی باید دقیق و برابر وزن آن باشد.")
   })
+  const activeSortingSession=(ledger.sortingSessions||[]).find((session:any)=>session.receiptId===batch.id&&session.status==="IN_PROGRESS"),sortedBatchCodes=new Map<string,string>();
   const children = outputs.map((output) => {
     const contributed = output.parentContributions.map((row: any) =>
         pwCode(row.batchId),
@@ -566,10 +605,14 @@ function recordSortingOutputs(
       route=pwRouteFor(output.destination),
       sourcePhysical=String(sources[0]?.physicalLocation||sources[0]?.sortingOrigin||"COLD_ROOM_POSITIVE_DIRTY"),
       isWaste=output.destination==="WASTE"
+    const batchKey=[sources[0].product,output.grade,output.size,output.destination].join("|"),batchCode=sortedBatchCodes.get(batchKey)||`BA-${activeSortingSession?.id||batch.id}-${String(sortedBatchCodes.size+1).padStart(2,"0")}`;
+    sortedBatchCodes.set(batchKey,batchCode)
     const code = pwId(ledger, "B"),
       item: PWItem = {
         id: code,
         code,
+        batchCode,
+        parentBatchIds:[batch.id],
         parentId: contributed.join(","),
         parentIds: contributed,
         parentContributions: output.parentContributions.map((row: any) => ({
@@ -593,7 +636,7 @@ function recordSortingOutputs(
         destination: output.destination,
         operationalDestination:output.destination,
         nextZone: isWaste?null:(route.processes[0]||null),
-        nextAction:isWaste?"ثبت پایان دفع":`اسکن ورود به ${PW_ZONES[route.processes[0]]||route.processes[0]}`,
+        nextAction:isWaste?"در انتظار ثبت پایان دفع":pwNextOperatorAction(output.destination,"SORTED",route.processes[0]),
         qualityCheckRequired:!!output.qualityCheckRequired,
         containerCode: isWaste?"":pwCode(output.code),
         trays: [],
@@ -643,7 +686,7 @@ function recordSortingOutputs(
   })
   ledger.sortingSessions = (ledger.sortingSessions || []).map((session: any) =>
     session.receiptId === batch.id && session.status === "IN_PROGRESS"
-      ? { ...session, status: "COMPLETED", completedAt: new Date().toISOString() }
+      ? { ...session, status: "COMPLETED", outputIds:children.map(item=>item.id), completedAt: new Date().toISOString() }
       : session,
   )
   saveProductionLedger(ledger)
@@ -736,6 +779,17 @@ function WashingScaleConsole({mode,code,net,previousNet,tare,onRead}:{mode:"ENTR
       <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:15,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#c9f7e4"}}><b>{mode==="ENTRY"?"وزن خالص جدید":"وزن خالص خروجی"}</b><span style={{fontFamily:"monospace",color:"#62e5ad"}}>SENS: HIGH</span></div><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:8,margin:"18px 0"}} dir="ltr"><strong style={{fontFamily:"monospace",fontSize:40,letterSpacing:4}}>{n(net)}</strong><span style={{background:"#0b382a",padding:"4px 8px",borderRadius:6,fontSize:10,color:"#62e5ad"}}>kg</span></div><div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #ffffff18",paddingTop:8,fontSize:10}}><span>وزن ظرف (Tare)</span><b style={{color:"#62e5ad",fontFamily:"monospace"}}>{n(tare)} kg</b></div></div>
       <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:15,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#c9f7e4"}}><b>{mode==="ENTRY"?"وزن خالص قبلی":"وزن ناخالص"}</b><span style={{fontFamily:"monospace",color:"#62e5ad"}}>GROSS</span></div><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:8,margin:"18px 0"}} dir="ltr"><strong style={{fontFamily:"monospace",fontSize:36,letterSpacing:3}}>{n(mode==="ENTRY"?previousNet:gross)}</strong><span style={{background:"#0b382a",padding:"4px 8px",borderRadius:6,fontSize:10,color:"#62e5ad"}}>kg</span></div><div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #ffffff18",paddingTop:8,fontSize:10}}><span>{mode==="ENTRY"?"اختلاف":"وضعیت"}</span><b style={{color:"#62e5ad",fontFamily:"monospace"}}>{mode==="ENTRY"?`${n(net-previousNet)} kg`:"READY"}</b></div></div>
       <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:13,background:"#0a3326",display:"flex",flexDirection:"column",justifyContent:"space-between",gap:9}}>{mode==="ENTRY"?<button type="button" onClick={onRead} style={{border:"1px solid #2b765b",background:"#14513d",color:"white",borderRadius:11,padding:12,fontWeight:800,cursor:"pointer"}}>↻ ثبت وزن جدید</button>:<div style={{border:"1px solid #2b765b",background:"#041d16",color:"#62e5ad",borderRadius:11,padding:12,fontWeight:800,textAlign:"center",fontSize:11}}>● وزن آنلاین پس از اسکن سبد</div>}<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><button type="button" style={{border:"1px solid #1b5a46",background:"#041d16",color:"white",borderRadius:8,padding:8}}>صفر (Zero)</button><button type="button" style={{border:"1px solid #1b5a46",background:"#041d16",color:"white",borderRadius:8,padding:8}}>تار (Tare)</button></div><div style={{border:"1px solid #1b5a46",background:"#041d16",borderRadius:8,padding:8,fontSize:10}}><span style={{color:"#91b9aa"}}>پورت اتصال: </span><b style={{fontFamily:"monospace",color:"#62e5ad"}}>COM 4</b></div></div>
+    </div>
+  </section>
+}
+function SlicingRemainderScaleConsole({code,net,tare}:{code?:string;net:number;tare:number}) {
+  const n=(value:number)=>Number.isFinite(value)?value.toFixed(3):"0.000"
+  const gross=pwNumber(net+tare)
+  return <section aria-label="باسکول آنلاین مانده اسلایس" style={{width:"100%",maxWidth:560,margin:"12px auto 0",background:"#06291f",border:"1px solid #1b5a46",borderRadius:13,padding:11,color:"white",boxShadow:"0 8px 20px #173f3520"}}>
+    <div style={{display:"grid",gridTemplateColumns:"1.15fr .85fr .85fr",gap:8,alignItems:"stretch"}} dir="rtl">
+      <div style={{border:"1px solid #1b5a46",borderRadius:9,padding:10,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:10}}><b style={{color:"#c9f7e4"}}>● لودسل آنلاین</b><span style={{color:"#62e5ad",fontFamily:"monospace"}}>RS485 · 10 Hz</span></div><div style={{marginTop:9,display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}><span style={{fontSize:10,color:"#91b9aa"}}>وزن خالص مانده</span><span dir="ltr"><strong style={{fontFamily:"monospace",fontSize:25,letterSpacing:2}}>{n(net)}</strong> <small style={{color:"#62e5ad"}}>kg</small></span></div><div style={{marginTop:7,fontSize:9,color:"#62e5ad"}}>✓ قرائت پایدار و ثبت خودکار پس از اسکن</div></div>
+      <div style={{border:"1px solid #1b5a46",borderRadius:9,padding:10,background:"#041d16",display:"flex",flexDirection:"column",justifyContent:"space-between"}}><small style={{color:"#91b9aa"}}>وزن ظرف (Tare)</small><b dir="ltr" style={{fontFamily:"monospace",fontSize:18}}>{n(tare)} kg</b><small style={{color:"#91b9aa"}}>وزن ناخالص: <b dir="ltr" style={{color:"#c9f7e4"}}>{n(gross)} kg</b></small></div>
+      <div style={{border:"1px solid #1b5a46",borderRadius:9,padding:10,background:"#0a3326",display:"flex",flexDirection:"column",justifyContent:"space-between",gap:6}}><small style={{color:"#91b9aa"}}>سبد روی باسکول</small><b style={{fontFamily:"monospace",fontSize:16,color:code?"#62e5ad":"#91b9aa"}}>{code||"در انتظار اسکن"}</b><small style={{color:"#91b9aa"}}>COM 4 · پایدار ±0.002 kg</small></div>
     </div>
   </section>
 }
@@ -857,7 +911,7 @@ function WashingSessionScreen({
       item.zone = "WASHING"
       item.currentLocation = "WASHING"
       item.currentState = "IN_PROCESS"
-      item.nextAction = "انجام عملیات شست‌وشو"
+      item.nextAction = "در مرحله شست‌وشو و منتظر ثبت خروج"
       session.inputIds.push(item.id)
       pwEvent(next, "اسکن ورودی شست‌وشو", session.id, {
         itemId: item.id,
@@ -890,7 +944,7 @@ function WashingSessionScreen({
       if(!session||session.outputs.length)throw Error("پس از ثبت اولین خروجی، حذف ورودی نشست مجاز نیست.")
       const item=next.items.find(row=>row.id===itemId)
       session.inputIds=session.inputIds.filter((id:string)=>id!==itemId)
-      if(item){item.zone=item.physicalLocation||"COLD_ROOM_POSITIVE_DIRTY";item.currentLocation=item.zone;item.currentState="READY";item.nextAction="اسکن ورود به شست‌وشو"}
+      if(item){item.zone=item.physicalLocation||"COLD_ROOM_POSITIVE_DIRTY";item.currentLocation=item.zone;item.currentState="READY";item.nextAction="در انتظار شست‌وشو"}
       if(!session.inputIds.length)next.washSessions=next.washSessions.filter(row=>row.id!==session.id)
       saveProductionLedger(next)
       const code=pwCode(item?.containerCode),nextWeights={...entryWeights},nextStates={...entryWeightStates}
@@ -904,10 +958,7 @@ function WashingSessionScreen({
     setError("")
     try{
       const next=readProductionLedger(),session=next.washSessions.find((row)=>["DRAFT","ACTIVE"].includes(row.status))
-      if(!session||!session.inputIds.length)throw Error("حداقل یک سبد برای قفل نشست لازم است.")
-      session.status="LOCKED";session.lockedAt=new Date().toISOString()
-      session.inputIds.forEach((id:string)=>{const item=next.items.find((row)=>row.id===id);if(item){item.currentState="WASH_SESSION_LOCKED";item.nextAction=`انجام شست‌وشوی نشست ${session.id}`}})
-      pwEvent(next,"قفل نشست شست‌وشو",session.id,{product:session.product,grade:session.grade,destination:session.destination,inputIds:session.inputIds})
+      pwLockWashingSession(next,session)
       saveProductionLedger(next);setWeighingCode("");setEntryWeights({});setEntryWeightStates({});setSelectedSessionId(session.id)
       onChange(next,`نشست ${session.id} قفل شد؛ اکنون می‌توانید نشست بعدی را باز کنید.`)
     }catch(failure:any){setError(failure.message)}
@@ -933,14 +984,6 @@ function WashingSessionScreen({
         throw Error("ابتدا یک نشست قفل‌شده را انتخاب کنید.")
       const carrier = pwCarrier(outputCode, "basket")
       pwFreeCarrier(next, carrier.code)
-      if (
-        session.inputIds.some(
-          (id: string) =>
-            next.items.find((item) => item.id === id)?.containerCode ===
-            carrier.code,
-        )
-      )
-        throw Error("سبد خروجی باید با سبدهای ورودی متفاوت و خالی باشد.")
       const weight = pwNumber(outputWeight)
       if (!(weight > 0) || weight > carrier.capacityKg)
         throw Error("وزن خروجی باید مثبت و در محدوده ظرفیت سبد باشد.")
@@ -1021,7 +1064,7 @@ function WashingSessionScreen({
           parentId: parents.map((parent) => parent.id).join(","),
           parentIds: parents.map((parent) => parent.id),
           parentContributions: contributions,
-          inputCodes: parents.map((parent) => parent.containerCode),
+          inputCodes: (session.inputCarriers||[]).map((entry:any) => entry.containerCode).filter(Boolean),
           product: parents[0].product,
           grade: session.grade,
           size: session.size,
@@ -1034,7 +1077,7 @@ function WashingSessionScreen({
           operationalDestination:destination,
           nextZone: nextProcess,
           nextProcess,
-          nextAction:`اسکن ورود به ${PW_ZONES[nextProcess]||nextProcess}`,
+          nextAction:pwNextOperatorAction(destination,"WASHED",nextProcess),
           qualityCheckRequired:!!row.qualityCheckRequired,
           containerCode: row.containerCode,
           trays: [],
@@ -1124,11 +1167,13 @@ function ProductionScreen(props: any) {
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
     [chosen, setChosen] = useState("")
-  const [sliceInputIds,setSliceInputIds]=useState<string[]>([])
+  const [sliceInputIds,setSliceInputIds]=useState<string[]>(()=>[...((ledger.slicingSessions||[]).find((session:any)=>session.status==="LOCKED")?.inputIds||[])])
   const [sliceScan,setSliceScan]=useState("")
   const [sliceScanOpen,setSliceScanOpen]=useState(false)
-  const [sliceTrayCount,setSliceTrayCount]=useState(1)
-  const [sliceTrayWeights,setSliceTrayWeights]=useState<string[]>([""])
+  const [sliceTrayGroups,setSliceTrayGroups]=useState([{id:1,count:"1",unitWeightKg:""}])
+  const [sliceRemainderCode,setSliceRemainderCode]=useState("")
+  const [sliceRemainderWeight,setSliceRemainderWeight]=useState("")
+  const [sliceRemainderScanOpen,setSliceRemainderScanOpen]=useState(false)
   const [sliceDifferenceReason,setSliceDifferenceReason]=useState("")
   const [resetArmed,setResetArmed]=useState(false)
   const tabs = [
@@ -1148,6 +1193,9 @@ function ProductionScreen(props: any) {
     live = allItems.filter((x) => !x.consumed),
     current = live.find((x) => x.id === chosen)
   const sliceEligible=live.filter((item)=>!pwBusy(ledger,item)&&!item.blocked&&item.stage==="WASHED"&&item.nextZone==="SLICING"&&!!item.containerCode)
+  const activeSliceSession=(ledger.slicingSessions||[]).find((session:any)=>session.status==="LOCKED")
+  const effectiveSliceInputIds=activeSliceSession?.inputIds||sliceInputIds
+  const selectedSliceItems=effectiveSliceInputIds.map((id:string)=>live.find((item)=>item.id===id)).filter(Boolean) as PWItem[]
   const execute = (message: string, work: (next: PWLedger) => void) => {
     setError("")
     setNotice("")
@@ -1171,7 +1219,9 @@ function ProductionScreen(props: any) {
     setChosen("")
     setError("")
     setNotice("")
-    setLedger(readProductionLedger())
+    const refreshed=readProductionLedger()
+    setLedger(refreshed)
+    if(value==="slice")setSliceInputIds([...((refreshed.slicingSessions||[]).find((session:any)=>session.status==="LOCKED")?.inputIds||[])])
   }
   const batchPicker = (items: PWItem[],label="بچ ورودی") => (
     <PWField label={label}>
@@ -1226,7 +1276,7 @@ function ProductionScreen(props: any) {
         item.zone = zone
         item.currentLocation = zone
         item.currentState = "IN_PROCESS"
-        item.nextAction = `انجام عملیات ${PW_ZONES[zone]}`
+        item.nextAction = `در مرحله ${PW_ZONES[zone]} و منتظر ثبت خروج`
         pwEvent(next, `اسکن ورود ${PW_ZONES[zone]}`, item.code, {
           from: entryLocation,
           to: zone,
@@ -1255,13 +1305,14 @@ function ProductionScreen(props: any) {
         }else{
           const nextProcess=route.processes[route.processes.indexOf("SLICING")+1]||"PACKAGING"
           if(nextProcess==="FREEZING") item.physicalLocation="COLD_ROOM_NEGATIVE"
+          if(nextProcess==="DRYING") item.physicalLocation="DRYING"
           item.zone=item.physicalLocation||"COLD_ROOM_POSITIVE_CLEAN"
           item.currentLocation=item.zone
           item.nextZone=nextProcess
           item.nextProcess=null
         }
         item.qualityCheckRequired=data.get("qualityCheckRequired")==="on"
-        item.nextAction=item.qualityCheckRequired?"در انتظار تصمیم مدیر کنترل کیفیت":`اسکن ورود به ${PW_ZONES[item.nextZone]||item.nextZone}`
+        item.nextAction=item.qualityCheckRequired?"در انتظار تصمیم مدیر کنترل کیفیت":pwNextOperatorAction(item.destination,item.stage,item.nextZone)
         pwEvent(
           next,
           process === "WASH" ? "ثبت شست‌وشو" : "ثبت اسلایس",
@@ -1335,6 +1386,7 @@ function ProductionScreen(props: any) {
     )
   const scanSliceInput=(rawCode:string)=>{
     setError("")
+    if(activeSliceSession){setError("نشست اسلایس قفل شده است؛ ابتدا خروج همین نشست را تکمیل کنید.");return}
     const code=pwCode(rawCode),item=sliceEligible.find((row)=>pwCode(row.containerCode)===code)
     if(!item){setError("این سبد برای ورود به اسلایس واجد شرایط نیست.");return}
     if(sliceInputIds.includes(item.id)){setError("این سبد قبلاً وارد شده است.");return}
@@ -1343,32 +1395,60 @@ function ProductionScreen(props: any) {
     setSliceInputIds([...sliceInputIds,item.id])
     setSliceScan("")
   }
-  const resizeSliceTrays=(count:number)=>{
-    const safe=Math.max(1,Math.min(50,Math.floor(count||1)))
-    setSliceTrayCount(safe)
-    setSliceTrayWeights((previous)=>Array.from({length:safe},(_,index)=>previous[index]||""))
+  const lockSlicingInputs=()=>{
+    let locked:any=null
+    execute("سبدها قفل شدند و نشست اسلایس پایدار شد.",(next)=>{locked=pwLockSlicingSession(next,sliceInputIds)})
+    if(locked)setSliceInputIds([...locked.inputIds])
   }
+  const addSliceTrayGroup=()=>setSliceTrayGroups([...sliceTrayGroups,{id:Math.max(0,...sliceTrayGroups.map((row)=>row.id))+1,count:"1",unitWeightKg:""}])
+  const updateSliceTrayGroup=(id:number,field:"count"|"unitWeightKg",value:string)=>setSliceTrayGroups(sliceTrayGroups.map((row)=>row.id===id?{...row,[field]:value}:row))
+  const removeSliceTrayGroup=(id:number)=>setSliceTrayGroups(sliceTrayGroups.filter((row)=>row.id!==id))
+  const scanSliceRemainder=(rawCode:string)=>{try{
+    const carrier=pwCarrier(rawCode,"basket")
+    pwFreeCarrier(ledger,carrier.code)
+    const inputTotal=selectedSliceItems.reduce((sum,item)=>sum+item.weightKg,0)
+    const trayTotal=sliceTrayGroups.reduce((sum,row)=>sum+(Number(row.count)||0)*(Number(row.unitWeightKg)||0),0)
+    const measured=pwNumber(Math.max(0,inputTotal-trayTotal))
+    setSliceRemainderCode(carrier.code)
+    setSliceRemainderWeight(measured>0?measured.toFixed(3):"")
+    setSliceRemainderScanOpen(false)
+    setError(measured>0?"":"وزن پایدار لودسل صفر است؛ سبد مانده را روی باسکول قرار دهید.")
+  }catch(failure:any){setSliceRemainderWeight("");setError(failure.message||"سبد مانده معتبر نیست.")}}
   const completeSlicing=(event:any)=>{
     const data=form(event)
     let completed=false
     execute("اسلایس و تراز وزن سینی‌ها ثبت شد.",(next)=>{
-      const parents=sliceInputIds.map((id)=>next.items.find((item)=>item.id===id)).filter(Boolean) as PWItem[]
-      if(!parents.length) throw Error("حداقل یک سبد ورودی را اسکن کنید.")
-      parents.forEach((item)=>{pwUsable(next,item);if(item.stage!=="WASHED"||item.nextZone!=="SLICING"||!item.containerCode)throw Error("یکی از سبدهای ورودی دیگر برای اسلایس معتبر نیست.")})
+      const session=(next.slicingSessions||[]).find((row:any)=>row.status==="LOCKED")
+      if(!session)throw Error("ابتدا سبدهای ورودی را ثبت و نشست اسلایس را قفل کنید.")
+      const parents=session.inputIds.map((id:string)=>next.items.find((item)=>item.id===id)).filter(Boolean) as PWItem[]
+      if(!parents.length||parents.length!==session.inputIds.length) throw Error("ورودی‌های نشست قفل‌شده کامل نیستند.")
+      parents.forEach((item)=>{if(item.consumed||item.blocked||!(item.weightKg>0)||item.stage!=="WASHED"||item.nextZone!=="SLICING"||item.currentState!=="IN_SLICING"||!item.containerCode)throw Error("یکی از سبدهای قفل‌شده دیگر برای خروج اسلایس معتبر نیست.")})
       const first=parents[0],destination=pwWashDestination(first)
       if(parents.some((item)=>item.product!==first.product||item.grade!==first.grade||pwWashDestination(item)!==destination))throw Error("محصول، گرید و مقصد نهایی سبدهای ورودی باید یکسان باشد.")
-      const weights=sliceTrayWeights.map(Number)
-      if(weights.length!==sliceTrayCount||weights.some((weight)=>!Number.isFinite(weight)||!(weight>0)))throw Error("وزن تمام سینی‌ها اجباری و باید مثبت باشد.")
-      const inputWeightKg=pwNumber(parents.reduce((sum,item)=>sum+item.weightKg,0)),outputWeightKg=pwNumber(weights.reduce((sum,weight)=>sum+weight,0)),deltaKg=pwNumber(outputWeightKg-inputWeightKg),reason=String(data.get("differenceReason")||"").trim()
-      if(Math.abs(deltaKg)>0.0005&&!reason)throw Error("برای اختلاف وزن ورودی و مجموع سینی‌ها علت را ثبت کنید.")
-      const route=pwRouteFor(destination),nextProcess=route.processes[route.processes.indexOf("SLICING")+1]||"PACKAGING",physicalLocation=nextProcess==="FREEZING"?"COLD_ROOM_NEGATIVE":first.physicalLocation||"COLD_ROOM_POSITIVE_CLEAN",id=pwId(next,"B")
-      const child:PWItem={id,code:id,parentId:parents.map((item)=>item.id).join(","),parentIds:parents.map((item)=>item.id),parentContributions:parents.map((item)=>({id:item.id,weightKg:item.weightKg})),inputCodes:parents.map((item)=>item.containerCode),product:first.product,grade:first.grade,size:[...new Set(parents.map((item)=>item.size))].join("، "),weightKg:outputWeightKg,stage:"SLICED",zone:physicalLocation,currentLocation:physicalLocation,physicalLocation,destination,operationalDestination:destination,nextZone:nextProcess,nextProcess:null,nextAction:`ثبت خروج از ${PW_ZONES[nextProcess]||nextProcess}`,qualityCheckRequired:data.get("qualityCheckRequired")==="on",containerCode:"",trays:weights.map((weight,index)=>({sequence:index+1,quantityKg:pwNumber(weight)})),allocated:true,consumed:false,blocked:data.get("qualityCheckRequired")==="on"}
+      const trayGroups=sliceTrayGroups.map((row)=>({count:Number(row.count),unitWeightKg:Number(row.unitWeightKg)}))
+      if(!trayGroups.length||trayGroups.some((row)=>!Number.isInteger(row.count)||row.count<1||row.count>100||!Number.isFinite(row.unitWeightKg)||!(row.unitWeightKg>0)))throw Error("در هر ردیف، تعداد سینی و وزن هر سینی باید معتبر و مثبت باشد.")
+      const trayCount=trayGroups.reduce((sum,row)=>sum+row.count,0)
+      const trays:{sequence:number;quantityKg:number;groupIndex:number}[]=[]
+      trayGroups.forEach((row,groupIndex)=>Array.from({length:row.count}).forEach(()=>trays.push({sequence:trays.length+1,quantityKg:pwNumber(row.unitWeightKg),groupIndex:groupIndex+1})))
+      const weights=trays.map((tray)=>tray.quantityKg)
+      const inputWeightKg=pwNumber(parents.reduce((sum,item)=>sum+item.weightKg,0)),trayOutputWeightKg=pwNumber(weights.reduce((sum,weight)=>sum+weight,0))
+      const remainderCode=pwCode(sliceRemainderCode),rawRemainderWeight=String(sliceRemainderWeight||"").trim(),remainderWeightKg=rawRemainderWeight?pwNumber(Number(rawRemainderWeight)):0
+      if((remainderCode&&!rawRemainderWeight)||(!remainderCode&&rawRemainderWeight))throw Error("برای مانده‌بار، هم QR سبد و هم وزن مانده را ثبت کنید.")
+      if(rawRemainderWeight&&(!Number.isFinite(Number(rawRemainderWeight))||!(remainderWeightKg>0)))throw Error("وزن مانده‌بار باید مثبت باشد.")
+      const accountedWeightKg=pwNumber(trayOutputWeightKg+remainderWeightKg),deltaKg=pwNumber(accountedWeightKg-inputWeightKg),reason=String(data.get("differenceReason")||"").trim()
+      if(Math.abs(deltaKg)>0.0005&&!reason)throw Error("برای اختلاف وزن ورودی با مجموع سینی‌ها و مانده‌بار علت را ثبت کنید.")
+      const route=pwRouteFor(destination),nextProcess=route.processes[route.processes.indexOf("SLICING")+1]||"PACKAGING",physicalLocation=nextProcess==="FREEZING"?"COLD_ROOM_NEGATIVE":nextProcess==="DRYING"?"DRYING":first.physicalLocation||"COLD_ROOM_POSITIVE_CLEAN",id=pwId(next,"B")
+      const inputCodes=parents.map((item)=>item.containerCode),contributionsFor=(weightKg:number)=>{let allocated=0;return parents.map((item,index)=>{const weight=index===parents.length-1?pwNumber(weightKg-allocated):pwNumber(weightKg*item.weightKg/inputWeightKg);allocated=pwNumber(allocated+weight);return {id:item.id,weightKg:weight}})}
+      const child:PWItem={id,code:id,parentId:parents.map((item)=>item.id).join(","),parentIds:parents.map((item)=>item.id),parentContributions:contributionsFor(trayOutputWeightKg),inputCodes,product:first.product,grade:first.grade,size:[...new Set(parents.map((item)=>item.size))].join("، "),weightKg:trayOutputWeightKg,stage:"SLICED",zone:physicalLocation,currentLocation:physicalLocation,physicalLocation,destination,operationalDestination:destination,nextZone:nextProcess,nextProcess:null,nextAction:pwNextOperatorAction(destination,"SLICED",nextProcess),qualityCheckRequired:data.get("qualityCheckRequired")==="on",containerCode:"",trays,allocated:true,consumed:false,blocked:data.get("qualityCheckRequired")==="on"}
       parents.forEach((item)=>{item.consumed=true;item.stage="CONSUMED";item.containerCode="";item.weightKg=0})
       next.items.push(child)
-      pwEvent(next,"ثبت اسلایس",child.code,{parents:child.parentIds,inputCodes:child.inputCodes,trayCount:sliceTrayCount,trayWeightsKg:child.trays.map((tray:any)=>tray.quantityKg),inputWeightKg,outputWeightKg,deltaKg,differenceReason:reason||null,nextZone:nextProcess})
+      let remainderBatchCode:string|null=null
+      if(remainderWeightKg>0){const carrier=pwCarrier(remainderCode,"basket");pwFreeCarrier(next,carrier.code);const remainderId=pwId(next,"B"),remainderLocation=first.physicalLocation||"COLD_ROOM_POSITIVE_CLEAN";const remainder:PWItem={id:remainderId,code:remainderId,parentId:parents.map((item)=>item.id).join(","),parentIds:parents.map((item)=>item.id),parentContributions:contributionsFor(remainderWeightKg),inputCodes,product:first.product,grade:first.grade,size:[...new Set(parents.map((item)=>item.size))].join("، "),weightKg:remainderWeightKg,stage:"WASHED",zone:remainderLocation,currentLocation:remainderLocation,physicalLocation:remainderLocation,destination,operationalDestination:destination,nextZone:"SLICING",nextProcess:null,nextAction:"منتظر ورود دوباره به اسلایس",qualityCheckRequired:false,containerCode:carrier.code,trays:[],allocated:false,consumed:false,blocked:false};next.items.push(remainder);remainderBatchCode=remainder.code;pwEvent(next,"ثبت مانده‌بار اسلایس",remainder.code,{containerCode:carrier.code,weightKg:remainderWeightKg,returnLocation:remainderLocation,nextZone:"SLICING"})}
+      pwEvent(next,"ثبت اسلایس",child.code,{parents:child.parentIds,inputCodes:child.inputCodes,trayCount,trayGroups:trayGroups.map((row)=>({...row,totalWeightKg:pwNumber(row.count*row.unitWeightKg)})),trayWeightsKg:child.trays.map((tray:any)=>tray.quantityKg),inputWeightKg,trayOutputWeightKg,remainderWeightKg,remainderContainerCode:remainderCode||null,remainderBatchCode,accountedWeightKg,deltaKg,differenceReason:reason||null,nextZone:nextProcess})
+      session.status="COMPLETED";session.completedAt=new Date().toISOString();session.outputIds=[child.id,...(remainderBatchCode?[remainderBatchCode]:[])]
       completed=true
     })
-    if(completed){setSliceInputIds([]);setSliceScan("");setSliceTrayCount(1);setSliceTrayWeights([""]);setSliceDifferenceReason("")}
+    if(completed){setSliceInputIds([]);setSliceScan("");setSliceTrayGroups([{id:1,count:"1",unitWeightKg:""}]);setSliceRemainderCode("");setSliceRemainderWeight("");setSliceDifferenceReason("")}
   }
   const createCycle = (event: any, type: string) => {
     const data = form(event)
@@ -1405,10 +1485,8 @@ function ProductionScreen(props: any) {
                 : "DRYING"
         items.forEach((item) => {
           pwUsable(next, item)
-          if (
-            item.stage !== expectedStage ||
-            (item.zone !== expectedZone && item.nextZone !== expectedZone)
-          )
+          const directFreezeDryEntry=type==="FREEZE_DRY"&&item.destination==="FREEZE_DRYING"&&item.stage==="SLICED"&&item.nextZone==="FREEZING"&&item.physicalLocation==="COLD_ROOM_NEGATIVE"
+          if (!directFreezeDryEntry&&(item.stage !== expectedStage || (item.zone !== expectedZone && item.nextZone !== expectedZone)))
             throw Error(
               "مرحله یا محل فعلی یکی از بچ‌ها برای این چرخه مناسب نیست.",
             )
@@ -1417,10 +1495,11 @@ function ProductionScreen(props: any) {
           throw Error("بچ آزمایشی و داده شما نباید در یک چرخه ترکیب شوند.")
         items.forEach((item) => {
           const before = item!.zone
+          if(type==="FREEZE_DRY"&&item!.stage==="SLICED"&&item!.destination==="FREEZE_DRYING")item!.stage="FROZEN"
           item!.zone = expectedZone
           item!.currentLocation = expectedZone
           item!.currentState = "IN_PROCESS"
-          item!.nextAction = `انجام عملیات ${PW_ZONES[expectedZone]}`
+            item!.nextAction = `در مرحله ${PW_ZONES[expectedZone]} و منتظر ثبت خروج`
           pwEvent(next, `ورود به ${PW_ZONES[expectedZone]}`, item!.code, {
             from: before,
             to: expectedZone,
@@ -1704,7 +1783,7 @@ function ProductionScreen(props: any) {
       !pwBusy(ledger, item) &&
       !item.blocked &&
       (cycleType === "FREEZE_DRY"
-          ? item.stage === "FROZEN" && (item.zone === "FREEZE_DRYING" || item.nextZone === "FREEZE_DRYING")
+          ? (item.stage === "FROZEN" && (item.zone === "FREEZE_DRYING" || item.nextZone === "FREEZE_DRYING")) || (item.destination==="FREEZE_DRYING"&&item.stage==="SLICED"&&item.nextZone==="FREEZING"&&item.physicalLocation==="COLD_ROOM_NEGATIVE")
           : false),
   )
   const freezeOutputEligible=live.filter(item=>!pwBusy(ledger,item)&&!item.blocked&&item.nextZone==="FREEZING"&&["WASHED","SLICED"].includes(item.stage))
@@ -1935,17 +2014,21 @@ function ProductionScreen(props: any) {
           <div style={pwBox}>
             <h2>ثبت ورود سبدها به اسلایس</h2>
             <PWNotice>سبدهای هم‌محصول، هم‌گرید و هم‌مقصد را اسکن کنید. سینی‌ها شناسه و QR جداگانه ندارند؛ فقط تعداد و وزن اجباری هر سینی ثبت می‌شود.</PWNotice>
-            <div style={{display:"flex",gap:8}}><input aria-label="اسکن سبد ورودی اسلایس" value={sliceScan} onChange={(event)=>setSliceScan(event.target.value)} onKeyDown={(event)=>{if(event.key==="Enter"){event.preventDefault();scanSliceInput(sliceScan)}}} style={{...pwInput,flex:1,fontFamily:"monospace"}} placeholder="اسکن QR سبد"/><PWButton secondary onClick={()=>setSliceScanOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton><PWButton disabled={!sliceScan} onClick={()=>scanSliceInput(sliceScan)}>افزودن</PWButton></div>
+            {!activeSliceSession&&<div style={{display:"flex",gap:8}}><input aria-label="اسکن سبد ورودی اسلایس" value={sliceScan} onChange={(event)=>setSliceScan(event.target.value)} onKeyDown={(event)=>{if(event.key==="Enter"){event.preventDefault();scanSliceInput(sliceScan)}}} style={{...pwInput,flex:1,fontFamily:"monospace"}} placeholder="اسکن QR سبد"/><PWButton secondary onClick={()=>setSliceScanOpen(true)}>⌗ شبیه‌ساز اسکن</PWButton><PWButton disabled={!sliceScan} onClick={()=>scanSliceInput(sliceScan)}>افزودن</PWButton></div>}
             <ScanSimulator open={sliceScanOpen} title="اسکن سبد ورودی اسلایس" suggestedCode={sliceEligible.find((item)=>!sliceInputIds.includes(item.id))?.containerCode||""} onClose={()=>setSliceScanOpen(false)} onScan={scanSliceInput}/>
-            <div style={{marginTop:14,border:"1px solid #d8e4df",borderRadius:10,overflow:"hidden"}}><div style={{display:"grid",gridTemplateColumns:".5fr 1fr 1fr 1fr .5fr",padding:9,background:"#eef4f1",fontSize:11,fontWeight:800}}><span>#</span><span>سبد</span><span>محصول / گرید</span><span>وزن ورودی</span><span></span></div>{sliceEligible.filter((item)=>sliceInputIds.includes(item.id)).map((item,index)=><div key={item.id} style={{display:"grid",gridTemplateColumns:".5fr 1fr 1fr 1fr .5fr",padding:10,borderTop:"1px solid #e1eae6",fontSize:12}}><span>{index+1}</span><b style={{fontFamily:"monospace"}}>{item.containerCode}</b><span>{item.product} / {item.grade}</span><b>{item.weightKg.toFixed(3)} kg</b><button type="button" onClick={()=>setSliceInputIds(sliceInputIds.filter((id)=>id!==item.id))} style={{border:0,background:"transparent",color:"#c23d3d"}}>حذف</button></div>)}</div>
+            {activeSliceSession&&<PWNotice>نشست <b>{activeSliceSession.id}</b> قفل و ذخیره شده است. خروج از صفحه یا رفرش، سبدها را از وضعیت «داخل اسلایس» خارج نمی‌کند.</PWNotice>}
+            <div style={{marginTop:14,border:"1px solid #d8e4df",borderRadius:10,overflow:"hidden"}}><div style={{display:"grid",gridTemplateColumns:".35fr .8fr 1fr .7fr .9fr .9fr .35fr",gap:6,padding:9,background:"#eef4f1",fontSize:11,fontWeight:800}}><span>#</span><span>سبد</span><span>محصول / گرید</span><span>وزن ورودی</span><span>مقصد بعدی</span><span>مقصد نهایی</span><span></span></div>{selectedSliceItems.map((item,index)=><div key={item.id} style={{display:"grid",gridTemplateColumns:".35fr .8fr 1fr .7fr .9fr .9fr .35fr",gap:6,padding:10,borderTop:"1px solid #e1eae6",fontSize:12,alignItems:"center"}}><span>{index+1}</span><b style={{fontFamily:"monospace"}}>{item.containerCode}</b><span>{item.product} / {item.grade}</span><b>{item.weightKg.toFixed(3)} kg</b><span>{PW_ZONES[item.nextZone||"SLICING"]||item.nextZone||"اسلایس"}</span><b>{PW_ZONES[pwWashDestination(item)]||pwWashDestination(item)}</b>{activeSliceSession?<b style={{color:"#176b50"}}>قفل</b>:<button type="button" onClick={()=>setSliceInputIds(sliceInputIds.filter((id)=>id!==item.id))} style={{border:0,background:"transparent",color:"#c23d3d"}}>حذف</button>}</div>)}</div>
+            {!activeSliceSession&&<div style={{marginTop:12}}><PWButton disabled={!sliceInputIds.length} onClick={lockSlicingInputs}>ثبت ورود و قفل نشست اسلایس</PWButton></div>}
           </div>
           <form onSubmit={completeSlicing} style={pwBox}>
-            <h2>ثبت خروجی روی سینی‌ها</h2>
-            <PWField label="تعداد سینی"><input type="number" min="1" max="50" step="1" value={sliceTrayCount} onChange={(event)=>resizeSliceTrays(Number(event.target.value))} required style={pwInput}/></PWField>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{sliceTrayWeights.map((weight,index)=><PWField key={index} label={`وزن سینی ${index+1} (kg)`}><input aria-label={`وزن سینی ${index+1}`} type="number" min="0.001" step="0.001" value={weight} onChange={(event)=>setSliceTrayWeights(sliceTrayWeights.map((row,rowIndex)=>rowIndex===index?event.target.value:row))} required style={pwInput}/></PWField>)}</div>
-            {(()=>{const inputTotal=sliceEligible.filter((item)=>sliceInputIds.includes(item.id)).reduce((sum,item)=>sum+item.weightKg,0),outputTotal=sliceTrayWeights.reduce((sum,value)=>sum+(Number(value)||0),0),delta=pwNumber(outputTotal-inputTotal);return <><PWNotice>وزن ورودی: <b>{inputTotal.toFixed(3)} kg</b> · مجموع سینی‌ها: <b>{outputTotal.toFixed(3)} kg</b> · اختلاف: <b>{delta.toFixed(3)} kg</b></PWNotice>{Math.abs(delta)>0.0005&&<PWField label="علت اختلاف وزن"><input name="differenceReason" value={sliceDifferenceReason} onChange={(event)=>setSliceDifferenceReason(event.target.value)} required style={pwInput}/></PWField>}</>})()}
+            <h2>ثبت گروه‌های سینی</h2>
+            <PWNotice>برای سینی‌های هم‌وزن فقط یک ردیف ثبت کنید؛ مثلاً ۱۸ سینی × ۲٫۵ کیلو. سینی‌های آخر با وزن متفاوت در ردیف جدا ثبت می‌شوند.</PWNotice>
+            <div style={{border:"1px solid #d8e4df",borderRadius:10,overflow:"hidden",marginBottom:12}}><div style={{display:"grid",gridTemplateColumns:".4fr 1fr 1fr 1fr .4fr",gap:8,padding:9,background:"#eef4f1",fontSize:11,fontWeight:800}}><span>#</span><span>تعداد سینی</span><span>وزن هر سینی</span><span>جمع ردیف</span><span></span></div>{sliceTrayGroups.map((row,index)=><div key={row.id} style={{display:"grid",gridTemplateColumns:".4fr 1fr 1fr 1fr .4fr",gap:8,padding:9,borderTop:"1px solid #e1eae6",alignItems:"center"}}><b>{index+1}</b><input aria-label={`تعداد سینی گروه ${index+1}`} type="number" min="1" max="100" step="1" value={row.count} onChange={(event)=>updateSliceTrayGroup(row.id,"count",event.target.value)} required style={pwInput}/><input aria-label={`وزن هر سینی گروه ${index+1}`} type="number" min="0.001" step="0.001" value={row.unitWeightKg} onChange={(event)=>updateSliceTrayGroup(row.id,"unitWeightKg",event.target.value)} required style={pwInput}/><b>{pwNumber((Number(row.count)||0)*(Number(row.unitWeightKg)||0)).toFixed(3)} kg</b><button type="button" disabled={sliceTrayGroups.length===1} onClick={()=>removeSliceTrayGroup(row.id)} style={{border:0,background:"transparent",color:"#c23d3d"}}>حذف</button></div>)}</div>
+            <PWButton secondary onClick={addSliceTrayGroup}>＋ افزودن ردیف با وزن متفاوت</PWButton>
+            <div style={{marginTop:16,padding:14,border:"1px solid #d8e4df",borderRadius:10,background:"#fafcfb"}}><h3 style={{margin:"0 0 6px"}}>مانده‌بار برگشتی به سردخانه (اختیاری)</h3><p style={{fontSize:11,color:"#718079",marginTop:0}}>اگر بخشی از محصول در سینی‌ها جا نشد، سبد مانده را روی باسکول بگذارید و QR آن را اسکن کنید؛ وزن پایدار لودسل خودکار ثبت می‌شود.</p><div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"end"}}><PWField label="QR سبد مانده"><input aria-label="QR سبد مانده اسلایس" value={sliceRemainderCode} onChange={(event)=>{setSliceRemainderCode(event.target.value);setSliceRemainderWeight("")}} onKeyDown={(event)=>{if(event.key==="Enter"){event.preventDefault();scanSliceRemainder(sliceRemainderCode)}}} style={{...pwInput,fontFamily:"monospace"}} placeholder="CTR-..."/></PWField><PWButton secondary onClick={()=>setSliceRemainderScanOpen(true)}>⌗ اسکن</PWButton></div><SlicingRemainderScaleConsole code={sliceRemainderCode} net={Number(sliceRemainderWeight||0)} tare={Number(pwCarriers().find((carrier:any)=>carrier.code===pwCode(sliceRemainderCode))?.tareWeightKg??pwCarriers().find((carrier:any)=>carrier.code===pwCode(sliceRemainderCode))?.tare??0)}/><ScanSimulator open={sliceRemainderScanOpen} title="اسکن سبد مانده اسلایس" suggestedCode={sliceRemainderCode||"CTR-008"} onClose={()=>setSliceRemainderScanOpen(false)} onScan={scanSliceRemainder}/></div>
+            {(()=>{const inputTotal=selectedSliceItems.reduce((sum,item)=>sum+item.weightKg,0),trayTotal=sliceTrayGroups.reduce((sum,row)=>sum+(Number(row.count)||0)*(Number(row.unitWeightKg)||0),0),remainderTotal=Number(sliceRemainderWeight)||0,accountedTotal=trayTotal+remainderTotal,delta=pwNumber(accountedTotal-inputTotal);return <><PWNotice>وزن ورودی: <b>{inputTotal.toFixed(3)} kg</b> · سینی‌ها: <b>{trayTotal.toFixed(3)} kg</b> · مانده سبد: <b>{remainderTotal.toFixed(3)} kg</b> · اختلاف: <b>{delta.toFixed(3)} kg</b></PWNotice>{Math.abs(delta)>0.0005&&<PWField label="علت اختلاف وزن"><input name="differenceReason" value={sliceDifferenceReason} onChange={(event)=>setSliceDifferenceReason(event.target.value)} required style={pwInput}/></PWField>}</>})()}
             <label style={{display:"flex",gap:8,fontSize:12,margin:"10px 0"}}><input name="qualityCheckRequired" type="checkbox"/>نیازمند کنترل کیفیت در خروج اسلایس</label>
-            <PWButton disabled={!sliceInputIds.length||sliceTrayWeights.some((weight)=>!(Number(weight)>0))}>ثبت پایان اسلایس و تراز سینی‌ها</PWButton>
+            <PWButton disabled={!activeSliceSession||!sliceTrayGroups.length||sliceTrayGroups.some((row)=>!(Number(row.count)>0)||!(Number(row.unitWeightKg)>0))||((!!sliceRemainderCode)!=(!!sliceRemainderWeight))}>ثبت پایان اسلایس، سینی‌ها و مانده‌بار</PWButton>
           </form>
         </div>
       )}
