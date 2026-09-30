@@ -81,7 +81,7 @@ function Hub({ onEnter }: { onEnter: (mode: AppMode) => void }) {
           </div>
         </div>
         <div className="flex gap-2">
-          {["۲۰ صفحه Web", "۹ صفحه PDA", "۷ صفحه Terminal", "۳۶ Screen"].map((tag) => (
+          {["۲۰ صفحه Web", "۹ صفحه PDA", "۱۳ ایستگاه Terminal", "۴۲ Screen"].map((tag) => (
             <span
               key={tag}
               className="font-['Vazirmatn:Regular',sans-serif] text-white text-[14px] px-4 py-2 rounded-full"
@@ -126,9 +126,9 @@ function Hub({ onEnter }: { onEnter: (mode: AppMode) => void }) {
         />
         <HubCard
           label="ترمینال ایستگاهی"
-          sublabel="TERMINAL · 7 SCREENS"
-          count="۷ صفحه"
-          desc="جریان‌های کامل دستگاه‌محور — ورود، انتخاب وظیفه، دریافت و توزین، بسته‌بندی، کنترل کیفیت، اقلام مصرفی، انتقال بین سایت و تکمیل"
+          sublabel="TERMINAL · 13 STATIONS"
+          count="۱۳ ایستگاه"
+          desc="کنترل لمسی دریافت، ورود و خروج مراحل تولید، بسته‌بندی، صادرات تازه و ارسال با همان جریان و داده مشترک پنل وب"
           accent="#176b50"
           onClick={() => onEnter("terminal")}
         />
@@ -147,7 +147,10 @@ function Hub({ onEnter }: { onEnter: (mode: AppMode) => void }) {
 }
 
 export default function App() {
-  const [mode, setMode] = useState<AppMode>("hub");
+  const initialMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mode") === "terminal"
+    ? "terminal"
+    : "hub";
+  const [mode, setMode] = useState<AppMode>(initialMode);
 
   if (mode === "web") return <WebApp onExit={() => setMode("hub")} />;
   if (mode === "pda") return <PDAApp onExit={() => setMode("hub")} />;

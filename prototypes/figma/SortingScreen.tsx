@@ -17,8 +17,9 @@ function SortingScaleConsole({
   onRead?: () => void
 }) {
   const number = (value: number) => Number.isFinite(value) ? value.toFixed(3) : "0.000"
-  return <section className="mx-auto w-full max-w-[1240px] overflow-hidden rounded-2xl border border-[#1b5a46] bg-[#082b20] p-4 text-white shadow-xl" aria-label={`کنسول توزین ${mode === "entry" ? "ورود" : "خروج"} سورتینگ`}>
-    <div className="grid grid-cols-[1.05fr_1.45fr_1.15fr_1fr] gap-3" dir="rtl">
+  return <section data-scale-console className="mx-auto w-full max-w-[1240px] overflow-hidden rounded-2xl border border-[#1b5a46] bg-[#082b20] p-4 text-white shadow-xl" aria-label={`کنسول توزین ${mode === "entry" ? "ورود" : "خروج"} سورتینگ`}>
+    <div className="terminal-scale-strip hidden" dir="rtl"><div className="terminal-scale-cell"><small>باسکول سورتینگ · آنلاین</small><b style={{color:code?"#62e5ad":"#91b9aa"}}>{code||"در انتظار اسکن"}</b><small>RS485 · پایدار ±0.002 kg</small></div><div className="terminal-scale-cell"><small>{mode==="entry"?"وزن قبلی":"وزن ناخالص"}</small><b className="font-mono">{number(mode==="entry"?previousNet||0:gross)} kg</b><small>{mode==="entry"?`اختلاف ${number(net-(previousNet||0))} kg`:`ظرف ${number(tare)} kg`}</small></div><div className="terminal-scale-cell"><small>{mode==="entry"?"وزن خالص جدید":"وزن خالص آنلاین"}</small><b className="terminal-scale-weight">{number(net)} <i style={{fontSize:10,color:"#62e5ad",fontStyle:"normal"}}>kg</i></b><small>10 Hz · SENS HIGH</small></div>{mode==="entry"?<button type="button" onClick={onRead} className="terminal-scale-action">↻ ثبت وزن جدید</button>:<div className="terminal-scale-cell"><small>وضعیت</small><b style={{color:"#62e5ad"}}>● خوانش آنلاین</b><small>پس از اسکن</small></div>}</div>
+    <div className="terminal-scale-full grid grid-cols-[1.05fr_1.45fr_1.15fr_1fr] gap-3" dir="rtl">
       <div className="flex flex-col justify-between rounded-xl border border-[#1b5a46] bg-[#061f17] p-3">
         <div className="flex items-center justify-between text-[11px]"><b className="text-[#c9f7e4]">● باسکول رومیزی ۱</b><span className="font-mono text-[#62e5ad]">10 Hz</span></div>
         <div className="mt-3 rounded-lg border border-[#1b5a46] bg-[#0d382a] p-2 text-[10px]"><div className="flex justify-between"><span>لودسل آنلاین</span><b className="font-mono text-[#62e5ad]">RS485</b></div><div className="mt-2 flex justify-between text-[#8eb8a8]"><span>قرائت پایدار</span><b>± 0.002 kg</b></div></div>
@@ -68,7 +69,8 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
     [staged, setStaged] = useState<string[]>([]),
     [weighingCode, setWeighingCode] = useState(""),
     [outputScanOpen, setOutputScanOpen] = useState(false),
-    [inputScanOpen, setInputScanOpen] = useState(false)
+    [inputScanOpen, setInputScanOpen] = useState(false),
+    [completedEntrySummary, setCompletedEntrySummary] = useState<{ count: number; weight: number } | null>(null)
   const scale = "STABLE"
   const defaultFleet = [
     {
@@ -169,9 +171,13 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
     QC: "کنترل کیفیت",
     WASTE: "دفع / امحاء · فقط ثبت وزن",
   }
-  const productGrades = readMasterData().products.find(
-    (item) => item.name === sources[0]?.product,
-  )?.grades || ["A", "B", "C"]
+  const sortingProduct = readMasterData().products.find(
+      (item) => item.active && item.name === sources[0]?.product,
+    ),
+    productGrades = (sortingProduct?.grades || []).filter(Boolean),
+    productSizes = (sortingProduct?.sizes || []).filter(Boolean),
+    selectedGrade = productGrades.includes(grade) ? grade : productGrades[0] || "",
+    selectedSize = productSizes.includes(size) ? size : productSizes[0] || ""
   function scanInput(rawCode = scanCode) {
     const code = pwCode(rawCode),
       source = batch.baskets.find((b: any) => pwCode(b.code) === code)
@@ -250,6 +256,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
         ),
         events: [...current.events, { time: new Date().toLocaleTimeString("fa-IR"), title: "شروع نشست سورتینگ", detail: `${inputCodes.length} سبد قفل شد و در وضعیت در حال سورت قرار گرفت.` }],
       })
+      setCompletedEntrySummary({ count: inputCodes.length, weight: inputWeight })
       setStep("entry-done")
       setInputCodes([])
       setEntryWeights({})
@@ -288,6 +295,8 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
   }
   function add() {
     const waste=destination==="WASTE"
+    if (!waste && (!selectedGrade || !selectedSize))
+      return setError("گرید و اندازه این محصول باید ابتدا در تنظیمات داده‌های پایه تعریف و فعال شوند.")
     if (
       (!waste&&!carrier) ||
       outputs.some((o) => o.code === outputCode) ||
@@ -316,8 +325,8 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
       ...outputs,
       {
         code: waste?"":outputCode,
-        grade,
-        size,
+        grade: selectedGrade || sources[0]?.grade || "",
+        size: selectedSize || sources[0]?.size || "",
         gross: Number(gross),
         tare,
         weight: net,
@@ -357,7 +366,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
         <Card className="p-7 text-center">
           <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-full bg-[#176b50] text-2xl text-white">✓</div>
           <h3 className="text-xl font-bold text-[#176b50]">ورود سبدها ثبت و نشست سورتینگ قفل شد</h3>
-          <p className="my-3 text-[13px]">{inputCodes.length} سبد با وزن ورودی {inputWeight.toFixed(3)} کیلوگرم اکنون در وضعیت «در حال سورت» هستند.</p>
+          <p className="my-3 text-[13px]">{completedEntrySummary?.count ?? inputCodes.length} سبد با وزن ورودی {(completedEntrySummary?.weight ?? inputWeight).toFixed(3)} کیلوگرم اکنون در وضعیت «در حال سورت» هستند.</p>
           <p className="text-[12px] text-[#718079]">خاموش یا روشن‌شدن سیستم وضعیت نشست را از بین نمی‌برد؛ خروج سورتینگ از کلید مستقل میز کار ثبت می‌شود.</p>
         </Card>
       ) : step === "done" ? (
@@ -502,9 +511,10 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                     گرید نهایی
                     <select
                       className={field}
-                      value={grade}
+                      value={selectedGrade}
                       onChange={(e) => setGrade(e.target.value)}
                     >
+                      {!productGrades.length && <option value="">ابتدا گرید محصول را در تنظیمات ثبت کنید</option>}
                       {productGrades.map((x) => (
                         <option key={x}>{x}</option>
                       ))}
@@ -514,10 +524,11 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                     اندازه نهایی
                     <select
                       className={field}
-                      value={size}
+                      value={selectedSize}
                       onChange={(e) => setSize(e.target.value)}
                     >
-                      {["درشت", "متوسط", "ریز", "مخلوط"].map((x) => (
+                      {!productSizes.length && <option value="">ابتدا اندازه‌های محصول را در تنظیمات ثبت کنید</option>}
+                      {productSizes.map((x) => (
                         <option key={x}>{x}</option>
                       ))}
                     </select>
@@ -559,6 +570,8 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                     (destination!=="WASTE"&&!carrier) ||
                     !gross ||
                     scale !== "STABLE" ||
+                    (destination!=="WASTE"&&!selectedGrade) ||
+                    (destination!=="WASTE"&&!selectedSize) ||
                     (destination!=="WASTE"&&!staged.includes(outputCode))
                   }
                   onClick={add}

@@ -1,6 +1,91 @@
 # UI / Backend Change Control
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
+
+## 2026-09-26 — Thirteen-station Terminal workspace (local UI rewrite)
+
+- Correction on 2026-09-27: the fixed Raspberry Pi terminal again requires operator authentication before station selection. The operator can enter with username/password or scan an operator QR/badge; both methods resolve an active user through one shared prototype authenticator. The screen identifies `RPI-TERM-IRAN-01` and shows scanner, scale, and printer connectivity. Logging out clears the operator session and returns to authentication.
+- Raspberry layout correction on 2026-09-27: all thirteen station routes now render inside a dedicated fixed-height kiosk shell rather than inheriting the desktop Web shell. The shell uses persistent device/session context, a compact station header, 44px minimum touch targets, reduced density, constrained scrolling, and responsive rules tuned against the physical Raspberry display at 800x480. Production routes open directly in their selected operation, omit the desktop test-reset action, and use terminal-sized padding/title treatment. The build supports `?mode=terminal` so the kiosk bypasses the design hub. An on-device 800x480 capture and LAN HTTP 200 response verified the deployment. No backend, database, API, or contract was changed.
+- Raspberry touch correction on 2026-09-27: every scale-bearing terminal workflow now exposes the same sticky 100px scale strip at the top of its operation scroll area, keeping live weight, carrier/session, connection state, and the relevant capture action visible while the form scrolls. Native select popovers are suppressed only inside the Raspberry terminal; each touch advances to the next enabled non-placeholder option and dispatches the original input/change handlers, while the Web UI keeps its normal dropdown behavior. Receiving, Sorting, Washing, Slicing remainder, freezing, drying, freeze-drying, and fresh-export screens inherit the shared treatment. UI/prototype only; no backend or contract change.
+- The old seven-screen Terminal demo and its independent fake Receiving, Packaging, Quality, Consumables, and Transfer forms were removed from the maintained prototype source.
+- Terminal now presents exactly thirteen touch-first station choices: Receiving; Sorting Entry/Exit; Washing Entry/Exit; Slicing Entry; Freeze Output + Packaging; Dryer Output + Packaging; Freeze-Dry Entry; Freeze-Dry Output + Packaging; Packaging; Fresh Export; and Shipping.
+- Every station mounts the same Web workflow component and therefore shares the same browser-local records, scan handlers, load-cell simulations, validation, genealogy, consumable stock, labels, and next-action state. Terminal no longer has a second mock implementation that can drift from Web behavior.
+- Production stations open their specific operation directly rather than landing on the Production overview. The Terminal header always provides an explicit return to station selection.
+- This is a local prototype UI composition change only. No backend route, request, response, contract, migration, or database was changed. The local password `1234` and QR `USR-U1` are demonstrator credentials only and are not a production credential design. The production terminal must use the existing server-side authenticated session, hashed credentials/badge mechanisms, device identity, and authorization. The prototype still uses browser-local storage and simulated equipment; production deployment of these Terminal flows must be verified against the corresponding backend/client contracts before factory use. No visual browser test was requested for this round.
+
+## 2026-09-26 — Scan-first carton assembly in Packaging (local UI correction)
+
+- Settings → Consumables now supports carton definitions with stock, empty weight, maximum package count, allowed content (`POUCH`, `STYROFOAM`, or both), and an optional compatible pouch fill size.
+- Packaging now creates one open carton draft in the operator UI, accepts package QR codes through the same handler for hardware entry and the scan simulator, validates carton capacity and package compatibility, and then seals the carton with a unique label and retained child-package genealogy.
+- Dry and freeze-dried retail pouches are required to enter a sealed carton before Shipping accepts them. Frozen and fresh-export styrofoam boxes may either enter a compatible carton or move directly to Shipping.
+- Sealing deducts one carton from the shared consumables inventory. The carton stores every child package ID/code, net and gross weight, carton definition code, label time, product, grade, and original package genealogy. Live Inventory hides the nested child rows beneath the carton while history retains them.
+- Backend alignment: the production backend already supports empty CARTON drafts, scan-first child attachment, sealing, labels, cancellation/reversal, and finished-goods transfer (FR26, FR49, FR83). This local prototype mirrors that domain order but is not wired to those HTTP routes in this round. No backend, API, contract, migration, or database change was made. No visual browser test was requested.
+
+## 2026-09-26 — Shared consumable inventory for dry, freeze-dry, and frozen packaging (local UI correction)
+
+- Settings → Consumables now also defines metallized pouches with nominal fill weight, empty-unit weight, active state, and available quantity. Existing local stores are migrated non-destructively by adding the default pouch definitions only when their codes are absent.
+- Dryer Output and Freeze-Dry Output now populate their pouch selectors from this shared settings collection. Completing one labelled package deducts one selected pouch; zero stock blocks packaging instead of allowing a negative balance.
+- Freeze Output now populates its styrofoam selector from the same shared collection used by Fresh Export. Completing one frozen box deducts one selected styrofoam box; zero stock blocks packaging.
+- Product genealogy, package labels, scale calculations, source-batch remainder behavior, and the existing inner-plastic/moisture-absorber mock selections are unchanged.
+- This is a browser-local source-of-truth correction. No backend, API, contract, migration, or database change was made. No visual browser test was requested for this round.
+
+## 2026-09-26 — Batch-based Fresh Export with configured styrofoam and gel packs (local UI proposal)
+
+- Packaging → Fresh Export now starts from one live sorted batch whose final destination is `FRESH_EXPORT`; it no longer asks the operator to choose individual baskets as the packaging source.
+- Settings → Consumables is now an editable browser-local source for styrofoam boxes and gel packs. Each styrofoam definition retains capacity and empty weight, and each gel-pack definition retains unit weight, active state, and available quantity.
+- The operator selects box size, gel-pack type and count, and the connected-scale product weight. Each confirmation creates one traceable labelled export box, retains the source batch genealogy, leaves any unboxed batch remainder open, and deducts exactly one styrofoam box plus the selected number of gel packs from local consumable inventory.
+- Backend alignment: Fix Request 55 already provides the production Fresh Shipping Box draft/confirm, capacity, official weighing, label, cold-holding, and shipment lifecycle. This prototype does not call those routes, and the exact UI model for configurable styrofoam/gel-pack stock consumption has not been proven against a production endpoint in this round. No backend, API, contract, migration, or database change was made.
+- No visual browser test was requested for this round.
+
+## 2026-09-26 — Fresh Export moved from Production to Packaging navigation (local UI correction)
+
+- `صادرات تازه` is no longer grouped under the Production sidebar section.
+- Packaging now has two sub-pages: the existing Packaging workspace and Fresh Export. The existing Fresh Export screen and its state/handlers are reused directly; no duplicate workflow was created.
+- This is navigation ownership only. No backend, API, contract, migration, database, or workflow-state change was made. No visual browser test was requested for this round.
+
+## 2026-09-26 — Freeze packaging keeps the batch open between boxes (local UI correction)
+
+- Root cause: after the first frozen box was created, the remaining source weight was correctly retained, but the source moved to `FROZEN / PACKAGING` without the `remainderForPackaging` eligibility flag. The next render therefore removed the batch from Freeze Output and made a partial 50 kg batch appear closed after its first box.
+- Every partially consumed frozen source is now explicitly retained as packaging remainder under the same input batch. The next box weight is prefilled from the smaller of box capacity and true remaining weight, and the operator sees the updated remaining kilograms after each label.
+- Each click closes only the physical box. The batch closes automatically only when its remaining weight reaches zero, or explicitly through `بستن نشست و ثبت مانده` with a scanned basket.
+- No backend, API, contract, migration, or database change was made. No visual browser test was requested for this round.
+
+## 2026-09-26 — Sorting-entry confirmation preserves its committed summary (local UI correction)
+
+- Root cause: after a Sorting session was persisted successfully, the entry form cleared `inputCodes` and captured weights. The success panel calculated its basket count and input weight from those cleared form values, so it incorrectly displayed zero even though the persisted session and inventory state were correct.
+- The successful commit now captures an immutable count/weight summary before resetting the form. The confirmation panel reads that committed snapshot, while the underlying form state may still be safely cleared.
+- No backend, API, contract, migration, or database change was made. No visual browser test was requested for this round.
+
+## 2026-09-26 — Sorting output sizes follow product master data (local UI correction)
+
+- Root cause: Sorting output already looked up the selected product's grades, but its final-size selector still used a hardcoded `درشت / متوسط / ریز / مخلوط` list. This allowed an operator to record a size that was not configured for that product.
+- Sorting now resolves one active product definition from Settings → Master Data and uses that same definition for both final grade and final size. The effective selection automatically follows the first configured value when the previous form value is not valid for the current product.
+- If the product is missing, inactive, or has no configured grade/size, normal Sorting output is blocked with an explicit instruction to correct master data. Disposal remains weight-only and is not blocked by this classification requirement.
+- No backend, API, contract, migration, or database change was made. No visual browser test was requested for this round.
+
+## 2026-09-26 — Inventory groups by original receiving batch and reports Sorting conversion (local UI correction)
+
+- Root cause: Sorting intentionally creates separate operational `batchCode` values when grade, size, or final destination changes. Inventory was using those operational codes as its top-level grouping key, so baskets from one receiving batch appeared as unrelated inventory batches after regrading.
+- Inventory now resolves each live item's original receiving batch recursively through `parentBatchIds` and parent-item genealogy. All grades, sizes, destinations, and carrier baskets originating from the same receiving batch appear under one inventory row; different receiving-batch roots remain separate so their receiving age is not blended.
+- The receiving timestamp is inherited for the inventory aging display of descendant items. A genuinely mixed-origin item is labelled with all origin batch codes rather than being silently attached to one batch.
+- Inventory → Product batches → `دفتر` now includes a `گزارش تبدیل بچ ورودی بعد از سورت` section. It shows each Sorting session's input, output, loss/reason, and every delivered output's operational batch, product, grade, size, weight, and final destination. New Sorting events persist these fields directly; earlier local events fall back to their retained item genealogy and weighted parent contributions.
+- No backend, API, contract, migration, or database change was made. No visual browser test was requested for this round.
+
+## 2026-09-26 — Batch-based freeze output and direct styrofoam packaging (local UI proposal)
+
+- Production → Freeze Output now selects the incoming freeze `batchCode`, not an individual basket. Every still-live physical unit under that code is shown as one batch with its total remaining weight and parent-unit count.
+- Regular frozen product is not graded or sorted again. The operator weighs one final package at a time, selects a configured styrofoam box and inner plastic, and the prototype calculates packaging tare and gross weight before creating and printing a unique package label.
+- Every resulting box keeps its own package/label identity while retaining the selected input batch as its `batchCode`, so Inventory can show the packages beneath the batch instead of creating one unrelated batch per box.
+- The operator can close an incomplete freeze-packaging session by scanning one free reusable basket. The full remaining weight is moved into that basket in negative cold storage, keeps the same input `batchCode` and genealogy, and returns later as frozen stock waiting for packaging; the scanned carrier is capacity- and occupancy-validated before the move.
+- Freeze-dry-bound product remains a separate exception: the whole selected batch leaves Freezing without packaging and becomes ready for Freeze-Dry entry.
+- This is a browser-local UI/workflow proposal only. No backend, API, contract, migration, or database change was made. No visual browser test was requested for this round.
+
+## 2026-09-26 — Finished packages grouped under one packaging batch (local UI correction)
+
+- Every dried or freeze-dried retail package keeps its own package/label identity, but packages produced while the same packaging session remains open now share one persisted packaging `batchCode`.
+- The shared code is stored on the still-open graded source items, so refreshing or leaving the screen between individual package weighings does not split the inventory into one batch per package.
+- Inventory continues to aggregate by `batchCode`; opening the batch ledger shows the individual packages and their parent contributions. Selecting sources from two different still-open packaging batches is rejected rather than silently merging their genealogy.
+- No backend, API, contract, migration, or database change was made.
 
 ## 2026-09-25 — Sorting entry locks product and grade; output reclassifies (local UI proposal)
 

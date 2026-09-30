@@ -399,6 +399,18 @@ function pwId(ledger: PWLedger, prefix: string) {
   ledger.idSeq = (ledger.idSeq || 0) + 1
   return `${prefix}-SIM-${String(ledger.idSeq).padStart(5, "0")}`
 }
+function pwPackagingBatchCode(ledger:PWLedger,sources:PWItem[],prefix:string){
+  const activeBatchCodes=[...new Set(sources.map((item)=>item.activePackagingBatchCode).filter(Boolean))]
+  if(activeBatchCodes.length>1)throw Error("منابع انتخاب‌شده متعلق به دو نشست بسته‌بندی فعال هستند؛ ابتدا یکی از نشست‌ها را ببندید.")
+  const batchCode=activeBatchCodes[0]||pwId(ledger,prefix)
+  sources.forEach((item)=>{item.activePackagingBatchCode=batchCode})
+  return batchCode
+}
+function pwFreezeBatchGroups(items:PWItem[]){
+  const groups=new Map<string,PWItem[]>()
+  items.forEach((item)=>{const code=item.batchCode||item.code;groups.set(code,[...(groups.get(code)||[]),item])})
+  return [...groups.entries()].map(([code,rows])=>({code,items:rows,product:rows[0]?.product||"",grade:rows[0]?.grade||"",destination:rows[0]?.destination||rows[0]?.operationalDestination||"",weightKg:pwNumber(rows.reduce((sum,item)=>sum+item.weightKg,0))}))
+}
 function pwCarriers() {
   let value: any
   const defaults = [
@@ -676,6 +688,11 @@ function recordSortingOutputs(
     inputCodes: selected,
     children: children.map((x) => ({
       code: x.code,
+      batchCode: x.batchCode,
+      product: x.product,
+      grade: x.grade,
+      size: x.size,
+      weightKg: x.weightKg,
       destination: x.destination,
       parents: x.parentContributions,
     })),
@@ -773,8 +790,9 @@ function PWEmpty({ children }: any) {
 function WashingScaleConsole({mode,code,net,previousNet,tare,onRead}:{mode:"ENTRY"|"EXIT";code?:string;net:number;previousNet:number;tare:number;onRead:()=>void}) {
   const n=(value:number)=>Number.isFinite(value)?value.toFixed(3):"0.000"
   const gross=pwNumber(net+tare)
-  return <section aria-label={`کنسول باسکول ${mode==="ENTRY"?"ورود":"خروج"} شست‌وشو`} style={{width:"100%",maxWidth:1240,margin:"0 auto",background:"#06291f",border:"1px solid #1b5a46",borderRadius:18,padding:16,color:"white",boxShadow:"0 12px 28px #173f3524"}}>
-    <div style={{display:"grid",gridTemplateColumns:"1.05fr 1.45fr 1.15fr 1fr",gap:12}} dir="rtl">
+  return <section data-scale-console aria-label={`کنسول باسکول ${mode==="ENTRY"?"ورود":"خروج"} شست‌وشو`} style={{width:"100%",maxWidth:1240,margin:"0 auto",background:"#06291f",border:"1px solid #1b5a46",borderRadius:18,padding:16,color:"white",boxShadow:"0 12px 28px #173f3524"}}>
+    <div className="terminal-scale-strip hidden" dir="rtl"><div className="terminal-scale-cell"><small>باسکول رومیزی ۱ · آنلاین</small><b style={{color:"#62e5ad"}}>{code||"در انتظار اسکن"}</b><small>RS485 · پایدار ±0.002 kg</small></div><div className="terminal-scale-cell"><small>{mode==="ENTRY"?"وزن قبلی":"وزن ناخالص"}</small><b style={{fontFamily:"monospace"}}>{n(mode==="ENTRY"?previousNet:gross)} kg</b><small>{mode==="ENTRY"?`اختلاف ${n(net-previousNet)} kg`:`ظرف ${n(tare)} kg`}</small></div><div className="terminal-scale-cell"><small>{mode==="ENTRY"?"وزن خالص جدید":"وزن خالص آنلاین"}</small><b className="terminal-scale-weight">{n(net)} <i style={{fontSize:10,color:"#62e5ad",fontStyle:"normal"}}>kg</i></b><small>10 Hz · SENS HIGH</small></div>{mode==="ENTRY"?<button type="button" onClick={onRead} className="terminal-scale-action">↻ ثبت وزن جدید</button>:<div className="terminal-scale-cell"><small>وضعیت</small><b style={{color:"#62e5ad"}}>● خوانش آنلاین</b><small>پس از اسکن</small></div>}</div>
+    <div className="terminal-scale-full" style={{display:"grid",gridTemplateColumns:"1.05fr 1.45fr 1.15fr 1fr",gap:12}} dir="rtl">
       <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:13,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11}}><b style={{color:"#c9f7e4"}}>● باسکول رومیزی ۱</b><span style={{color:"#62e5ad",fontFamily:"monospace"}}>10 Hz</span></div><div style={{marginTop:12,padding:9,borderRadius:9,background:"#0b382a",fontSize:10}}><div style={{display:"flex",justifyContent:"space-between"}}><span>لودسل آنلاین</span><b style={{color:"#62e5ad"}}>RS485</b></div><div style={{display:"flex",justifyContent:"space-between",marginTop:8,color:"#91b9aa"}}><span>قرائت پایدار</span><b>± 0.002 kg</b></div></div><div style={{marginTop:10,padding:8,border:"1px solid #1b5a46",borderRadius:8,textAlign:"center",fontSize:10,color:"#62e5ad"}}>✓ ثبات سیگنال حسگر تأیید شد</div>{code&&<div style={{marginTop:10,padding:8,borderRadius:8,background:"#03160f",textAlign:"center"}}><small style={{display:"block",color:"#91b9aa"}}>سریال سبد جاری</small><b style={{fontFamily:"monospace",fontSize:20,color:"#62e5ad"}}>{code}</b></div>}</div>
       <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:15,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#c9f7e4"}}><b>{mode==="ENTRY"?"وزن خالص جدید":"وزن خالص خروجی"}</b><span style={{fontFamily:"monospace",color:"#62e5ad"}}>SENS: HIGH</span></div><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:8,margin:"18px 0"}} dir="ltr"><strong style={{fontFamily:"monospace",fontSize:40,letterSpacing:4}}>{n(net)}</strong><span style={{background:"#0b382a",padding:"4px 8px",borderRadius:6,fontSize:10,color:"#62e5ad"}}>kg</span></div><div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #ffffff18",paddingTop:8,fontSize:10}}><span>وزن ظرف (Tare)</span><b style={{color:"#62e5ad",fontFamily:"monospace"}}>{n(tare)} kg</b></div></div>
       <div style={{border:"1px solid #1b5a46",borderRadius:13,padding:15,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#c9f7e4"}}><b>{mode==="ENTRY"?"وزن خالص قبلی":"وزن ناخالص"}</b><span style={{fontFamily:"monospace",color:"#62e5ad"}}>GROSS</span></div><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:8,margin:"18px 0"}} dir="ltr"><strong style={{fontFamily:"monospace",fontSize:36,letterSpacing:3}}>{n(mode==="ENTRY"?previousNet:gross)}</strong><span style={{background:"#0b382a",padding:"4px 8px",borderRadius:6,fontSize:10,color:"#62e5ad"}}>kg</span></div><div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #ffffff18",paddingTop:8,fontSize:10}}><span>{mode==="ENTRY"?"اختلاف":"وضعیت"}</span><b style={{color:"#62e5ad",fontFamily:"monospace"}}>{mode==="ENTRY"?`${n(net-previousNet)} kg`:"READY"}</b></div></div>
@@ -785,8 +803,9 @@ function WashingScaleConsole({mode,code,net,previousNet,tare,onRead}:{mode:"ENTR
 function SlicingRemainderScaleConsole({code,net,tare}:{code?:string;net:number;tare:number}) {
   const n=(value:number)=>Number.isFinite(value)?value.toFixed(3):"0.000"
   const gross=pwNumber(net+tare)
-  return <section aria-label="باسکول آنلاین مانده اسلایس" style={{width:"100%",maxWidth:560,margin:"12px auto 0",background:"#06291f",border:"1px solid #1b5a46",borderRadius:13,padding:11,color:"white",boxShadow:"0 8px 20px #173f3520"}}>
-    <div style={{display:"grid",gridTemplateColumns:"1.15fr .85fr .85fr",gap:8,alignItems:"stretch"}} dir="rtl">
+  return <section data-scale-console aria-label="باسکول آنلاین مانده اسلایس" style={{width:"100%",maxWidth:560,margin:"12px auto 0",background:"#06291f",border:"1px solid #1b5a46",borderRadius:13,padding:11,color:"white",boxShadow:"0 8px 20px #173f3520"}}>
+    <div className="terminal-scale-strip hidden" dir="rtl"><div className="terminal-scale-cell"><small>باسکول مانده اسلایس</small><b style={{color:code?"#62e5ad":"#91b9aa"}}>{code||"در انتظار اسکن"}</b><small>RS485 · پایدار</small></div><div className="terminal-scale-cell"><small>وزن ظرف</small><b style={{fontFamily:"monospace"}}>{n(tare)} kg</b><small>ناخالص {n(gross)} kg</small></div><div className="terminal-scale-cell"><small>وزن خالص مانده</small><b className="terminal-scale-weight">{n(net)} <i style={{fontSize:10,color:"#62e5ad",fontStyle:"normal"}}>kg</i></b><small>ثبت خودکار</small></div><div className="terminal-scale-cell"><small>وضعیت</small><b style={{color:"#62e5ad"}}>● آنلاین</b><small>COM 4</small></div></div>
+    <div className="terminal-scale-full" style={{display:"grid",gridTemplateColumns:"1.15fr .85fr .85fr",gap:8,alignItems:"stretch"}} dir="rtl">
       <div style={{border:"1px solid #1b5a46",borderRadius:9,padding:10,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:10}}><b style={{color:"#c9f7e4"}}>● لودسل آنلاین</b><span style={{color:"#62e5ad",fontFamily:"monospace"}}>RS485 · 10 Hz</span></div><div style={{marginTop:9,display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}><span style={{fontSize:10,color:"#91b9aa"}}>وزن خالص مانده</span><span dir="ltr"><strong style={{fontFamily:"monospace",fontSize:25,letterSpacing:2}}>{n(net)}</strong> <small style={{color:"#62e5ad"}}>kg</small></span></div><div style={{marginTop:7,fontSize:9,color:"#62e5ad"}}>✓ قرائت پایدار و ثبت خودکار پس از اسکن</div></div>
       <div style={{border:"1px solid #1b5a46",borderRadius:9,padding:10,background:"#041d16",display:"flex",flexDirection:"column",justifyContent:"space-between"}}><small style={{color:"#91b9aa"}}>وزن ظرف (Tare)</small><b dir="ltr" style={{fontFamily:"monospace",fontSize:18}}>{n(tare)} kg</b><small style={{color:"#91b9aa"}}>وزن ناخالص: <b dir="ltr" style={{color:"#c9f7e4"}}>{n(gross)} kg</b></small></div>
       <div style={{border:"1px solid #1b5a46",borderRadius:9,padding:10,background:"#0a3326",display:"flex",flexDirection:"column",justifyContent:"space-between",gap:6}}><small style={{color:"#91b9aa"}}>سبد روی باسکول</small><b style={{fontFamily:"monospace",fontSize:16,color:code?"#62e5ad":"#91b9aa"}}>{code||"در انتظار اسکن"}</b><small style={{color:"#91b9aa"}}>COM 4 · پایدار ±0.002 kg</small></div>
@@ -1162,7 +1181,7 @@ function WashingSessionScreen({
   </div>
 }
 function ProductionScreen(props: any) {
-  const [tab, setTab] = useState("overview"),
+  const [tab, setTab] = useState(props.initialTab || "overview"),
     [ledger, setLedger] = useState<PWLedger>(() => readProductionLedger()),
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
@@ -1792,7 +1811,7 @@ function ProductionScreen(props: any) {
     <div
       dir="rtl"
       style={{
-        padding: 24,
+        padding: props.terminalMode ? 12 : 24,
         color: "#183e38",
         background: "#f3f7f6",
         flex: 1,
@@ -1811,9 +1830,9 @@ function ProductionScreen(props: any) {
         }}
       >
         <div>
-          <h1 style={{fontSize:25,margin:0,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}><span>میز کار تولید</span>{tab!=="overview"&&<><span style={{color:"#a8b8b2",fontWeight:400}}>—</span><span style={{fontSize:17,color:"#176b50",fontWeight:800}}>{tabs.find(([id])=>id===tab)?.[1]}</span></>}</h1>
+          <h1 style={{fontSize:props.terminalMode?20:25,margin:0,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}><span>{props.terminalMode?(tabs.find(([id])=>id===tab)?.[1]||"عملیات تولید"):"میز کار تولید"}</span>{!props.terminalMode&&tab!=="overview"&&<><span style={{color:"#a8b8b2",fontWeight:400}}>—</span><span style={{fontSize:17,color:"#176b50",fontWeight:800}}>{tabs.find(([id])=>id===tab)?.[1]}</span></>}</h1>
         </div>
-        <button type="button" onClick={()=>setResetArmed(true)} style={{border:"1px solid #c85b5b",background:"#fff7f7",color:"#a43838",borderRadius:10,padding:"10px 14px",fontWeight:800,cursor:"pointer"}}>↺ بازنشانی سناریوی آزمایشی</button>
+        {!props.terminalMode&&<button type="button" onClick={()=>setResetArmed(true)} style={{border:"1px solid #c85b5b",background:"#fff7f7",color:"#a43838",borderRadius:10,padding:"10px 14px",fontWeight:800,cursor:"pointer"}}>↺ بازنشانی سناریوی آزمایشی</button>}
       </div>
       {resetArmed&&<div role="alertdialog" aria-label="تأیید بازنشانی سناریوی آزمایشی" style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16,padding:"12px 14px",border:"1px solid #e3b0b0",background:"#fff7f7",borderRadius:12,fontSize:12}}><span><b>همه عملیات سورت، شست‌وشو و تولید این سناریو پاک شود؟</b><small style={{display:"block",color:"#718079",marginTop:3}}>محموله ۱۵۰ کیلویی و ۷ سبد اولیه برمی‌گردد؛ کاربران، تنظیمات پایه و فهرست کانتینرها حفظ می‌شوند.</small></span><span style={{display:"flex",gap:8}}><button type="button" onClick={()=>setResetArmed(false)} style={{border:"1px solid #cad7d1",background:"white",borderRadius:8,padding:"8px 12px",cursor:"pointer"}}>انصراف</button><button type="button" onClick={()=>{resetPrototypeOperationalScenario();setLedger(pwEmpty());setTab("overview");setChosen("");setNotice("سناریوی آزمایشی به محموله اولیه ۱۵۰ کیلویی بازنشانی شد.");setError("");setResetArmed(false)}} style={{border:0,background:"#b84242",color:"white",borderRadius:8,padding:"8px 12px",fontWeight:800,cursor:"pointer"}}>بله، بازنشانی شود</button></span></div>}
       {(error || ledger.storageError) && (

@@ -8,7 +8,8 @@ This folder keeps the reproducible source prepared for Figma Make as Version 36 
 - `SortingScreen.tsx`: multi-container input sorting with one-at-a-time weighed outputs, operator-selected final routes, automatically weighted parent contributions, load-cell simulation, existing-container scans, and child genealogy.
 - `ProductionInventory.tsx`: production output integration for Inventory and Trace.
 - `WebApp.tsx`: the complete assembled Figma Make source snapshot.
-- `HubApp.tsx`: the Figma Make hub source with the updated 20-screen Web count.
+- `TerminalApp.tsx`: the 13-station touch shell that mounts the same maintained Web workflows instead of duplicating mock logic.
+- `HubApp.tsx`: the Figma Make hub source with the updated Web and Terminal counts.
 - `assemble.mjs`: deterministic assembler for a baseline or for refreshing an already assembled snapshot.
 - `production.test.mjs`: focused storage and production-domain regression tests.
 

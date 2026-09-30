@@ -91,6 +91,24 @@ const USERS_DEFAULT:PrototypeUser[]=[{id:"U1",name:"علی رضایی",username:
 function readPrototypeUsers():PrototypeUser[]{try{const raw=localStorage.getItem(USERS_KEY),value=raw?JSON.parse(raw):null;if(Array.isArray(value))return value}catch{}return USERS_DEFAULT}
 function validatePrototypeUser(form:Partial<PrototypeUser>,users:PrototypeUser[],editingId?:string){const name=String(form.name||"").trim(),username=String(form.username||"").trim().toLowerCase(),phone=String(form.phone||"").trim(),role=String(form.role||"").trim();if(!name||!username||!role)return "نام، نام کاربری و نقش الزامی است.";if(!/^[a-z0-9._-]{3,}$/i.test(username))return "نام کاربری باید حداقل سه نویسه و شامل حروف انگلیسی، عدد، نقطه، خط تیره یا زیرخط باشد.";if(users.some(user=>user.id!==editingId&&user.username.toLowerCase()===username))return "این نام کاربری قبلاً ثبت شده است.";if(phone&&!/^[۰-۹0-9+ -]{7,}$/.test(phone))return "شماره تماس معتبر نیست.";return ""}
 function writePrototypeUsers(users:PrototypeUser[]){localStorage.setItem(USERS_KEY,JSON.stringify(users));window.dispatchEvent(new Event("storemesh-users"))}
+type PrototypeTerminalIdentity={id:string;name:string;username:string;role:string};
+function authenticatePrototypeTerminal(input:{method:"PASSWORD"|"QR";username?:string;password?:string;qr?:string}):PrototypeTerminalIdentity{
+  const users=readPrototypeUsers().filter(user=>user.active);
+  let user:PrototypeUser|undefined;
+  if(input.method==="QR"){
+    const code=String(input.qr||"").trim().toUpperCase();
+    if(!code)throw Error("QR کارت اپراتور را اسکن کنید.");
+    const userId=code.replace(/^USR-/,"");
+    user=users.find(item=>item.id.toUpperCase()===userId||item.username.toUpperCase()===userId);
+  }else{
+    const username=String(input.username||"").trim().toLowerCase(),password=String(input.password||"");
+    if(!username||!password)throw Error("نام کاربری و رمز عبور الزامی است.");
+    if(password!=="1234")throw Error("نام کاربری یا رمز عبور صحیح نیست.");
+    user=users.find(item=>item.username.toLowerCase()===username);
+  }
+  if(!user)throw Error("کاربر فعال متناظر با اطلاعات ورود پیدا نشد.");
+  return {id:user.id,name:user.name,username:user.username,role:user.role};
+}
 
 type MasterProduct={id:string;code:string;name:string;category:string;grades:string[];sizes:string[];active:boolean};
 type MasterParty={id:string;code:string;name:string;contact:string;active:boolean};
@@ -135,9 +153,9 @@ const sidebarSections: { label: string; item: string; screens: WebScreen[] }[] =
   { label: "داشبورد", item: "dashboard", screens: ["dashboard"] },
   { label: "دریافت", item: "receiving", screens: ["receiving"] },
   { label: "موجودی", item: "inventory", screens: ["inventory", "inventory-movement"] },
-  { label: "تولید", item: "production", screens: ["production", "fresh-export"] },
+  { label: "تولید", item: "production", screens: ["production"] },
   { label: "کیفیت", item: "quality", screens: ["quality"] },
-  { label: "بسته‌بندی", item: "packaging", screens: ["packaging"] },
+  { label: "بسته‌بندی", item: "packaging", screens: ["packaging", "fresh-export"] },
   { label: "ارسال", item: "shipments", screens: ["shipments"] },
   { label: "رهگیری", item: "trace", screens: ["trace", "tasks", "printing"] },
   { label: "تنظیمات", item: "config", screens: ["config", "master-data", "containers", "consumables", "users", "overrides", "audit", "cloud", "system"] },
@@ -388,14 +406,14 @@ function DashboardScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
 
 type ReceivingBasket = { id:number; code:string; product:string; grade:string; size:string; gross:number; tare:number };
 
-function ReceivingScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
+function ReceivingScreen({ navigate, terminalMode = false }: { navigate: (s: WebScreen) => void; terminalMode?: boolean }) {
   const master=readMasterData();
   const activeProducts=master.products.filter(item=>item.active);
   const options:Record<string,{grades:string[];sizes:string[]}>=Object.fromEntries(activeProducts.map(item=>[item.name,{grades:item.grades,sizes:item.sizes}]));
   const initialProduct=activeProducts[0]?.name||"";
   const [stage,setStage]=useState<"setup"|"capture"|"review"|"dispatch"|"done">("setup");
   const [supplier,setSupplier]=useState("");
-  const [reference,setReference]=useState("");
+  const [reference]=useState(()=>`AUTO-RCV-${String(Date.now()).slice(-8)}`);
   const [expected,setExpected]=useState(10);
   const [containerCode,setContainerCode]=useState("");
   const [product,setProduct]=useState(initialProduct);
@@ -422,6 +440,7 @@ function ReceivingScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
     {code:"D-IRAN-0014",batchCode:"—",supplier:"تأمین‌کننده البرز",containers:3,weightKg:28.4,status:"CANCELLED"},
   ];
   const [recentDeliveries,setRecentDeliveries]=useState<any[]>(()=>{try{return JSON.parse(localStorage.getItem("storemesh.prototype.recent-receipts")||"null")||recentSeed}catch{return recentSeed}});
+  const [showRecentDeliveries,setShowRecentDeliveries]=useState(false);
   const net=Math.max(0,gross-tare);
   const total=baskets.reduce((sum,b)=>sum+b.gross-b.tare,0);
   const acceptContainerScan=(code:string)=>{if(!code)return;if(baskets.some(item=>item.code.toUpperCase()===code.toUpperCase()))return;setContainerCode(code.toUpperCase());setGross(24.68)};
@@ -437,14 +456,15 @@ function ReceivingScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
   if(stage==="done") return <div className="flex-1 bg-[#f4f7f5] p-8 overflow-auto" dir="rtl"><Card className="max-w-3xl mx-auto mt-16 p-10 text-center"><div className="w-16 h-16 rounded-full bg-[#176b50] text-white text-[34px] flex items-center justify-center mx-auto mb-4">✓</div><h2 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[24px]">دریافت و انتقال کامل شد</h2><p className="text-[#718079] text-[13px] mt-2">محموله بدون خروج از صفحه دریافت، به مقصد «{destinationNames[destination]}» تحویل شد و موقعیت، وضعیت و رهگیری همه ظروف به‌روزرسانی شد.</p><div className="grid grid-cols-3 gap-3 my-7"><div className="bg-[#f1f6f3] rounded-xl p-4"><small className="block text-[#718079]">تعداد ظروف</small><b>{baskets.length}</b></div><div className="bg-[#f1f6f3] rounded-xl p-4"><small className="block text-[#718079]">روش انتقال</small><b>{moveMode==="batch"?"کل بچ یکجا":"اسکن تک‌تک"}</b></div><div className="bg-[#f1f6f3] rounded-xl p-4"><small className="block text-[#718079]">موقعیت فعلی</small><b className="text-[#176b50]">{destinationNames[destination]}</b></div></div><div className="flex justify-center gap-2"><button onClick={resetReceiving} className="bg-[#176b50] text-white rounded-lg px-6 h-11 text-[12px] font-bold">دریافت محموله جدید</button><button onClick={()=>navigate("inventory")} className="border border-[#d8e4df] rounded-lg px-5 h-11 text-[12px]">مشاهده رهگیری (اختیاری)</button></div></Card></div>;
 
   return <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl">
-    <div className="flex items-start justify-between mb-4"><div><p className="text-[#176b50] text-[11px] font-bold">دریافت · {stage==="setup"?"محموله جدید":reference||"محموله جاری"}</p><h2 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[22px]">{stage==="setup"?"تعریف محموله ورودی":stage==="review"?"بازبینی محموله":stage==="dispatch"?"محل فیزیکی و تحویل":"ثبت و توزین ظروف"}</h2><p className="font-['Vazirmatn:Regular',sans-serif] text-[#718079] text-[13px]">{stage==="setup"?"اطلاعات بار را ثبت کنید؛ سپس ظروف را یکی‌یکی اسکن و توزین کنید.":supplier+" · پیشرفت "+baskets.length+" از "+expected+" ظرف"}</p></div><Badge text={stage==="setup"?"مرحله ۱ از ۴":stage==="capture"?"مرحله ۲ از ۴":stage==="review"?"مرحله ۳ از ۴":"مرحله ۴ از ۴"} color="#176b50" bg="#e1f2eb" /></div>
+    {!terminalMode&&<div className="flex items-start justify-between mb-4"><div><p className="text-[#176b50] text-[11px] font-bold">دریافت · {stage==="setup"?"محموله جدید":"محموله جاری"}</p><h2 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[22px]">{stage==="setup"?"تعریف محموله ورودی":stage==="review"?"بازبینی محموله":stage==="dispatch"?"محل فیزیکی و تحویل":"ثبت و توزین ظروف"}</h2><p className="font-['Vazirmatn:Regular',sans-serif] text-[#718079] text-[13px]">{stage==="setup"?"اطلاعات بار را ثبت کنید؛ سپس ظروف را یکی‌یکی اسکن و توزین کنید.":supplier+" · پیشرفت "+baskets.length+" از "+expected+" ظرف"}</p></div><Badge text={stage==="setup"?"مرحله ۱ از ۴":stage==="capture"?"مرحله ۲ از ۴":stage==="review"?"مرحله ۳ از ۴":"مرحله ۴ از ۴"} color="#176b50" bg="#e1f2eb" /></div>}
 
-    {stage==="setup"&&<><Card className="p-5"><h4 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[14px] mb-4">مشخصات محموله</h4><div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-bold text-[#435a52]">تأمین‌کننده<select className={selectClass} value={supplier} onChange={e=>setSupplier(e.target.value)}><option value="">انتخاب تأمین‌کننده…</option>{master.suppliers.filter(item=>item.active).map(item=><option key={item.id}>{item.name}</option>)}</select></label><label className="text-[11px] font-bold text-[#435a52]">شماره بارنامه / مرجع<input className={selectClass} value={reference} onChange={e=>setReference(e.target.value)} placeholder="مثلاً BL-1405-091" /></label><label className="text-[11px] font-bold text-[#435a52]">تعداد ظرف مورد انتظار<input type="number" className={selectClass} value={expected} onChange={e=>setExpected(Number(e.target.value))}/></label></div><div className="flex justify-end mt-4"><button disabled={!supplier||!activeProducts.length} onClick={()=>setStage("capture")} className="bg-[#176b50] disabled:opacity-40 text-white rounded-lg px-6 h-11 text-[12px] font-bold">شروع ثبت ظروف ←</button></div>{!activeProducts.length&&<p role="alert" className="mt-3 text-[#a43838] text-[11px]">هیچ محصول فعالی برای عملیات جدید وجود ندارد.</p>}</Card><Card className="mt-4 overflow-hidden"><div className="flex items-center gap-2 px-5 py-4"><span className="grid h-6 w-6 place-items-center rounded-full bg-[#e1f2eb] text-[#176b50]">↟</span><h3 className="font-bold text-[#18302a] text-[16px]">تحویل‌های اخیر</h3></div><div className="grid grid-cols-[1fr_1fr_1.2fr_.6fr_.7fr_.8fr] gap-3 bg-[#fbfdfc] px-5 py-3 text-[10px] font-bold text-[#718079]"><span>کد</span><span>بچ تجمیعی</span><span>تأمین‌کننده</span><span>سبدها</span><span>وزن</span><span>وضعیت</span></div>{recentDeliveries.map((row:any)=><div key={row.code} className="grid grid-cols-[1fr_1fr_1.2fr_.6fr_.7fr_.8fr] gap-3 border-t border-[#e8efeb] px-5 py-4 text-[12px] items-center"><b className="font-mono">{row.code}</b><b className="font-mono text-[#365c4f]">{row.batchCode}</b><span>{row.supplier}</span><b>{row.containers}</b><b>{Number(row.weightKg).toFixed(1)} kg</b><span className={`justify-self-start rounded-full px-3 py-1 text-[10px] font-bold ${row.status==="COMPLETED"?"bg-[#dff3e9] text-[#16825b]":"bg-[#fbe6e6] text-[#b84242]"}`}>{row.status}</span></div>)}</Card></>}
+    {stage==="setup"&&<><Card className="terminal-receiving-setup-card p-5"><h4 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[14px] mb-4">مشخصات محموله</h4><div className="terminal-receiving-setup-grid grid grid-cols-2 gap-3"><label className="text-[11px] font-bold text-[#435a52]">تأمین‌کننده<select className={selectClass} value={supplier} onChange={e=>setSupplier(e.target.value)}><option value="">انتخاب تأمین‌کننده…</option>{master.suppliers.filter(item=>item.active).map(item=><option key={item.id}>{item.name}</option>)}</select></label><label className="text-[11px] font-bold text-[#435a52]">تعداد ظرف مورد انتظار<div className="mt-1 grid h-11 grid-cols-[48px_1fr_48px] overflow-hidden rounded-lg border border-[#d9e3de] bg-white"><button type="button" aria-label="کاهش تعداد ظرف" onClick={()=>setExpected(value=>Math.max(1,value-1))} className="border-l border-[#d9e3de] text-[24px] font-bold text-[#176b50]">−</button><b className="grid place-items-center text-[16px] text-[#18302a]">{expected}</b><button type="button" aria-label="افزایش تعداد ظرف" onClick={()=>setExpected(value=>value+1)} className="border-r border-[#d9e3de] text-[22px] font-bold text-[#176b50]">＋</button></div></label></div><div className="terminal-receiving-setup-actions flex justify-end gap-3 mt-4"><button disabled={!supplier||!activeProducts.length} onClick={()=>setStage("capture")} className="bg-[#176b50] disabled:opacity-40 text-white rounded-lg px-6 h-11 text-[12px] font-bold">شروع ثبت ظروف ←</button>{terminalMode&&<button type="button" onClick={()=>setShowRecentDeliveries(true)} className="rounded-xl bg-[#0e3d2e] px-7 h-11 text-[12px] font-bold text-white">لیست تحویل‌های اخیر</button>}</div>{!activeProducts.length&&<p role="alert" className="mt-3 text-[#a43838] text-[11px]">هیچ محصول فعالی برای عملیات جدید وجود ندارد.</p>}</Card><Card className={(terminalMode?(showRecentDeliveries?"terminal-receiving-recent-open":"terminal-receiving-recent-hidden"):"mt-4")+" overflow-hidden"}><div className="flex items-center gap-2 px-5 py-4"><span className="grid h-6 w-6 place-items-center rounded-full bg-[#e1f2eb] text-[#176b50]">↟</span><h3 className="font-bold text-[#18302a] text-[16px]">تحویل‌های اخیر</h3>{terminalMode&&<button type="button" onClick={()=>setShowRecentDeliveries(false)} className="mr-auto rounded-lg border border-[#d8e4df] px-4 py-2 text-[11px]">بستن</button>}</div><div className="grid grid-cols-[1fr_1fr_1.2fr_.6fr_.7fr_.8fr] gap-3 bg-[#fbfdfc] px-5 py-3 text-[10px] font-bold text-[#718079]"><span>کد</span><span>بچ تجمیعی</span><span>تأمین‌کننده</span><span>سبدها</span><span>وزن</span><span>وضعیت</span></div>{recentDeliveries.map((row:any)=><div key={row.code} className="grid grid-cols-[1fr_1fr_1.2fr_.6fr_.7fr_.8fr] gap-3 border-t border-[#e8efeb] px-5 py-4 text-[12px] items-center"><b className="font-mono">{row.code}</b><b className="font-mono text-[#365c4f]">{row.batchCode}</b><span>{row.supplier}</span><b>{row.containers}</b><b>{Number(row.weightKg).toFixed(1)} kg</b><span className={`justify-self-start rounded-full px-3 py-1 text-[10px] font-bold ${row.status==="COMPLETED"?"bg-[#dff3e9] text-[#16825b]":"bg-[#fbe6e6] text-[#b84242]"}`}>{row.status}</span></div>)}</Card></>}
 
     {stage==="capture"&&<>
-      <section data-purpose="receiving-scale-monitor" className="relative mx-auto w-full max-w-[1240px] overflow-hidden rounded-2xl border border-[#176b5066] bg-[#07231a] p-4 text-white shadow-xl">
+      <section data-scale-console data-purpose="receiving-scale-monitor" className="relative mx-auto w-full max-w-[1240px] overflow-hidden rounded-2xl border border-[#176b5066] bg-[#07231a] p-4 text-white shadow-xl">
         <div className="pointer-events-none absolute -right-12 -top-16 h-40 w-40 rounded-full bg-[#42d99a14] blur-2xl" />
-        <div className="relative grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-12" dir="rtl">
+        <div className="terminal-scale-strip hidden" dir="rtl"><div className="terminal-scale-cell"><small>باسکول دریافت · آنلاین</small><b style={{color:"#62e5ad"}}>{containerCode||"در انتظار اسکن"}</b><small>RS485 · پایدار ±0.002 kg</small></div><div className="terminal-scale-cell"><small>وزن ظرف / ناخالص</small><b className="font-mono">{tare.toFixed(2)} / {gross.toFixed(2)} kg</b><small>COM 4</small></div><div className="terminal-scale-cell"><small>وزن خالص</small><b className="terminal-scale-weight">{net.toFixed(2)} <i style={{fontSize:10,color:"#62e5ad",fontStyle:"normal"}}>kg</i></b><small>10 Hz · آماده</small></div><button type="button" onClick={()=>setGross(24.5+Math.random())} className="terminal-scale-action">↻ دریافت وزن</button></div>
+        <div className="terminal-scale-full relative grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-12" dir="rtl">
           <div className="col-span-1 min-w-0 flex flex-col justify-between gap-3 border-[#1d594744] lg:col-span-3 lg:border-l lg:pl-4">
             <div className="flex items-center justify-between gap-2">
               <span className="rounded-lg border border-[#2a765c66] bg-[#0e3d2e] px-3 py-1.5 text-[11px] font-bold text-[#c9f7e4]"><i className="ml-2 inline-block h-2 w-2 rounded-full bg-[#55d69a]"/>باسکول رومیزی ۱</span>
@@ -472,15 +492,14 @@ function ReceivingScreen({ navigate }: { navigate: (s: WebScreen) => void }) {
           </div>
         </div>
       </section>
-      <Card className="mt-4 p-5">
-        <div className="mb-3 flex items-center justify-between"><h4 className="text-[13px] font-bold text-[#18302a]">۱. شناسایی ظرف</h4><Badge text={(baskets.length+1)+" / "+expected} color="#176b50" bg="#e1f2eb" /></div>
-        <div className="flex flex-col gap-2 xl:flex-row"><input className={selectClass} value={containerCode} onChange={e=>setContainerCode(e.target.value)} placeholder="کد ظرف یا QR"/><button onClick={()=>setScanOpen(true)} className="h-11 shrink-0 rounded-xl bg-[#0e3d2e] px-5 text-[11px] font-bold text-white">⌗ اسکن QR</button><button onClick={()=>setCreateOpen(true)} className="h-11 shrink-0 rounded-xl bg-[#176b50] px-5 text-[11px] font-bold text-white">＋ ساخت ظرف یک‌بارمصرف و چاپ QR</button></div>
-        <div className="mt-5 border-t border-[#edf2ef] pt-4"><h4 className="mb-3 text-[13px] font-bold text-[#18302a]">۲. مشخصات محصول</h4><div className="grid grid-cols-1 gap-3 xl:grid-cols-3"><label className="text-[11px] font-bold">محصول<select className={selectClass} value={product} onChange={e=>{const v=e.target.value;setProduct(v);setGrade(options[v].grades[0]);setSize(options[v].sizes[0])}}>{Object.keys(options).map(v=><option key={v}>{v}</option>)}</select></label><label className="text-[11px] font-bold">گرید اظهارشده / اولیه<select className={selectClass} value={grade} onChange={e=>setGrade(e.target.value)}>{options[product].grades.map(v=><option key={v}>{v}</option>)}</select></label><label className="text-[11px] font-bold">اندازه اظهارشده / اولیه<select className={selectClass} value={size} onChange={e=>setSize(e.target.value)}>{options[product].sizes.map(v=><option key={v}>{v}</option>)}</select></label></div></div>
+      <Card className="terminal-receiving-capture-card mt-3 p-4">
+        <div className="flex items-center gap-3"><div className="terminal-receiving-scan-actions grid flex-1 grid-cols-2 gap-2"><button onClick={()=>setScanOpen(true)} className="h-11 rounded-xl bg-[#0e3d2e] px-5 text-[11px] font-bold text-white">⌗ اسکن QR سبد</button><button onClick={()=>setCreateOpen(true)} className="h-11 rounded-xl bg-[#176b50] px-5 text-[11px] font-bold text-white">＋ ساخت ظرف یک‌بارمصرف و چاپ QR</button></div><Badge text={(baskets.length+1)+" / "+expected} color="#176b50" bg="#e1f2eb" /></div>
+        <div className="mt-4 border-t border-[#edf2ef] pt-3"><div className="terminal-receiving-product-grid grid grid-cols-3 gap-3"><label className="text-[11px] font-bold">محصول<select className={selectClass} value={product} onChange={e=>{const v=e.target.value;setProduct(v);setGrade(options[v].grades[0]);setSize(options[v].sizes[0])}}>{Object.keys(options).map(v=><option key={v}>{v}</option>)}</select></label><label className="text-[11px] font-bold">گرید اولیه<select className={selectClass} value={grade} onChange={e=>setGrade(e.target.value)}>{options[product].grades.map(v=><option key={v}>{v}</option>)}</select></label><label className="text-[11px] font-bold">اندازه اولیه<select className={selectClass} value={size} onChange={e=>setSize(e.target.value)}>{options[product].sizes.map(v=><option key={v}>{v}</option>)}</select></label></div></div>
       </Card>
-      <div className="mt-4 flex flex-wrap justify-end gap-2 rounded-2xl border border-[#dce5e0] bg-white p-3 shadow-sm"><button onClick={()=>setStage("setup")} className="rounded-xl border border-[#dce5e0] bg-white px-5 py-2.5 text-[11px]">بازگشت</button><button disabled={!containerCode||gross<=0} onClick={addBasket} className="rounded-xl bg-[#176b50] px-6 py-2.5 text-[11px] font-bold text-white disabled:opacity-40">ثبت ظرف و ادامه</button><button disabled={!baskets.length} onClick={()=>setStage("review")} className="rounded-xl bg-[#0e3d2e] px-6 py-2.5 text-[11px] font-bold text-white disabled:opacity-40">بازبینی محموله</button></div>
+      <div className="terminal-receiving-capture-actions mt-4 flex flex-wrap justify-end gap-2 rounded-2xl border border-[#dce5e0] bg-white p-3 shadow-sm"><button onClick={()=>setStage("setup")} className="rounded-xl border border-[#dce5e0] bg-white px-5 py-2.5 text-[11px]">بازگشت</button><button disabled={!containerCode||gross<=0} onClick={addBasket} className="rounded-xl bg-[#176b50] px-6 py-2.5 text-[11px] font-bold text-white disabled:opacity-40">ثبت ظرف و ادامه</button><button disabled={!baskets.length} onClick={()=>setStage("review")} className="rounded-xl bg-[#0e3d2e] px-6 py-2.5 text-[11px] font-bold text-white disabled:opacity-40">بازبینی محموله</button></div>
     </>}
 
-    {stage!=="setup"&&<Card className="mt-4 overflow-hidden"><div className="p-3 border-b border-[#edf2ef] flex justify-between"><h4 className="font-bold text-[#18302a] text-[13px]">ظروف ثبت‌شده در این محموله</h4><span className="text-[11px] text-[#718079]">{baskets.length} ظرف · {total.toFixed(2)} کیلوگرم خالص</span></div>{baskets.length===0?<div className="m-4 border border-dashed border-[#ccd9d3] rounded-lg p-6 text-center text-[#82968e] text-[12px]">هنوز ظرفی ثبت نشده است؛ QR اولین ظرف را اسکن کنید.</div>:<><div className="grid grid-cols-[.35fr_1fr_1fr_1fr_.7fr_.7fr_.7fr_.7fr] bg-[#f3f6f4] px-3 py-2 text-[10px] text-[#718079]"><span>#</span><span>کد ظرف</span><span>محصول</span><span>گرید / اندازه</span><span>ناخالص</span><span>ظرف</span><span>خالص</span><span>عملیات</span></div>{baskets.map((b,i)=><div key={b.id} className="grid grid-cols-[.35fr_1fr_1fr_1fr_.7fr_.7fr_.7fr_.7fr] px-3 py-3 border-t border-[#edf2ef] text-[11px]"><span>{i+1}</span><b className="font-mono">{b.code}</b><span>{b.product}</span><span>{b.grade} · {b.size}</span><span>{b.gross.toFixed(2)}</span><span>{b.tare.toFixed(2)}</span><b>{(b.gross-b.tare).toFixed(2)}</b><button onClick={()=>setBaskets(baskets.filter(x=>x.id!==b.id))} className="text-[#b84242] text-right">حذف</button></div>)}</>}</Card>}
+    {stage!=="setup"&&(!terminalMode||baskets.length>0)&&<Card className="mt-4 overflow-hidden"><div className="p-3 border-b border-[#edf2ef] flex justify-between"><h4 className="font-bold text-[#18302a] text-[13px]">ظروف ثبت‌شده در این محموله</h4><span className="text-[11px] text-[#718079]">{baskets.length} ظرف · {total.toFixed(2)} کیلوگرم خالص</span></div>{baskets.length===0?<div className="m-4 border border-dashed border-[#ccd9d3] rounded-lg p-6 text-center text-[#82968e] text-[12px]">هنوز ظرفی ثبت نشده است؛ QR اولین ظرف را اسکن کنید.</div>:<><div className="grid grid-cols-[.35fr_1fr_1fr_1fr_.7fr_.7fr_.7fr_.7fr] bg-[#f3f6f4] px-3 py-2 text-[10px] text-[#718079]"><span>#</span><span>کد ظرف</span><span>محصول</span><span>گرید / اندازه</span><span>ناخالص</span><span>ظرف</span><span>خالص</span><span>عملیات</span></div>{baskets.map((b,i)=><div key={b.id} className="grid grid-cols-[.35fr_1fr_1fr_1fr_.7fr_.7fr_.7fr_.7fr] px-3 py-3 border-t border-[#edf2ef] text-[11px]"><span>{i+1}</span><b className="font-mono">{b.code}</b><span>{b.product}</span><span>{b.grade} · {b.size}</span><span>{b.gross.toFixed(2)}</span><span>{b.tare.toFixed(2)}</span><b>{(b.gross-b.tare).toFixed(2)}</b><button onClick={()=>setBaskets(baskets.filter(x=>x.id!==b.id))} className="text-[#b84242] text-right">حذف</button></div>)}</>}</Card>}
 
     {stage==="review"&&<div className="mt-4 bg-[#fff8e3] border border-[#ead995] rounded-xl p-4 flex items-center gap-3"><div className="ml-auto"><h4 className="font-bold text-[13px]">کنترل نهایی</h4><p className="text-[11px] text-[#6e654a]">{baskets.length<expected?"تعداد ثبت‌شده کمتر از انتظار است؛ برای ادامه می‌توانید برگردید یا اختلاف را آگاهانه ثبت کنید.":"تعداد ظروف با انتظار محموله مطابقت دارد."}</p></div><button onClick={()=>setStage("capture")} className="bg-white rounded-lg px-4 py-2 text-[11px]">افزودن/اصلاح ظروف</button><button onClick={()=>setStage("dispatch")} className="bg-[#176b50] text-white rounded-lg px-5 py-2 text-[11px] font-bold">تأیید دریافت و انتخاب مقصد ←</button></div>}
 
@@ -675,15 +694,16 @@ const PW_DEFAULT_MACHINES: Record<string, string[]> = {
   FREEZE_DRY: ["FD-01"],
   DRY: ["DRY-01"],
 }
-const PW_DRY_POUCHES=[
-  {code:"CNS-MET-100",name:"پاکت متالایز ۱۰۰ گرمی",fillWeightGrams:100,tareWeightGrams:5,stock:860},
-  {code:"CNS-MET-250",name:"پاکت متالایز ۲۵۰ گرمی",fillWeightGrams:250,tareWeightGrams:8,stock:420},
-  {code:"CNS-MET-500",name:"پاکت متالایز ۵۰۰ گرمی",fillWeightGrams:500,tareWeightGrams:12,stock:260},
-]
+let PW_DRY_POUCHES:any[]=[]
 const PW_DRY_ABSORBERS=[
   {code:"NONE",name:"بدون رطوبت‌گیر",weightGrams:0,stock:0},
   {code:"CNS-DES-005",name:"رطوبت‌گیر ۵ گرمی",weightGrams:5,stock:1200},
   {code:"CNS-DES-010",name:"رطوبت‌گیر ۱۰ گرمی",weightGrams:10,stock:780},
+]
+let PW_FREEZE_BOXES:any[]=[]
+const PW_FREEZE_PLASTICS=[
+  {code:"CNS-LINER-020",name:"پلاستیک داخلی سبک",weightGrams:20,stock:900},
+  {code:"CNS-LINER-040",name:"پلاستیک داخلی ضخیم",weightGrams:40,stock:620},
 ]
 const pwEmpty = (): PWLedger => ({
   version: 1,
@@ -913,6 +933,18 @@ function pwEvent(
 function pwId(ledger: PWLedger, prefix: string) {
   ledger.idSeq = (ledger.idSeq || 0) + 1
   return `${prefix}-SIM-${String(ledger.idSeq).padStart(5, "0")}`
+}
+function pwPackagingBatchCode(ledger:PWLedger,sources:PWItem[],prefix:string){
+  const activeBatchCodes=[...new Set(sources.map((item)=>item.activePackagingBatchCode).filter(Boolean))]
+  if(activeBatchCodes.length>1)throw Error("منابع انتخاب‌شده متعلق به دو نشست بسته‌بندی فعال هستند؛ ابتدا یکی از نشست‌ها را ببندید.")
+  const batchCode=activeBatchCodes[0]||pwId(ledger,prefix)
+  sources.forEach((item)=>{item.activePackagingBatchCode=batchCode})
+  return batchCode
+}
+function pwFreezeBatchGroups(items:PWItem[]){
+  const groups=new Map<string,PWItem[]>()
+  items.forEach((item)=>{const code=item.batchCode||item.code;groups.set(code,[...(groups.get(code)||[]),item])})
+  return [...groups.entries()].map(([code,rows])=>({code,items:rows,product:rows[0]?.product||"",grade:rows[0]?.grade||"",destination:rows[0]?.destination||rows[0]?.operationalDestination||"",weightKg:pwNumber(rows.reduce((sum,item)=>sum+item.weightKg,0))}))
 }
 function pwCarriers() {
   let value: any
@@ -1191,6 +1223,11 @@ function recordSortingOutputs(
     inputCodes: selected,
     children: children.map((x) => ({
       code: x.code,
+      batchCode: x.batchCode,
+      product: x.product,
+      grade: x.grade,
+      size: x.size,
+      weightKg: x.weightKg,
       destination: x.destination,
       parents: x.parentContributions,
     })),
@@ -1289,7 +1326,9 @@ function WashingScaleConsole({mode,code,net,previousNet,tare,onRead,netOnly=fals
   const n=(value:number)=>Number.isFinite(value)?value.toFixed(3):"0.000"
   const gross=pwNumber(net+tare)
   const controlStyle={border:"1px solid #1b5a46",background:"#041d16",color:"white",borderRadius:8,padding:"6px 12px",fontSize:10,cursor:"pointer"} as const
-  return <section aria-label={`کنسول باسکول ${mode==="ENTRY"?"ورود":"خروج"} شست‌وشو`} style={{width:"100%",maxWidth:760,margin:"10px auto",background:"#06291f",border:"1px solid #1b5a46",borderRadius:14,padding:10,color:"white",boxShadow:"0 8px 20px #173f351b"}}>
+  return <section data-scale-console aria-label={`کنسول باسکول ${mode==="ENTRY"?"ورود":"خروج"} شست‌وشو`} style={{width:"100%",maxWidth:760,margin:"10px auto",background:"#06291f",border:"1px solid #1b5a46",borderRadius:14,padding:10,color:"white",boxShadow:"0 8px 20px #173f351b"}}>
+    <div className="terminal-scale-strip hidden" dir="rtl"><div className="terminal-scale-cell"><small>باسکول رومیزی ۱ · آنلاین</small><b style={{color:"#62e5ad"}}>{code||"در انتظار اسکن"}</b><small>RS485 · پایدار ±0.002 kg</small></div><div className="terminal-scale-cell"><small>{mode==="ENTRY"?"وزن قبلی":"وزن ناخالص"}</small><b style={{fontFamily:"monospace"}}>{n(mode==="ENTRY"?previousNet:gross)} kg</b><small>{mode==="ENTRY"?`اختلاف ${n(net-previousNet)} kg`:`ظرف ${n(tare)} kg`}</small></div><div className="terminal-scale-cell"><small>{mode==="ENTRY"?"وزن خالص جدید":"وزن خالص آنلاین"}</small><b className="terminal-scale-weight">{n(net)} <i style={{fontSize:10,color:"#62e5ad",fontStyle:"normal"}}>kg</i></b><small>10 Hz · SENS HIGH</small></div>{mode==="ENTRY"&&onRead?<button type="button" onClick={onRead} className="terminal-scale-action">↻ ثبت وزن جدید</button>:<div className="terminal-scale-cell"><small>وضعیت</small><b style={{color:"#62e5ad"}}>● خوانش آنلاین</b><small>پس از اسکن</small></div>}</div>
+    <div className="terminal-scale-full">
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",flexWrap:"wrap",gap:"6px 14px",padding:"5px 8px",borderRadius:8,background:"#041d16",fontSize:9}}><b style={{color:"#c9f7e4"}}>● باسکول رومیزی ۱</b><span style={{fontFamily:"monospace",color:"#62e5ad"}}>10 Hz</span><span>لودسل آنلاین <b style={{color:"#62e5ad"}}>RS485</b></span><span style={{color:"#91b9aa"}}>قرائت پایدار <b style={{color:"#c9f7e4"}}>± 0.002 kg</b></span><span style={{color:"#62e5ad"}}>✓ ثبات سیگنال حسگر تأیید شد</span>{code&&<b style={{fontFamily:"monospace",color:"#62e5ad"}}>{code}</b>}</div>
     <div style={{display:"grid",gridTemplateColumns:netOnly?"1fr":"1fr 1fr",gap:8,margin:"8px 0"}} dir="rtl">
       <div style={{border:"1px solid #1b5a46",borderRadius:10,padding:"9px 12px",background:"#041d16",textAlign:"center"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#c9f7e4"}}><b>{mode==="ENTRY"?"وزن خالص جدید":"وزن خالص خروجی"}</b><span style={{fontFamily:"monospace",color:"#62e5ad"}}>SENS: HIGH</span></div><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:7,margin:"7px 0"}} dir="ltr"><strong style={{fontFamily:"monospace",fontSize:29,letterSpacing:2}}>{n(net)}</strong><span style={{fontSize:10,color:"#62e5ad"}}>kg</span></div><small style={{color:"#91b9aa"}}>{netOnly?"وزن خالص محصول؛ بدون محاسبه وزن ناخالص":`وزن ظرف ${n(tare)} kg`}</small></div>
@@ -1297,16 +1336,20 @@ function WashingScaleConsole({mode,code,net,previousNet,tare,onRead,netOnly=fals
     </div>
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",flexWrap:"wrap",gap:7,padding:"6px 8px",borderRadius:8,background:"#0a3326",fontSize:9}}>{mode==="ENTRY"&&onRead?<button type="button" onClick={onRead} style={controlStyle}>↻ ثبت وزن جدید</button>:<b style={{color:"#62e5ad"}}>● وزن آنلاین پس از اسکن سبد</b>}<button type="button" style={controlStyle}>صفر (Zero)</button><button type="button" style={controlStyle}>تار (Tare)</button><span style={{color:"#91b9aa"}}>پورت اتصال: <b style={{fontFamily:"monospace",color:"#62e5ad"}}>COM 4</b></span></div>
     {onSimulate&&<div style={{display:"flex",alignItems:"center",justifyContent:"center",flexWrap:"wrap",gap:6,marginTop:7,fontSize:9}}><span style={{color:"#91b9aa"}}>وزن آزمایشی:</span>{testWeights.map((weight)=><button key={weight} type="button" onClick={()=>onSimulate(weight)} style={{...controlStyle,color:"#62e5ad"}}>{n(weight)} kg</button>)}</div>}
+    </div>
   </section>
 }
 function SlicingRemainderScaleConsole({code,net,tare}:{code?:string;net:number;tare:number}) {
   const n=(value:number)=>Number.isFinite(value)?value.toFixed(3):"0.000"
   const gross=pwNumber(net+tare)
-  return <section aria-label="باسکول آنلاین مانده اسلایس" style={{width:"100%",maxWidth:560,margin:"12px auto 0",background:"#06291f",border:"1px solid #1b5a46",borderRadius:13,padding:11,color:"white",boxShadow:"0 8px 20px #173f3520"}}>
+  return <section data-scale-console aria-label="باسکول آنلاین مانده اسلایس" style={{width:"100%",maxWidth:560,margin:"12px auto 0",background:"#06291f",border:"1px solid #1b5a46",borderRadius:13,padding:11,color:"white",boxShadow:"0 8px 20px #173f3520"}}>
+    <div className="terminal-scale-strip hidden" dir="rtl"><div className="terminal-scale-cell"><small>باسکول مانده اسلایس</small><b style={{color:code?"#62e5ad":"#91b9aa"}}>{code||"در انتظار اسکن"}</b><small>RS485 · پایدار</small></div><div className="terminal-scale-cell"><small>وزن ظرف</small><b style={{fontFamily:"monospace"}}>{n(tare)} kg</b><small>ناخالص {n(gross)} kg</small></div><div className="terminal-scale-cell"><small>وزن خالص مانده</small><b className="terminal-scale-weight">{n(net)} <i style={{fontSize:10,color:"#62e5ad",fontStyle:"normal"}}>kg</i></b><small>ثبت خودکار</small></div><div className="terminal-scale-cell"><small>وضعیت</small><b style={{color:"#62e5ad"}}>● آنلاین</b><small>COM 4</small></div></div>
+    <div className="terminal-scale-full">
     <div style={{display:"grid",gridTemplateColumns:"1.15fr .85fr .85fr",gap:8,alignItems:"stretch"}} dir="rtl">
       <div style={{border:"1px solid #1b5a46",borderRadius:9,padding:10,background:"#041d16"}}><div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:10}}><b style={{color:"#c9f7e4"}}>● لودسل آنلاین</b><span style={{color:"#62e5ad",fontFamily:"monospace"}}>RS485 · 10 Hz</span></div><div style={{marginTop:9,display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}><span style={{fontSize:10,color:"#91b9aa"}}>وزن خالص مانده</span><span dir="ltr"><strong style={{fontFamily:"monospace",fontSize:25,letterSpacing:2}}>{n(net)}</strong> <small style={{color:"#62e5ad"}}>kg</small></span></div><div style={{marginTop:7,fontSize:9,color:"#62e5ad"}}>✓ قرائت پایدار و ثبت خودکار پس از اسکن</div></div>
       <div style={{border:"1px solid #1b5a46",borderRadius:9,padding:10,background:"#041d16",display:"flex",flexDirection:"column",justifyContent:"space-between"}}><small style={{color:"#91b9aa"}}>وزن ظرف (Tare)</small><b dir="ltr" style={{fontFamily:"monospace",fontSize:18}}>{n(tare)} kg</b><small style={{color:"#91b9aa"}}>وزن ناخالص: <b dir="ltr" style={{color:"#c9f7e4"}}>{n(gross)} kg</b></small></div>
       <div style={{border:"1px solid #1b5a46",borderRadius:9,padding:10,background:"#0a3326",display:"flex",flexDirection:"column",justifyContent:"space-between",gap:6}}><small style={{color:"#91b9aa"}}>سبد روی باسکول</small><b style={{fontFamily:"monospace",fontSize:16,color:code?"#62e5ad":"#91b9aa"}}>{code||"در انتظار اسکن"}</b><small style={{color:"#91b9aa"}}>COM 4 · پایدار ±0.002 kg</small></div>
+    </div>
     </div>
   </section>
 }
@@ -1679,7 +1722,11 @@ function WashingSessionScreen({
   </div>
 }
 function ProductionScreen(props: any) {
-  const [tab, setTab] = useState("overview"),
+  const sharedConsumables=readPrototypeConsumables()
+  const activePouches=sharedConsumables.filter((row)=>row.active&&row.category==="METALLIZED_POUCH").map((row)=>({code:row.code,name:row.name,fillWeightGrams:row.fillWeightGrams,tareWeightGrams:row.weightGrams,stock:row.stock})),activeFreezeBoxes=sharedConsumables.filter((row)=>row.active&&row.category==="STYROFOAM_BOX").map((row)=>({code:row.code,name:row.name,capacityKg:row.capacityKg,tareWeightGrams:row.weightGrams,stock:row.stock}))
+  PW_DRY_POUCHES=activePouches.length?activePouches:[{code:"",name:"ابتدا پاکت متالایز فعال را در تنظیمات تعریف کنید",fillWeightGrams:0,tareWeightGrams:0,stock:0}]
+  PW_FREEZE_BOXES=activeFreezeBoxes.length?activeFreezeBoxes:[{code:"",name:"ابتدا یونولیت فعال را در تنظیمات تعریف کنید",capacityKg:0,tareWeightGrams:0,stock:0}]
+  const [tab, setTab] = useState(props.initialTab || "overview"),
     [ledger, setLedger] = useState<PWLedger>(() => readProductionLedger()),
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
@@ -1692,21 +1739,26 @@ function ProductionScreen(props: any) {
   const [sliceRemainderWeight,setSliceRemainderWeight]=useState("")
   const [sliceRemainderScanOpen,setSliceRemainderScanOpen]=useState(false)
   const [sliceDifferenceReason,setSliceDifferenceReason]=useState("")
+  const [freezeBoxCode,setFreezeBoxCode]=useState(PW_FREEZE_BOXES[0]?.code||"")
+  const [freezePlasticCode,setFreezePlasticCode]=useState(PW_FREEZE_PLASTICS[0].code)
+  const [freezePackageScaleKg,setFreezePackageScaleKg]=useState(PW_FREEZE_BOXES[0]?.capacityKg||0)
+  const [freezeRemainderCode,setFreezeRemainderCode]=useState("")
+  const [freezeRemainderScanOpen,setFreezeRemainderScanOpen]=useState(false)
   const [cycleEntryIds,setCycleEntryIds]=useState<string[]>([])
   const [dryGradeRows,setDryGradeRows]=useState([{id:1,grade:"A",weightKg:""}])
   const [dryPackagingSourceIds,setDryPackagingSourceIds]=useState<string[]>([])
-  const [dryPouchCode,setDryPouchCode]=useState(PW_DRY_POUCHES[0].code)
+  const [dryPouchCode,setDryPouchCode]=useState(PW_DRY_POUCHES[0]?.code||"")
   const [dryAbsorberCode,setDryAbsorberCode]=useState("CNS-DES-005")
-  const [dryPackageScaleKg,setDryPackageScaleKg]=useState(PW_DRY_POUCHES[0].fillWeightGrams/1000)
+  const [dryPackageScaleKg,setDryPackageScaleKg]=useState((PW_DRY_POUCHES[0]?.fillWeightGrams||0)/1000)
   const [dryScaleMode,setDryScaleMode]=useState<"GRADING"|"PACKAGING">("GRADING")
   const [dryRemainderCode,setDryRemainderCode]=useState("")
   const [dryRemainderScanOpen,setDryRemainderScanOpen]=useState(false)
   const [freezeDryGradeRows,setFreezeDryGradeRows]=useState([{id:1,grade:"A",weightKg:""}])
   const [freezeDryOutputCycleId,setFreezeDryOutputCycleId]=useState("")
   const [freezeDryPackagingSourceIds,setFreezeDryPackagingSourceIds]=useState<string[]>([])
-  const [freezeDryPouchCode,setFreezeDryPouchCode]=useState(PW_DRY_POUCHES[0].code)
+  const [freezeDryPouchCode,setFreezeDryPouchCode]=useState(PW_DRY_POUCHES[0]?.code||"")
   const [freezeDryAbsorberCode,setFreezeDryAbsorberCode]=useState("CNS-DES-005")
-  const [freezeDryPackageScaleKg,setFreezeDryPackageScaleKg]=useState(PW_DRY_POUCHES[0].fillWeightGrams/1000)
+  const [freezeDryPackageScaleKg,setFreezeDryPackageScaleKg]=useState((PW_DRY_POUCHES[0]?.fillWeightGrams||0)/1000)
   const [freezeDryScaleMode,setFreezeDryScaleMode]=useState<"GRADING"|"PACKAGING">("GRADING")
   const [freezeDryRemainderCode,setFreezeDryRemainderCode]=useState("")
   const [freezeDryRemainderScanOpen,setFreezeDryRemainderScanOpen]=useState(false)
@@ -1741,8 +1793,10 @@ function ProductionScreen(props: any) {
       saveProductionLedger(next)
       setLedger(next)
       setNotice(message)
+      return true
     } catch (failure: any) {
       setError(failure.message || "ثبت عملیات انجام نشد.")
+      return false
     }
   }
   const form = (event: any) => {
@@ -2307,21 +2361,24 @@ function ProductionScreen(props: any) {
   }
   const packageOneDryUnit=()=>{
     let survivingIds:string[]=[]
-    let completed=false
-    execute("بسته توزین شد؛ شناسه و برچسب همان بسته چاپ شد.",(next)=>{
+    let completed=false,usedPouchCode=""
+    const saved=execute("بسته توزین شد؛ شناسه و برچسب همان بسته چاپ شد.",(next)=>{
       const sources=dryPackagingSourceIds.map((id)=>next.items.find((item)=>item.id===id)).filter(Boolean) as PWItem[]
       if(!sources.length||sources.length!==dryPackagingSourceIds.length)throw Error("حداقل یک بچ گریددار معتبر برای بسته‌بندی انتخاب کنید.")
       sources.forEach((item)=>{pwUsable(next,item);if(item.stage!=="DRIED"||item.nextZone!=="PACKAGING")throw Error("فقط خروجی خشک گریدشده و قفل‌شده قابل بسته‌بندی است.")})
       if(sources.some((item)=>item.product!==sources[0].product||item.grade!==sources[0].grade))throw Error("برای یک بسته فقط بچ‌های هم‌محصول و هم‌گرید را ترکیب کنید.")
-      const pouch=PW_DRY_POUCHES.find((row)=>row.code===dryPouchCode),absorber=PW_DRY_ABSORBERS.find((row)=>row.code===dryAbsorberCode)
-      if(!pouch||!absorber)throw Error("پاکت یا رطوبت‌گیر انتخاب‌شده معتبر نیست.")
+      const pouch=PW_DRY_POUCHES.find((row)=>row.code===dryPouchCode)||PW_DRY_POUCHES[0],absorber=PW_DRY_ABSORBERS.find((row)=>row.code===dryAbsorberCode)
+      if(!pouch||!absorber)throw Error("پاکت فعال یا رطوبت‌گیر معتبر در تنظیمات پیدا نشد.")
+      if(pouch.stock<1)throw Error("موجودی پاکت متالایز انتخاب‌شده تمام شده است.")
       const netWeightKg=pwNumber(dryPackageScaleKg),availableWeightKg=pwNumber(sources.reduce((sum,item)=>sum+item.weightKg,0))
       if(!(netWeightKg>0))throw Error("وزن آنلاین بسته باید مثبت باشد.")
       if(availableWeightKg<netWeightKg)throw Error("موجودی انتخاب‌شده برای پر کردن این پاکت کافی نیست؛ مانده را داخل سبد ثبت کنید.")
       const sourceWeights=sources.map((item)=>({code:item.id,gross:item.weightKg,tare:0})),contributions=pwProportionalParentContributions(sourceWeights,netWeightKg,{})
+      const packagingBatchCode=pwPackagingBatchCode(next,sources,"PKB")
       contributions.forEach((part:any)=>{const source=sources.find((item)=>item.id===part.batchId)!;source.weightKg=pwNumber(source.weightKg-part.inputWeightKg);if(source.weightKg<=0.0005){source.weightKg=0;source.consumed=true;source.stage="CONSUMED";source.currentState="CONSUMED_BY_PACKAGING";source.nextZone=null;source.nextAction="در بسته‌بندی مصرف شد"}else{survivingIds.push(source.id)}})
-      const id=pwId(next,"PKG"),packagingSessionId=pwId(next,"PKS"),tareWeightGrams=pouch.tareWeightGrams+absorber.weightGrams,grossWeightGrams=Math.round((netWeightKg*1000)+tareWeightGrams),packaged:PWItem={id,code:id,batchCode:packagingSessionId,parentId:sources.map((item)=>item.id).join(","),parentIds:sources.map((item)=>item.id),parentContributions:contributions.map((part:any)=>({id:part.batchId,weightKg:part.inputWeightKg})),inputCodes:sources.flatMap((item)=>item.inputCodes||[]),product:sources[0].product,grade:sources[0].grade,size:`${Math.round(netWeightKg*1000)} g`,weightKg:netWeightKg,stage:"PACKAGED",zone:"PACKAGING",currentLocation:"PACKAGING",physicalLocation:"PACKAGING",currentState:"FINISHED_PACKAGE",destination:null,operationalDestination:"DRYING",nextZone:null,nextAction:"آماده انبار محصول نهایی",containerCode:"",trays:[],allocated:false,consumed:false,blocked:false,packagingSessionId,packageUnitWeightGrams:Math.round(netWeightKg*1000),pouchCode:pouch.code,pouchTareWeightGrams:pouch.tareWeightGrams,moistureAbsorberCode:absorber.code,moistureAbsorberWeightGrams:absorber.weightGrams,grossWeightGrams,labelPrintedAt:new Date().toISOString()};next.items.push(packaged);pwEvent(next,"توزین، چاپ برچسب و بستن بسته",id,{sourceIds:sources.map((item)=>item.id),netWeightKg,pouchCode:pouch.code,pouchTareWeightGrams:pouch.tareWeightGrams,moistureAbsorberCode:absorber.code,moistureAbsorberWeightGrams:absorber.weightGrams,grossWeightGrams,labelPrinted:true});completed=true
+      const id=pwId(next,"PKG"),packagingSessionId=packagingBatchCode,tareWeightGrams=pouch.tareWeightGrams+absorber.weightGrams,grossWeightGrams=Math.round((netWeightKg*1000)+tareWeightGrams),packaged:PWItem={id,code:id,batchCode:packagingBatchCode,parentId:sources.map((item)=>item.id).join(","),parentIds:sources.map((item)=>item.id),parentContributions:contributions.map((part:any)=>({id:part.batchId,weightKg:part.inputWeightKg})),inputCodes:sources.flatMap((item)=>item.inputCodes||[]),product:sources[0].product,grade:sources[0].grade,size:`${Math.round(netWeightKg*1000)} g`,weightKg:netWeightKg,stage:"PACKAGED",zone:"PACKAGING",currentLocation:"PACKAGING",physicalLocation:"PACKAGING",currentState:"FINISHED_PACKAGE",destination:null,operationalDestination:"DRYING",nextZone:null,nextAction:"آماده انبار محصول نهایی",containerCode:"",trays:[],allocated:false,consumed:false,blocked:false,packagingSessionId,packageUnitWeightGrams:Math.round(netWeightKg*1000),pouchCode:pouch.code,pouchTareWeightGrams:pouch.tareWeightGrams,moistureAbsorberCode:absorber.code,moistureAbsorberWeightGrams:absorber.weightGrams,grossWeightGrams,labelPrintedAt:new Date().toISOString()};next.items.push(packaged);pwEvent(next,"توزین، چاپ برچسب و بستن بسته",id,{packagingBatchCode,sourceIds:sources.map((item)=>item.id),netWeightKg,pouchCode:pouch.code,pouchTareWeightGrams:pouch.tareWeightGrams,moistureAbsorberCode:absorber.code,moistureAbsorberWeightGrams:absorber.weightGrams,grossWeightGrams,labelPrinted:true});usedPouchCode=pouch.code;completed=true
     })
+    if(saved&&completed)consumePrototypeConsumables([{code:usedPouchCode,quantity:1}])
     if(completed)setDryPackagingSourceIds([...new Set(survivingIds)])
   }
   const closeDryPackaging=()=>{
@@ -2364,20 +2421,23 @@ function ProductionScreen(props: any) {
     if(lockedIds.length){setFreezeDryGradeRows([{id:1,grade:"A",weightKg:""}]);setFreezeDryPackagingSourceIds(lockedIds);setFreezeDryScaleMode("PACKAGING")}
   }
   const packageOneFreezeDryUnit=()=>{
-    let survivingIds:string[]=[],completed=false
-    execute("بسته فریزدرای توزین شد؛ شناسه و برچسب همان بسته چاپ شد.",(next)=>{
+    let survivingIds:string[]=[],completed=false,usedPouchCode=""
+    const saved=execute("بسته فریزدرای توزین شد؛ شناسه و برچسب همان بسته چاپ شد.",(next)=>{
       const sources=freezeDryPackagingSourceIds.map((id)=>next.items.find((item)=>item.id===id)).filter(Boolean) as PWItem[]
       if(!sources.length||sources.length!==freezeDryPackagingSourceIds.length)throw Error("حداقل یک خروجی فریزدرای گریدشده انتخاب کنید.")
       sources.forEach((item)=>{pwUsable(next,item);if(item.stage!=="FREEZE_DRIED"||item.nextZone!=="PACKAGING")throw Error("فقط خروجی فریزدرای قفل‌شده قابل بسته‌بندی است.")})
       if(sources.some((item)=>item.product!==sources[0].product||item.grade!==sources[0].grade))throw Error("برای یک بسته فقط موجودی هم‌محصول و هم‌گرید را ترکیب کنید.")
-      const pouch=PW_DRY_POUCHES.find((row)=>row.code===freezeDryPouchCode),absorber=PW_DRY_ABSORBERS.find((row)=>row.code===freezeDryAbsorberCode),netWeightKg=pwNumber(freezeDryPackageScaleKg)
-      if(!pouch||!absorber||!(netWeightKg>0))throw Error("پاکت، رطوبت‌گیر یا وزن آنلاین بسته معتبر نیست.")
+      const pouch=PW_DRY_POUCHES.find((row)=>row.code===freezeDryPouchCode)||PW_DRY_POUCHES[0],absorber=PW_DRY_ABSORBERS.find((row)=>row.code===freezeDryAbsorberCode),netWeightKg=pwNumber(freezeDryPackageScaleKg)
+      if(!pouch||!absorber||!(netWeightKg>0))throw Error("پاکت فعال، رطوبت‌گیر یا وزن آنلاین بسته معتبر نیست.")
+      if(pouch.stock<1)throw Error("موجودی پاکت متالایز انتخاب‌شده تمام شده است.")
       const availableWeightKg=pwNumber(sources.reduce((sum,item)=>sum+item.weightKg,0))
       if(availableWeightKg<netWeightKg)throw Error("موجودی انتخاب‌شده برای این بسته کافی نیست.")
       const contributions=pwProportionalParentContributions(sources.map((item)=>({code:item.id,gross:item.weightKg,tare:0})),netWeightKg,{})
+      const packagingBatchCode=pwPackagingBatchCode(next,sources,"FPB")
       contributions.forEach((part:any)=>{const source=sources.find((item)=>item.id===part.batchId)!;source.weightKg=pwNumber(source.weightKg-part.inputWeightKg);if(source.weightKg<=0.0005){source.weightKg=0;source.consumed=true;source.stage="CONSUMED";source.currentState="CONSUMED_BY_PACKAGING";source.nextZone=null;source.nextAction="در بسته‌بندی مصرف شد"}else survivingIds.push(source.id)})
-      const id=pwId(next,"PKG"),packagingSessionId=pwId(next,"FPK"),tareWeightGrams=pouch.tareWeightGrams+absorber.weightGrams,grossWeightGrams=Math.round(netWeightKg*1000+tareWeightGrams),packaged:PWItem={id,code:id,batchCode:packagingSessionId,parentId:sources.map((item)=>item.id).join(","),parentIds:sources.map((item)=>item.id),parentContributions:contributions.map((part:any)=>({id:part.batchId,weightKg:part.inputWeightKg})),inputCodes:sources.flatMap((item)=>item.inputCodes||[]),product:sources[0].product,grade:sources[0].grade,size:`${Math.round(netWeightKg*1000)} g`,weightKg:netWeightKg,stage:"PACKAGED",zone:"PACKAGING",currentLocation:"PACKAGING",physicalLocation:"PACKAGING",currentState:"FINISHED_PACKAGE",destination:null,operationalDestination:"FREEZE_DRYING",nextZone:null,nextAction:"آماده انبار محصول نهایی",containerCode:"",trays:[],allocated:false,consumed:false,blocked:false,packagingSessionId,packageUnitWeightGrams:Math.round(netWeightKg*1000),pouchCode:pouch.code,pouchTareWeightGrams:pouch.tareWeightGrams,moistureAbsorberCode:absorber.code,moistureAbsorberWeightGrams:absorber.weightGrams,grossWeightGrams,labelPrintedAt:new Date().toISOString()};next.items.push(packaged);pwEvent(next,"توزین، چاپ برچسب و بستن بسته فریزدرای",id,{sourceIds:sources.map((item)=>item.id),netWeightKg,pouchCode:pouch.code,moistureAbsorberCode:absorber.code,grossWeightGrams,labelPrinted:true});completed=true
+      const id=pwId(next,"PKG"),packagingSessionId=packagingBatchCode,tareWeightGrams=pouch.tareWeightGrams+absorber.weightGrams,grossWeightGrams=Math.round(netWeightKg*1000+tareWeightGrams),packaged:PWItem={id,code:id,batchCode:packagingBatchCode,parentId:sources.map((item)=>item.id).join(","),parentIds:sources.map((item)=>item.id),parentContributions:contributions.map((part:any)=>({id:part.batchId,weightKg:part.inputWeightKg})),inputCodes:sources.flatMap((item)=>item.inputCodes||[]),product:sources[0].product,grade:sources[0].grade,size:`${Math.round(netWeightKg*1000)} g`,weightKg:netWeightKg,stage:"PACKAGED",zone:"PACKAGING",currentLocation:"PACKAGING",physicalLocation:"PACKAGING",currentState:"FINISHED_PACKAGE",destination:null,operationalDestination:"FREEZE_DRYING",nextZone:null,nextAction:"آماده انبار محصول نهایی",containerCode:"",trays:[],allocated:false,consumed:false,blocked:false,packagingSessionId,packageUnitWeightGrams:Math.round(netWeightKg*1000),pouchCode:pouch.code,pouchTareWeightGrams:pouch.tareWeightGrams,moistureAbsorberCode:absorber.code,moistureAbsorberWeightGrams:absorber.weightGrams,grossWeightGrams,labelPrintedAt:new Date().toISOString()};next.items.push(packaged);pwEvent(next,"توزین، چاپ برچسب و بستن بسته فریزدرای",id,{packagingBatchCode,sourceIds:sources.map((item)=>item.id),netWeightKg,pouchCode:pouch.code,moistureAbsorberCode:absorber.code,grossWeightGrams,labelPrinted:true});usedPouchCode=pouch.code;completed=true
     })
+    if(saved&&completed)consumePrototypeConsumables([{code:usedPouchCode,quantity:1}])
     if(completed)setFreezeDryPackagingSourceIds([...new Set(survivingIds)])
   }
   const closeFreezeDryPackaging=()=>{
@@ -2395,44 +2455,49 @@ function ProductionScreen(props: any) {
     })
     if(completed){setFreezeDryPackagingSourceIds([]);setFreezeDryRemainderCode("")}
   }
-  const finishMachineOutput = (event:any,type:"FREEZE"|"DRY") => {
-    const data=form(event)
-    execute(type==="FREEZE"?"خروج از فریز ثبت شد.":"خروج از خشک‌کن ثبت شد و محصول بسته‌بندی شد.",(next)=>{
-      const item=next.items.find((row)=>row.id===chosen)
-      pwUsable(next,item)
-      const isFreezeDry=type==="FREEZE"&&item.destination==="FREEZE_DRYING"
-      const valid=type==="FREEZE"
-        ? item.nextZone==="FREEZING"&&["WASHED","SLICED"].includes(item.stage)
-        : item.nextZone==="DRYING"&&item.stage==="SLICED"&&item.destination==="DRYING"
-      if(!valid) throw Error("این بچ برای خروجی انتخاب‌شده آماده نیست.")
-      const measured=Number(data.get("weight")),packageCode=String(data.get("packageCode")||"").trim().toUpperCase(),weightDifferenceReason=String(data.get("weightDifferenceReason")||"").trim()
-      if(!Number.isFinite(measured)||!(measured>0)) throw Error("وزن خروجی باید مثبت باشد.")
-      const weightDeltaKg=pwNumber(measured-item.weightKg)
-      if(type==="FREEZE"&&Math.abs(weightDeltaKg)>0.0005&&!weightDifferenceReason) throw Error("برای افزایش یا کاهش وزن، علت اختلاف را ثبت کنید.")
-      if(!isFreezeDry&&!packageCode) throw Error("کد بسته یا لیبل خروجی لازم است.")
-      const before=item.weightKg
-      item.weightKg=pwNumber(measured)
-      item.beforeMachineWeightKg=before
-      item.yieldPercent=pwNumber((measured/before)*100)
-      item.containerCode=isFreezeDry?item.containerCode:packageCode
-      item.currentState="COMPLETED"
-      item.blocked=data.get("qualityCheckRequired")==="on"
-      if(type==="FREEZE"){
-        item.physicalLocation="COLD_ROOM_NEGATIVE"
-        item.zone="COLD_ROOM_NEGATIVE"
-        item.currentLocation="COLD_ROOM_NEGATIVE"
-        item.stage=isFreezeDry?"FROZEN":"PACKAGED"
-        item.nextZone=isFreezeDry?"FREEZE_DRYING":null
-        item.nextAction=item.blocked?"در انتظار تصمیم مدیر کنترل کیفیت":isFreezeDry?"ثبت ورود سینی‌ها به فریزدرای":"آماده نگهداری یا ارسال"
-      }else{
-        item.physicalLocation="COLD_ROOM_POSITIVE_CLEAN"
-        item.zone="COLD_ROOM_POSITIVE_CLEAN"
-        item.currentLocation="COLD_ROOM_POSITIVE_CLEAN"
-        item.stage="PACKAGED"
-        item.nextZone=null
-        item.nextAction=item.blocked?"در انتظار تصمیم مدیر کنترل کیفیت":"آماده نگهداری یا ارسال"
-      }
-      pwEvent(next,type==="FREEZE"?"ثبت خروج از فریز":"ثبت خروج از خشک‌کن",item.code,{beforeWeightKg:before,outputWeightKg:item.weightKg,weightDeltaKg,weightDifferenceReason:weightDifferenceReason||null,packageCode:packageCode||null,nextZone:item.nextZone})
+  const packageOneFrozenUnit=()=>{
+    let completed=false,remainingAfterKg=0,usedBoxCode=""
+    const saved=execute("یک جعبه محصول فریز بسته‌بندی و برچسب‌گذاری شد.",(next)=>{
+      const sources=next.items.filter((item)=>!item.consumed&&(item.batchCode||item.code)===chosen&&((item.nextZone==="FREEZING"&&["WASHED","SLICED","FROZEN"].includes(item.stage))||(item.stage==="FROZEN"&&item.nextZone==="PACKAGING"&&item.remainderForPackaging))&&item.destination!=="FREEZE_DRYING")
+      if(!sources.length)throw Error("بچ انتخاب‌شده برای خروج فریز و بسته‌بندی آماده نیست.")
+      sources.forEach((item)=>pwUsable(next,item))
+      if(sources.some((item)=>item.product!==sources[0].product||item.grade!==sources[0].grade))throw Error("یک بچ فریز باید محصول و گرید یکسان داشته باشد.")
+      const box=PW_FREEZE_BOXES.find((row)=>row.code===freezeBoxCode)||PW_FREEZE_BOXES[0],plastic=PW_FREEZE_PLASTICS.find((row)=>row.code===freezePlasticCode),netWeightKg=pwNumber(freezePackageScaleKg)
+      if(!box||!plastic||!(netWeightKg>0))throw Error("جعبه یونولیت فعال، پلاستیک یا وزن آنلاین معتبر نیست.")
+      if(box.stock<1)throw Error("موجودی جعبه یونولیت انتخاب‌شده تمام شده است.")
+      if(netWeightKg>box.capacityKg)throw Error("وزن خالص محصول از ظرفیت جعبه یونولیت بیشتر است.")
+      const availableWeightKg=pwNumber(sources.reduce((sum,item)=>sum+item.weightKg,0))
+      if(netWeightKg>availableWeightKg)throw Error("وزن این جعبه از مانده بچ بیشتر است.")
+      const contributions=pwProportionalParentContributions(sources.map((item)=>({code:item.id,gross:item.weightKg,tare:0})),netWeightKg,{})
+      contributions.forEach((part:any)=>{const source=sources.find((item)=>item.id===part.batchId)!;source.weightKg=pwNumber(source.weightKg-part.inputWeightKg);source.stage="FROZEN";source.currentState="READY_FOR_PACKAGING";source.physicalLocation="COLD_ROOM_NEGATIVE";source.zone="COLD_ROOM_NEGATIVE";source.currentLocation="COLD_ROOM_NEGATIVE";source.nextZone="PACKAGING";source.nextAction="مانده محصول فریز؛ در انتظار بسته‌بندی";source.remainderForPackaging=true;if(source.weightKg<=0.0005){source.weightKg=0;source.consumed=true;source.stage="CONSUMED";source.currentState="CONSUMED_BY_PACKAGING";source.nextZone=null;source.remainderForPackaging=false}})
+      const id=pwId(next,"PKG"),tareWeightGrams=box.tareWeightGrams+plastic.weightGrams,grossWeightGrams=Math.round(netWeightKg*1000+tareWeightGrams),packaged:PWItem={id,code:id,batchCode:chosen,parentId:sources.map((item)=>item.id).join(","),parentIds:sources.map((item)=>item.id),parentContributions:contributions.map((part:any)=>({id:part.batchId,weightKg:part.inputWeightKg})),inputCodes:sources.flatMap((item)=>item.inputCodes||[]),product:sources[0].product,grade:sources[0].grade,size:sources[0].size,weightKg:netWeightKg,stage:"PACKAGED",zone:"COLD_ROOM_NEGATIVE",currentLocation:"COLD_ROOM_NEGATIVE",physicalLocation:"COLD_ROOM_NEGATIVE",currentState:"FINISHED_PACKAGE",destination:null,operationalDestination:sources[0].destination||"FREEZING",nextZone:null,nextAction:"آماده نگهداری یا ارسال",containerCode:"",trays:[],allocated:false,consumed:false,blocked:false,packagingSessionId:`FRZ-${chosen}`,packageUnitWeightGrams:Math.round(netWeightKg*1000),freezeBoxCode:box.code,freezeBoxTareWeightGrams:box.tareWeightGrams,plasticCode:plastic.code,plasticWeightGrams:plastic.weightGrams,grossWeightGrams,labelPrintedAt:new Date().toISOString()}
+      next.items.push(packaged);remainingAfterKg=pwNumber(sources.reduce((sum,item)=>sum+item.weightKg,0));pwEvent(next,"بسته‌بندی خروج فریز",id,{batchCode:chosen,sourceIds:sources.map((item)=>item.id),netWeightKg,remainingAfterKg,freezeBoxCode:box.code,plasticCode:plastic.code,grossWeightGrams,labelPrinted:true});usedBoxCode=box.code;completed=true
+    })
+    if(saved&&completed)consumePrototypeConsumables([{code:usedBoxCode,quantity:1}])
+    if(completed){setNotice(remainingAfterKg>0?`جعبه ثبت شد؛ ${remainingAfterKg.toFixed(3)} کیلوگرم از همین بچ باقی مانده است.`:"آخرین جعبه ثبت شد و بچ به‌طور کامل بسته‌بندی شد.");const nextBox=PW_FREEZE_BOXES.find((row)=>row.code===freezeBoxCode)||PW_FREEZE_BOXES[0];setFreezePackageScaleKg(remainingAfterKg>0&&nextBox?String(Math.min(nextBox.capacityKg,remainingAfterKg)):"")}
+  }
+  const closeFrozenPackaging=()=>{
+    let completed=false
+    execute("نشست بسته‌بندی فریز بسته شد و مانده برای نوبت بعد داخل سبد ثبت شد.",(next)=>{
+      const sources=next.items.filter((item)=>!item.consumed&&(item.batchCode||item.code)===chosen&&((item.nextZone==="FREEZING"&&["WASHED","SLICED","FROZEN"].includes(item.stage))||(item.stage==="FROZEN"&&item.nextZone==="PACKAGING"&&item.remainderForPackaging))&&item.destination!=="FREEZE_DRYING"),remainingKg=pwNumber(sources.reduce((sum,item)=>sum+item.weightKg,0))
+      if(!sources.length)throw Error("مانده بازی برای بستن نشست فریز وجود ندارد.")
+      if(remainingKg>0&&!freezeRemainderCode)throw Error("برای مانده محصول فریز، QR سبد را اسکن کنید.")
+      const carrier=pwCarrier(freezeRemainderCode,"basket")
+      pwFreeCarrier(next,carrier.code)
+      if(remainingKg>carrier.capacityKg)throw Error("مانده محصول فریز بیشتر از ظرفیت سبد است.")
+      const first=sources[0],parentIds=sources.map((item)=>item.id),parentContributions=sources.map((item)=>({id:item.id,weightKg:item.weightKg}))
+      sources.forEach((item)=>{item.consumed=true;item.stage="CONSUMED";item.currentState="PACKAGING_SESSION_CLOSED";item.weightKg=0;item.nextZone=null;item.nextAction="نشست بسته‌بندی فریز بسته شد"})
+      const id=pwId(next,"B"),remainder:PWItem={id,code:id,batchCode:chosen,parentId:parentIds.join(","),parentIds,parentContributions,inputCodes:sources.flatMap((item)=>item.inputCodes||[]),product:first.product,grade:first.grade,size:first.size,weightKg:remainingKg,stage:"FROZEN",zone:"COLD_ROOM_NEGATIVE",currentLocation:"COLD_ROOM_NEGATIVE",physicalLocation:"COLD_ROOM_NEGATIVE",currentState:"AVAILABLE",destination:first.destination,operationalDestination:first.operationalDestination||first.destination,nextZone:"PACKAGING",nextAction:"مانده محصول فریز؛ در انتظار بسته‌بندی بعدی",containerCode:carrier.code,trays:[],allocated:false,consumed:false,blocked:false,remainderForPackaging:true}
+      next.items.push(remainder);pwEvent(next,"ثبت مانده محصول فریز",id,{batchCode:chosen,sourceIds:parentIds,containerCode:carrier.code,weightKg:remainingKg});completed=true
+    })
+    if(completed){setFreezeRemainderCode("");setChosen("")}
+  }
+  const sendFrozenBatchToFreezeDry=()=>{
+    execute("خروج کل بچ از فریز ثبت و برای ورود به فریزدرای آماده شد.",(next)=>{
+      const sources=next.items.filter((item)=>!item.consumed&&(item.batchCode||item.code)===chosen&&item.nextZone==="FREEZING"&&["WASHED","SLICED","FROZEN"].includes(item.stage)&&item.destination==="FREEZE_DRYING")
+      if(!sources.length)throw Error("بچ انتخاب‌شده برای مسیر فریزدرای آماده نیست.")
+      sources.forEach((item)=>{pwUsable(next,item);item.stage="FROZEN";item.physicalLocation="COLD_ROOM_NEGATIVE";item.zone="COLD_ROOM_NEGATIVE";item.currentLocation="COLD_ROOM_NEGATIVE";item.currentState="READY_FOR_FREEZE_DRY";item.nextZone="FREEZE_DRYING";item.nextAction="در انتظار ورود به دستگاه فریزدرای"})
+      pwEvent(next,"ثبت خروج بچ از فریز",chosen,{batchCode:chosen,itemIds:sources.map((item)=>item.id),weightKg:pwNumber(sources.reduce((sum,item)=>sum+item.weightKg,0)),nextZone:"FREEZE_DRYING"})
     })
   }
   const cycleType = tab==="FREEZE_DRY_ENTRY"||tab==="FREEZE_DRY_EXIT" ? "FREEZE_DRY" : ""
@@ -2444,7 +2509,9 @@ function ProductionScreen(props: any) {
           ? (item.stage === "FROZEN" && (item.zone === "FREEZE_DRYING" || item.nextZone === "FREEZE_DRYING")) || (item.destination==="FREEZE_DRYING"&&item.stage==="SLICED"&&item.nextZone==="FREEZING"&&item.physicalLocation==="COLD_ROOM_NEGATIVE")
           : false),
   )
-  const freezeOutputEligible=live.filter(item=>!pwBusy(ledger,item)&&!item.blocked&&item.nextZone==="FREEZING"&&["WASHED","SLICED"].includes(item.stage))
+  const freezeOutputEligible=live.filter(item=>!pwBusy(ledger,item)&&!item.blocked&&((item.nextZone==="FREEZING"&&["WASHED","SLICED","FROZEN"].includes(item.stage))||(item.stage==="FROZEN"&&item.nextZone==="PACKAGING"&&item.remainderForPackaging)))
+  const freezeOutputBatches=pwFreezeBatchGroups(freezeOutputEligible)
+  const freezePreparedPackages=live.filter(item=>item.stage==="PACKAGED"&&["FREEZING","FREEZING_SLICED"].includes(item.operationalDestination)&&item.packagingSessionId)
   const dryOutputEligible=live.filter(item=>!pwBusy(ledger,item)&&!item.blocked&&item.nextZone==="DRYING"&&item.stage==="SLICED"&&item.destination==="DRYING")
   const dryPackagingEligible=live.filter(item=>!pwBusy(ledger,item)&&!item.blocked&&item.stage==="DRIED"&&item.nextZone==="PACKAGING"&&item.remainderForPackaging)
   const dryPreparedPackages=live.filter(item=>item.stage==="PACKAGED"&&item.operationalDestination==="DRYING"&&item.packagingSessionId)
@@ -2454,7 +2521,7 @@ function ProductionScreen(props: any) {
     <div
       dir="rtl"
       style={{
-        padding: 24,
+        padding: props.terminalMode ? 12 : 24,
         color: "#183e38",
         background: "#f3f7f6",
         flex: 1,
@@ -2463,7 +2530,7 @@ function ProductionScreen(props: any) {
         fontFamily: "inherit",
       }}
     >
-      <div
+      {!props.terminalMode&&<div
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -2473,10 +2540,10 @@ function ProductionScreen(props: any) {
         }}
       >
         <div>
-          <h1 style={{fontSize:25,margin:0,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}><span>میز کار تولید</span>{tab!=="overview"&&<><span style={{color:"#a8b8b2",fontWeight:400}}>—</span><span style={{fontSize:17,color:"#176b50",fontWeight:800}}>{tabs.find(([id])=>id===tab)?.[1]}</span></>}</h1>
+          <h1 style={{fontSize:props.terminalMode?20:25,margin:0,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}><span>{props.terminalMode?(tabs.find(([id])=>id===tab)?.[1]||"عملیات تولید"):"میز کار تولید"}</span>{!props.terminalMode&&tab!=="overview"&&<><span style={{color:"#a8b8b2",fontWeight:400}}>—</span><span style={{fontSize:17,color:"#176b50",fontWeight:800}}>{tabs.find(([id])=>id===tab)?.[1]}</span></>}</h1>
         </div>
-        <button type="button" onClick={()=>setResetArmed(true)} style={{border:"1px solid #c85b5b",background:"#fff7f7",color:"#a43838",borderRadius:10,padding:"10px 14px",fontWeight:800,cursor:"pointer"}}>↺ بازنشانی سناریوی آزمایشی</button>
-      </div>
+        {!props.terminalMode&&<button type="button" onClick={()=>setResetArmed(true)} style={{border:"1px solid #c85b5b",background:"#fff7f7",color:"#a43838",borderRadius:10,padding:"10px 14px",fontWeight:800,cursor:"pointer"}}>↺ بازنشانی سناریوی آزمایشی</button>}
+      </div>}
       {resetArmed&&<div role="alertdialog" aria-label="تأیید بازنشانی سناریوی آزمایشی" style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16,padding:"12px 14px",border:"1px solid #e3b0b0",background:"#fff7f7",borderRadius:12,fontSize:12}}><span><b>همه عملیات سورت، شست‌وشو و تولید این سناریو پاک شود؟</b><small style={{display:"block",color:"#718079",marginTop:3}}>محموله ۱۵۰ کیلویی و ۷ سبد اولیه برمی‌گردد؛ کاربران، تنظیمات پایه و فهرست کانتینرها حفظ می‌شوند.</small></span><span style={{display:"flex",gap:8}}><button type="button" onClick={()=>setResetArmed(false)} style={{border:"1px solid #cad7d1",background:"white",borderRadius:8,padding:"8px 12px",cursor:"pointer"}}>انصراف</button><button type="button" onClick={()=>{resetPrototypeOperationalScenario();setLedger(pwEmpty());setTab("overview");setChosen("");setNotice("سناریوی آزمایشی به محموله اولیه ۱۵۰ کیلویی بازنشانی شد.");setError("");setResetArmed(false)}} style={{border:0,background:"#b84242",color:"white",borderRadius:8,padding:"8px 12px",fontWeight:800,cursor:"pointer"}}>بله، بازنشانی شود</button></span></div>}
       {(error || ledger.storageError) && (
         <div
@@ -2763,22 +2830,19 @@ function ProductionScreen(props: any) {
         </div>
       })()}
       {tab === "FREEZE" && (()=>{
-        const rows=freezeOutputEligible
-        const selected=rows.find(item=>item.id===chosen)
+        const rows=freezeOutputBatches
+        const selected=rows.find(item=>item.code===chosen)
         const freezeDryContinuation=selected?.destination==="FREEZE_DRYING"
-        return <div style={{...pwBox,maxWidth:900}}>
+        const box=PW_FREEZE_BOXES.find((row)=>row.code===freezeBoxCode)||PW_FREEZE_BOXES[0],plastic=PW_FREEZE_PLASTICS.find((row)=>row.code===freezePlasticCode)||PW_FREEZE_PLASTICS[0],netWeightKg=pwNumber(freezePackageScaleKg),tareWeightKg=pwNumber((box.tareWeightGrams+plastic.weightGrams)/1000),grossWeightKg=pwNumber(netWeightKg+tareWeightKg)
+        return <div style={{...pwBox,maxWidth:1100}}>
           <h2>ثبت خروج از فریز و بسته‌بندی</h2>
-          <PWNotice>ورود به فریز قبلاً از مسیر شست‌وشو یا اسلایس مشخص شده است. اینجا فقط خروج محصول، وزن نهایی و بسته‌بندی ثبت می‌شود. محصول مسیر فریزدرای بدون بسته‌بندی به مرحله ورود فریزدرای می‌رود.</PWNotice>
-          {!rows.length?<PWEmpty>محصول آماده خروج در این مرحله وجود ندارد.</PWEmpty>:<form onSubmit={event=>finishMachineOutput(event,"FREEZE")}>
-            {batchPicker(rows,"محموله / نشست ورودی فریز")}
-            {selected&&summary(selected)}
-            <PWField label="وزن نهایی خروجی (kg)"><input name="weight" type="number" min="0.001" step="0.001" required style={pwInput}/></PWField>
-            <PWField label="علت افزایش یا کاهش وزن (در صورت اختلاف)"><input name="weightDifferenceReason" placeholder="مثلاً جذب رطوبت، برفک یا افت فرایند" style={pwInput}/></PWField>
-            {!freezeDryContinuation&&<PWField label="کد بسته یا لیبل خروجی"><input name="packageCode" placeholder="مثلاً PKG-0001" required style={pwInput}/></PWField>}
-            {freezeDryContinuation&&<PWNotice>این بچ پس از ثبت خروج فریز، در سردخانه منفی باقی می‌ماند و برای «ورود به فریزدرای» آماده می‌شود؛ در این مرحله بسته‌بندی نمی‌شود.</PWNotice>}
-            <label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,margin:"12px 0"}}><input name="qualityCheckRequired" type="checkbox"/>نیازمند کنترل کیفیت در خروج این مرحله</label>
-            <PWButton disabled={!selected}>ثبت وزن و {freezeDryContinuation?"ارسال به فریزدرای":"بسته‌بندی"}</PWButton>
-          </form>}
+          <PWNotice>ورودی بر اساس بچ انتخاب می‌شود. خروج عادی فریز بدون سورت یا تغییر گرید مستقیماً داخل جعبه یونولیت و پلاستیک بسته‌بندی و برای هر جعبه برچسب چاپ می‌شود.</PWNotice>
+          {!rows.length?<PWEmpty>بچ آماده خروج از فریز وجود ندارد.</PWEmpty>:<><PWField label="بچ ورودی فریز"><select value={chosen} onChange={(event)=>{const code=event.target.value;setChosen(code);setFreezeRemainderCode("");const batch=rows.find((row)=>row.code===code);if(batch&&batch.destination!=="FREEZE_DRYING")setFreezePackageScaleKg(String(Math.min(box.capacityKg,batch.weightKg)))}} style={pwInput}><option value="">انتخاب بچ…</option>{rows.map((batch)=><option key={batch.code} value={batch.code}>{batch.code} · {batch.product} / {batch.grade} · {batch.weightKg.toFixed(3)} kg · {batch.items.length} واحد</option>)}</select></PWField>{selected&&<PWNotice>بچ <b className="font-mono">{selected.code}</b> · {selected.product} / {selected.grade} · مانده قابل بسته‌بندی <b>{selected.weightKg.toFixed(3)} kg</b> · تعداد واحدهای والد <b>{selected.items.length}</b></PWNotice>}
+          {selected&&freezeDryContinuation&&<div style={{marginTop:12}}><PWNotice>این بچ بسته‌بندی نمی‌شود؛ خروج آن از فریز ثبت و برای ورود به دستگاه فریزدرای آماده خواهد شد.</PWNotice><div style={{marginTop:10}}><PWButton onClick={sendFrozenBatchToFreezeDry}>ثبت خروج کل بچ و ارسال به فریزدرای</PWButton></div></div>}
+          {selected&&!freezeDryContinuation&&<PWNotice>هر بار ثبت فقط همان جعبه را می‌بندد؛ بچ تا بسته‌بندی کامل وزن یا ثبت مانده‌بار باز می‌ماند.</PWNotice>}
+          {selected&&!freezeDryContinuation&&<><div style={{margin:"12px 0",padding:10,border:"1px solid #cfe0d9",borderRadius:12,background:"#edf7f2"}}><b style={{fontSize:12}}>باسکول بسته‌بندی خروج فریز · بچ {selected.code}</b><WashingScaleConsole mode="EXIT" code={selected.code} net={netWeightKg} previousNet={0} tare={tareWeightKg} onSimulate={setFreezePackageScaleKg} testWeights={[2.5,5,10]}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><PWField label="جعبه یونولیت"><select value={freezeBoxCode} onChange={(event)=>{const code=event.target.value;setFreezeBoxCode(code);const next=PW_FREEZE_BOXES.find((row)=>row.code===code);if(next)setFreezePackageScaleKg(String(Math.min(next.capacityKg,selected.weightKg)))}} style={pwInput}>{PW_FREEZE_BOXES.map((row)=><option key={row.code} value={row.code}>{row.name} · موجودی {row.stock} · وزن ظرف {row.tareWeightGrams} g</option>)}</select></PWField><PWField label="پلاستیک داخلی"><select value={freezePlasticCode} onChange={(event)=>setFreezePlasticCode(event.target.value)} style={pwInput}>{PW_FREEZE_PLASTICS.map((row)=><option key={row.code} value={row.code}>{row.name} · {row.weightGrams} g · موجودی {row.stock}</option>)}</select></PWField></div><div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,margin:"12px 0"}}><PWNotice>مانده بچ<br/><b>{selected.weightKg.toFixed(3)} kg</b></PWNotice><PWNotice>وزن خالص جعبه<br/><b>{netWeightKg.toFixed(3)} kg</b></PWNotice><PWNotice>یونولیت + پلاستیک<br/><b>{(tareWeightKg*1000).toFixed(0)} g</b></PWNotice><PWNotice>وزن ناخالص<br/><b>{grossWeightKg.toFixed(3)} kg</b></PWNotice></div><PWButton disabled={!(netWeightKg>0)||netWeightKg>selected.weightKg||netWeightKg>box.capacityKg} onClick={packageOneFrozenUnit}>ثبت این جعبه، چاپ برچسب و ادامه بچ</PWButton><div style={{marginTop:16,padding:13,border:"1px solid #d8e4df",borderRadius:11,background:"#fafcfb"}}><h4 style={{margin:"0 0 5px"}}>بستن نشست و ثبت مانده</h4><p style={{fontSize:11,color:"#718079"}}>اگر محصول باقی ماند، یک سبد آزاد اسکن کنید تا مانده با همان بچ برای بسته‌بندی بعدی به سردخانه منفی برگردد.</p><div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"end"}}><PWField label="QR سبد مانده"><input value={freezeRemainderCode} onChange={(event)=>setFreezeRemainderCode(event.target.value)} style={{...pwInput,fontFamily:"monospace"}} placeholder="CTR-..."/></PWField><PWButton secondary onClick={()=>setFreezeRemainderScanOpen(true)}>⌗ اسکن سبد</PWButton></div><ScanSimulator open={freezeRemainderScanOpen} title="اسکن سبد مانده محصول فریز" suggestedCode={freezeRemainderCode||"CTR-008"} onClose={()=>setFreezeRemainderScanOpen(false)} onScan={setFreezeRemainderCode}/><div style={{marginTop:10}}><PWButton secondary disabled={!freezeRemainderCode||!(selected.weightKg>0)} onClick={closeFrozenPackaging}>بستن نشست و ثبت مانده</PWButton></div></div></>}
+          </>}
+          <div style={{marginTop:18}}><h3>جعبه‌های آماده‌شده خروج فریز</h3>{!freezePreparedPackages.length?<PWEmpty>هنوز جعبه‌ای ثبت نشده است.</PWEmpty>:<div style={{border:"1px solid #d8e4df",borderRadius:11,overflow:"hidden"}}><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",padding:10,background:"#eef4f1",fontSize:11,fontWeight:800}}><span>شناسه بسته</span><span>بچ</span><span>جعبه / پلاستیک</span><span>خالص / ناخالص</span><span>برچسب</span></div>{freezePreparedPackages.slice().reverse().map((item)=><div key={item.id} style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",padding:10,borderTop:"1px solid #e1eae6",fontSize:12}}><b className="font-mono">{item.code}</b><b className="font-mono">{item.batchCode}</b><span>{item.freezeBoxCode} / {item.plasticCode}</span><b>{item.weightKg.toFixed(3)} / {((item.grossWeightGrams||0)/1000).toFixed(3)} kg</b><span>{item.labelPrintedAt?"چاپ شد":"—"}</span></div>)}</div>}</div>
         </div>
       })()}
       {cycleType && (
@@ -3162,8 +3226,9 @@ function SortingScaleConsole({
   onRead?: () => void
 }) {
   const number = (value: number) => Number.isFinite(value) ? value.toFixed(3) : "0.000"
-  return <section className="mx-auto w-full max-w-[1240px] overflow-hidden rounded-2xl border border-[#1b5a46] bg-[#082b20] p-4 text-white shadow-xl" aria-label={`کنسول توزین ${mode === "entry" ? "ورود" : "خروج"} سورتینگ`}>
-    <div className="grid grid-cols-[1.05fr_1.45fr_1.15fr_1fr] gap-3" dir="rtl">
+  return <section data-scale-console className="mx-auto w-full max-w-[1240px] overflow-hidden rounded-2xl border border-[#1b5a46] bg-[#082b20] p-4 text-white shadow-xl" aria-label={`کنسول توزین ${mode === "entry" ? "ورود" : "خروج"} سورتینگ`}>
+    <div className="terminal-scale-strip hidden" dir="rtl"><div className="terminal-scale-cell"><small>باسکول سورتینگ · آنلاین</small><b style={{color:code?"#62e5ad":"#91b9aa"}}>{code||"در انتظار اسکن"}</b><small>RS485 · پایدار ±0.002 kg</small></div><div className="terminal-scale-cell"><small>{mode==="entry"?"وزن قبلی":"وزن ناخالص"}</small><b className="font-mono">{number(mode==="entry"?previousNet||0:gross)} kg</b><small>{mode==="entry"?`اختلاف ${number(net-(previousNet||0))} kg`:`ظرف ${number(tare)} kg`}</small></div><div className="terminal-scale-cell"><small>{mode==="entry"?"وزن خالص جدید":"وزن خالص آنلاین"}</small><b className="terminal-scale-weight">{number(net)} <i style={{fontSize:10,color:"#62e5ad",fontStyle:"normal"}}>kg</i></b><small>10 Hz · SENS HIGH</small></div>{mode==="entry"?<button type="button" onClick={onRead} className="terminal-scale-action">↻ ثبت وزن جدید</button>:<div className="terminal-scale-cell"><small>وضعیت</small><b style={{color:"#62e5ad"}}>● خوانش آنلاین</b><small>پس از اسکن</small></div>}</div>
+    <div className="terminal-scale-full grid grid-cols-[1.05fr_1.45fr_1.15fr_1fr] gap-3" dir="rtl">
       <div className="flex flex-col justify-between rounded-xl border border-[#1b5a46] bg-[#061f17] p-3">
         <div className="flex items-center justify-between text-[11px]"><b className="text-[#c9f7e4]">● باسکول رومیزی ۱</b><span className="font-mono text-[#62e5ad]">10 Hz</span></div>
         <div className="mt-3 rounded-lg border border-[#1b5a46] bg-[#0d382a] p-2 text-[10px]"><div className="flex justify-between"><span>لودسل آنلاین</span><b className="font-mono text-[#62e5ad]">RS485</b></div><div className="mt-2 flex justify-between text-[#8eb8a8]"><span>قرائت پایدار</span><b>± 0.002 kg</b></div></div>
@@ -3213,7 +3278,8 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
     [staged, setStaged] = useState<string[]>([]),
     [weighingCode, setWeighingCode] = useState(""),
     [outputScanOpen, setOutputScanOpen] = useState(false),
-    [inputScanOpen, setInputScanOpen] = useState(false)
+    [inputScanOpen, setInputScanOpen] = useState(false),
+    [completedEntrySummary, setCompletedEntrySummary] = useState<{ count: number; weight: number } | null>(null)
   const scale = "STABLE"
   const defaultFleet = [
     {
@@ -3315,9 +3381,13 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
     QC: "کنترل کیفیت",
     WASTE: "دفع / امحاء · فقط ثبت وزن",
   }
-  const productGrades = readMasterData().products.find(
-    (item) => item.name === sources[0]?.product,
-  )?.grades || ["A", "B", "C"]
+  const sortingProduct = readMasterData().products.find(
+      (item) => item.active && item.name === sources[0]?.product,
+    ),
+    productGrades = (sortingProduct?.grades || []).filter(Boolean),
+    productSizes = (sortingProduct?.sizes || []).filter(Boolean),
+    selectedGrade = productGrades.includes(grade) ? grade : productGrades[0] || "",
+    selectedSize = productSizes.includes(size) ? size : productSizes[0] || ""
   function scanInput(rawCode = scanCode) {
     const code = pwCode(rawCode),
       source = batch.baskets.find((b: any) => pwCode(b.code) === code)
@@ -3404,6 +3474,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
         ),
         events: [...current.events, { time: new Date().toLocaleTimeString("fa-IR"), title: "شروع نشست سورتینگ", detail: `${inputCodes.length} سبد قفل شد و در وضعیت در حال سورت قرار گرفت.` }],
       })
+      setCompletedEntrySummary({ count: inputCodes.length, weight: inputWeight })
       setStep("entry-done")
       setInputCodes([])
       setEntryWeights({})
@@ -3442,6 +3513,8 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
   }
   function add() {
     const waste=destination==="WASTE"
+    if (!waste && (!selectedGrade || !selectedSize))
+      return setError("گرید و اندازه این محصول باید ابتدا در تنظیمات داده‌های پایه تعریف و فعال شوند.")
     if (
       (!waste&&!carrier) ||
       outputs.some((o) => o.code === outputCode) ||
@@ -3470,8 +3543,8 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
       ...outputs,
       {
         code: waste?"":outputCode,
-        grade,
-        size,
+        grade: selectedGrade || sources[0]?.grade || "",
+        size: selectedSize || sources[0]?.size || "",
         gross: Number(gross),
         tare,
         weight: net,
@@ -3511,7 +3584,7 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
         <Card className="p-7 text-center">
           <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-full bg-[#176b50] text-2xl text-white">✓</div>
           <h3 className="text-xl font-bold text-[#176b50]">ورود سبدها ثبت و نشست سورتینگ قفل شد</h3>
-          <p className="my-3 text-[13px]">{inputCodes.length} سبد با وزن ورودی {inputWeight.toFixed(3)} کیلوگرم اکنون در وضعیت «در حال سورت» هستند.</p>
+          <p className="my-3 text-[13px]">{completedEntrySummary?.count ?? inputCodes.length} سبد با وزن ورودی {(completedEntrySummary?.weight ?? inputWeight).toFixed(3)} کیلوگرم اکنون در وضعیت «در حال سورت» هستند.</p>
           <p className="text-[12px] text-[#718079]">خاموش یا روشن‌شدن سیستم وضعیت نشست را از بین نمی‌برد؛ خروج سورتینگ از کلید مستقل میز کار ثبت می‌شود.</p>
         </Card>
       ) : step === "done" ? (
@@ -3657,9 +3730,10 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                     گرید نهایی
                     <select
                       className={field}
-                      value={grade}
+                      value={selectedGrade}
                       onChange={(e) => setGrade(e.target.value)}
                     >
+                      {!productGrades.length && <option value="">ابتدا گرید محصول را در تنظیمات ثبت کنید</option>}
                       {productGrades.map((x) => (
                         <option key={x}>{x}</option>
                       ))}
@@ -3669,10 +3743,11 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                     اندازه نهایی
                     <select
                       className={field}
-                      value={size}
+                      value={selectedSize}
                       onChange={(e) => setSize(e.target.value)}
                     >
-                      {["درشت", "متوسط", "ریز", "مخلوط"].map((x) => (
+                      {!productSizes.length && <option value="">ابتدا اندازه‌های محصول را در تنظیمات ثبت کنید</option>}
+                      {productSizes.map((x) => (
                         <option key={x}>{x}</option>
                       ))}
                     </select>
@@ -3714,6 +3789,8 @@ function SortingScreen({ initialStep = "input" }: { initialStep?: "input" | "out
                     (destination!=="WASTE"&&!carrier) ||
                     !gross ||
                     scale !== "STABLE" ||
+                    (destination!=="WASTE"&&!selectedGrade) ||
+                    (destination!=="WASTE"&&!selectedSize) ||
                     (destination!=="WASTE"&&!staged.includes(outputCode))
                   }
                   onClick={add}
@@ -3855,47 +3932,30 @@ function buildInventoryModel(history = false) {
   const ledger = readProductionLedger()
   const consumed = new Set(ledger.consumedInputs || [])
   const receiptBaskets = receipt.baskets.filter((basket: any) => history || !consumed.has(`${receipt.id}:${basket.code}`))
-  const productionItems = ledger.items.filter((item: any) => !item.demo && (history || !item.consumed))
-  const productGroups = new Map<string, any[]>()
-  const derivedBatchByItem=new Map<string,string>(),legacySortGroups=new Map<string,string>(),receiptContainerCodes=new Set(receipt.baskets.map((basket:any)=>String(basket.code)))
+  const productionItems = ledger.items.filter((item: any) => !item.demo && (history || (!item.consumed&&!item.nestedInCarton)))
+  const productGroups = new Map<string, any[]>(),groupOrigins=new Map<string,string[]>()
+  const itemById=new Map(ledger.items.map((item:any)=>[String(item.id||item.code),item])),receiptContainerCodes=new Set(receipt.baskets.map((basket:any)=>String(basket.code)))
+  const originBatchCodes=(item:any,seen=new Set<string>()):string[]=>{
+    const itemId=String(item?.id||item?.code||"")
+    if(itemId&&seen.has(itemId))return []
+    const nextSeen=new Set(seen);if(itemId)nextSeen.add(itemId)
+    const declared=(item?.parentBatchIds||[]).map(String).filter(Boolean)
+    if(declared.length)return [...new Set(declared)]
+    const refs=[...(item?.parentIds||[]),...String(item?.parentId||"").split(",")].map(String).filter(Boolean)
+    const roots=refs.flatMap((raw:string)=>raw.startsWith(`${receipt.id}:`)||receiptContainerCodes.has(raw)?[receipt.id]:itemById.has(raw)?originBatchCodes(itemById.get(raw),nextSeen):[raw])
+    return [...new Set(roots)]
+  }
   productionItems.forEach((item: any) => {
-    let code=item.batchCode
-    if(!code&&item.stage==="SORTED"){
-      const parentKey=[...(item.parentIds||String(item.parentId||"").split(","))].filter(Boolean).sort().join("+")
-      const groupKey=[parentKey,item.product,item.grade,item.size,item.destination||item.operationalDestination].join("|")
-      code=legacySortGroups.get(groupKey)||`BA-SORT-${String(legacySortGroups.size+1).padStart(3,"0")}`
-      legacySortGroups.set(groupKey,code)
-    }
-    code=code||item.code
-    derivedBatchByItem.set(String(item.id||item.code),code)
+    const origins=originBatchCodes(item).sort(),code=origins.length?origins.join(" + "):item.batchCode||item.code
+    groupOrigins.set(code,origins.length?origins:[code])
     productGroups.set(code, [...(productGroups.get(code) || []), item])
   })
-  const parentBatch=(value:any)=>{const raw=String(value||"");if(!raw)return "";if(raw.startsWith(`${receipt.id}:`)||receiptContainerCodes.has(raw))return receipt.id;return derivedBatchByItem.get(raw)||raw}
-  const batches: any[] = []
-  if (receiptBaskets.length) batches.push({
-    code: receipt.id, kind: "RECEIPT",
-    product: [...new Set(receiptBaskets.map((basket: any) => basket.product))].join("، "),
-    grade: [...new Set(receiptBaskets.map((basket: any) => basket.grade))].join("، "),
-    weightKg: receiptBaskets.reduce((sum: number, basket: any) => sum + Number(basket.gross || 0) - Number(basket.tare || 0), 0),
-    stage: receipt.status,
-    locations: [...new Set(receiptBaskets.map((basket: any) => inventoryLocationName(basket.currentLocation || basket.zone)))],
-    containers: receiptBaskets.map((basket: any) => basket.code), parents: [],
-    nextActions: [...new Set(receiptBaskets.map((basket: any) => inventoryActionName(basket.nextAction)).filter(Boolean))],
-    destination: [...new Set(receiptBaskets.map((basket: any) => basket.destination).filter(Boolean))].map(inventoryLocationName), rows: receiptBaskets, ...prototypeAgingState(receiptBaskets),
-  })
-  productGroups.forEach((items: any[], code: string) => {
-    const parents = [...new Set(items.flatMap((item: any) => item.parentBatchIds || item.parentIds || String(item.parentId || "").split(",")).map(parentBatch).filter(Boolean))]
-    batches.push({
-      code, kind: "PRODUCT",
-      product: [...new Set(items.map((item: any) => item.product).filter(Boolean))].join("، "),
-      grade: [...new Set(items.map((item: any) => item.grade).filter(Boolean))].join("، "),
-      weightKg: items.reduce((sum: number, item: any) => sum + Number(item.weightKg || 0), 0),
-      stage: [...new Set(items.map((item: any) => inventoryStageName(item.stage)))].join("، "),
-      locations: [...new Set(items.map((item: any) => inventoryLocationName(item.currentLocation || item.zone)))],
-      containers: [...new Set(items.flatMap((item: any) => [item.containerCode, ...(item.trays || []).map((tray: any) => tray.code)].filter(Boolean)))],
-      parents, nextActions: [...new Set(items.map((item: any) => inventoryActionName(item.nextAction)).filter(Boolean))],
-      destination: [...new Set(items.map((item: any) => item.destination).filter(Boolean))].map(inventoryLocationName), rows: items, ...prototypeAgingState(items),
-    })
+  if(receiptBaskets.length){productGroups.set(receipt.id,[...receiptBaskets,...(productGroups.get(receipt.id)||[])]);groupOrigins.set(receipt.id,[receipt.id])}
+  const sortingReportsFor=(origins:string[])=>ledger.events.filter((event:any)=>event.action==="ثبت سورتینگ"&&origins.includes(String(event.entity))).map((event:any)=>({id:`SORT-${event.seq}`,at:event.at,inputWeightKg:Number(event.details?.inputWeightKg||0),outputWeightKg:Number(event.details?.outputWeightKg||0),lossKg:Number(event.details?.lossKg||0),lossReason:event.details?.lossReason||null,outputs:(event.details?.children||[]).map((child:any)=>{const stored=ledger.items.find((item:any)=>item.id===child.code||item.code===child.code),weightKg=Number(child.weightKg??stored?.parentContributions?.reduce((sum:number,row:any)=>sum+Number(row.weightKg||0),0)??stored?.weightKg??0);return{code:child.batchCode||stored?.batchCode||child.code,unitCode:child.code,product:child.product||stored?.product||"—",grade:child.grade||stored?.grade||"—",size:child.size||stored?.size||"—",destination:child.destination||stored?.destination||"—",weightKg}})}))
+  const batches:any[]=[]
+  productGroups.forEach((items:any[],code:string)=>{
+    const origins=groupOrigins.get(code)||[code],ageItems=items.map((item:any)=>origins.includes(receipt.id)&&!item.createdAt&&!item.storedAt?{...item,createdAt:receipt.createdAt}:item),hasProduction=items.some((item:any)=>item.stage)
+    batches.push({code,kind:hasProduction?"PRODUCT":"RECEIPT",product:[...new Set(items.map((item:any)=>item.product).filter(Boolean))].join("، "),grade:[...new Set(items.map((item:any)=>item.grade).filter(Boolean))].join("، "),weightKg:items.reduce((sum:number,item:any)=>sum+Number(item.weightKg??(Number(item.gross||0)-Number(item.tare||0))),0),stage:[...new Set(items.map((item:any)=>inventoryStageName(item.stage||item.currentState||item.status||receipt.status)))].join("، "),locations:[...new Set(items.map((item:any)=>inventoryLocationName(item.currentLocation||item.zone)))],containers:[...new Set(items.flatMap((item:any)=>[item.containerCode||(!item.stage?item.code:""),...(item.trays||[]).map((tray:any)=>tray.code)].filter(Boolean)))],parents:origins,nextActions:[...new Set(items.map((item:any)=>inventoryActionName(item.nextAction)).filter(Boolean))],destination:[...new Set(items.map((item:any)=>item.destination).filter(Boolean))].map(inventoryLocationName),rows:items,sortingReports:sortingReportsFor(origins),...prototypeAgingState(ageItems)})
   })
   const containers = [
     ...receiptBaskets.map((basket: any) => ({ code: basket.code, batchCode: receipt.id, product: basket.product, grade: basket.grade, weightKg: Number(basket.gross || 0) - Number(basket.tare || 0), location: inventoryLocationName(basket.currentLocation || basket.zone), state: inventoryStatusNames[basket.currentState || basket.status] || basket.currentState || basket.status || receipt.status, nextAction: inventoryActionName(basket.nextAction) })),
@@ -3919,12 +3979,14 @@ function buildPrototypeWorkQueue(model=buildInventoryModel(false)){
 }
 
 function InventoryBatchDetails({ row }: { row: any }) {
-  const units=(row.rows||[]).map((item:any)=>({key:String(item.id??item.code??item.containerCode),container:item.containerCode||item.code||"بدون ظرف",weightKg:Number(item.weightKg??(Number(item.gross||0)-Number(item.tare||0))),location:inventoryLocationName(item.currentLocation||item.zone),stage:inventoryStageName(item.stage||item.currentState||item.status),nextAction:inventoryActionName(item.nextAction)}))
+  const units=(row.rows||[]).map((item:any)=>({key:String(item.id??item.code??item.containerCode),container:item.containerCode||item.code||"بدون ظرف",grade:item.grade||"—",destination:inventoryLocationName(item.destination||item.operationalDestination||""),weightKg:Number(item.weightKg??(Number(item.gross||0)-Number(item.tare||0))),location:inventoryLocationName(item.currentLocation||item.zone),stage:inventoryStageName(item.stage||item.currentState||item.status),nextAction:inventoryActionName(item.nextAction)}))
+  const sortingReports=row.sortingReports||[]
   return <div className="border-t bg-[#fbfdfc] p-4 grid grid-cols-3 gap-3 text-[12px]">
     <div className="bg-white border rounded-lg p-3"><small className="block text-[#718079]">ظروف حامل فعلی</small><b className="font-mono">{row.containers.join("، ") || "بدون ظرف؛ تخصیص فرایندی"}</b></div>
     <div className="bg-white border rounded-lg p-3"><small className="block text-[#718079]">بچ‌های ورودی</small><b className="font-mono">{row.parents.join("، ") || "مبدأ دریافت"}</b></div>
     <div className="bg-white border rounded-lg p-3"><small className="block text-[#718079]">مقصد نهایی</small><b>{row.destination.join("، ") || "هنوز تعیین نشده"}</b></div>
-    {units.length>1&&<div className="col-span-3 bg-white border rounded-lg overflow-hidden"><div className="grid grid-cols-[.8fr_.6fr_1.2fr_1.4fr] gap-2 bg-[#eef4f1] p-2 text-[10px] font-bold text-[#718079]"><span>سبد مستقل</span><span>وزن</span><span>موقعیت / مرحله فعلی</span><span>اقدام بعدی</span></div>{units.map((unit:any)=><div key={unit.key} className="grid grid-cols-[.8fr_.6fr_1.2fr_1.4fr] gap-2 border-t p-2 items-center"><b className="font-mono">{unit.container}</b><b>{unit.weightKg.toFixed(3)} kg</b><span>{unit.location} / {unit.stage}</span><span>{unit.nextAction}</span></div>)}</div>}
+    {units.length>1&&<div className="col-span-3 bg-white border rounded-lg overflow-hidden"><div className="grid grid-cols-[.75fr_.45fr_.55fr_.75fr_1.1fr_1.3fr] gap-2 bg-[#eef4f1] p-2 text-[10px] font-bold text-[#718079]"><span>سبد مستقل</span><span>گرید</span><span>وزن</span><span>مقصد نهایی</span><span>موقعیت / مرحله فعلی</span><span>اقدام بعدی</span></div>{units.map((unit:any)=><div key={unit.key} className="grid grid-cols-[.75fr_.45fr_.55fr_.75fr_1.1fr_1.3fr] gap-2 border-t p-2 items-center"><b className="font-mono">{unit.container}</b><b>{unit.grade}</b><b>{unit.weightKg.toFixed(3)} kg</b><span>{unit.destination||"—"}</span><span>{unit.location} / {unit.stage}</span><span>{unit.nextAction}</span></div>)}</div>}
+    <div className="col-span-3 bg-white border rounded-lg overflow-hidden"><div className="flex items-center justify-between bg-[#eef4f1] p-3"><div><b>گزارش تبدیل بچ ورودی بعد از سورت</b><small className="block text-[#718079] mt-1">گرید، اندازه، وزن و مقصد خروجی‌ها بر اساس همان بچ ورودی؛ مستقل از سبد حامل</small></div><span className="font-mono text-[#176b50]">{row.parents.join("، ")||row.code}</span></div>{!sortingReports.length?<div className="p-4 text-[#718079]">برای این بچ هنوز خروجی سورت ثبت نشده است.</div>:sortingReports.map((report:any)=><div key={report.id} className="border-t"><div className="grid grid-cols-4 gap-2 p-3 bg-[#fbfdfc]"><span>ورودی: <b>{report.inputWeightKg.toFixed(3)} kg</b></span><span>خروجی: <b>{report.outputWeightKg.toFixed(3)} kg</b></span><span>افت: <b>{report.lossKg.toFixed(3)} kg</b></span><span>علت افت: <b>{report.lossReason||"بدون افت"}</b></span></div><div className="grid grid-cols-[.9fr_.65fr_.65fr_.65fr_.8fr] gap-2 px-3 py-2 text-[10px] font-bold text-[#718079]"><span>بچ خروجی</span><span>گرید / اندازه</span><span>وزن تحویلی</span><span>مقصد نهایی</span><span>محصول</span></div>{report.outputs.map((output:any,index:number)=><div key={`${report.id}-${output.unitCode}-${index}`} className="grid grid-cols-[.9fr_.65fr_.65fr_.65fr_.8fr] gap-2 border-t px-3 py-2"><b className="font-mono">{output.code}</b><span>{output.grade} / {output.size}</span><b>{output.weightKg.toFixed(3)} kg</b><span>{inventoryLocationName(output.destination)}</span><span>{output.product}</span></div>)}</div>)}</div>
     <div className="col-span-3 bg-[#edf8f3] rounded-lg p-3"><b>اقدام بعدی: </b>{row.nextActions.join("، ") || "فعلاً اقدام دیگری لازم نیست"}</div>
   </div>
 }
@@ -4003,37 +4065,61 @@ function InventoryScreen() {
 function TraceScreen() { return <div className="flex-1 min-h-0 overflow-auto"><ProductionInventorySummary history /><LegacyTraceScreen /></div> }
 
 // END PRODUCTION WORKSPACE
-function FreshExportScreen() {
+type PrototypeConsumableCategory="STYROFOAM_BOX"|"GEL_PACK"|"METALLIZED_POUCH"|"CARTON"|"OTHER"
+type PrototypeConsumable={id:string;code:string;name:string;category:PrototypeConsumableCategory;stock:number;unit:string;weightGrams:number;capacityKg:number;fillWeightGrams:number;capacityUnits:number;contentKind:"POUCH"|"STYROFOAM"|"BOTH";compatibleFillWeightGrams:number;active:boolean}
+const PROTOTYPE_CONSUMABLES_KEY="storemesh.prototype.consumables.v1"
+const PROTOTYPE_CONSUMABLES_DEFAULT:PrototypeConsumable[]=[
+  {id:"C1",code:"CNS-EPS-05",name:"جعبه یونولیت ۵ کیلوگرمی",category:"STYROFOAM_BOX",stock:240,unit:"عدد",weightGrams:350,capacityKg:5,fillWeightGrams:0,capacityUnits:0,contentKind:"STYROFOAM",compatibleFillWeightGrams:0,active:true},
+  {id:"C2",code:"CNS-EPS-10",name:"جعبه یونولیت ۱۰ کیلوگرمی",category:"STYROFOAM_BOX",stock:180,unit:"عدد",weightGrams:520,capacityKg:10,fillWeightGrams:0,capacityUnits:0,contentKind:"STYROFOAM",compatibleFillWeightGrams:0,active:true},
+  {id:"C3",code:"CNS-EPS-15",name:"جعبه یونولیت ۱۵ کیلوگرمی",category:"STYROFOAM_BOX",stock:120,unit:"عدد",weightGrams:690,capacityKg:15,fillWeightGrams:0,capacityUnits:0,contentKind:"STYROFOAM",compatibleFillWeightGrams:0,active:true},
+  {id:"C4",code:"CNS-GEL-250",name:"ژل‌پک ۲۵۰ گرمی",category:"GEL_PACK",stock:600,unit:"عدد",weightGrams:250,capacityKg:0,fillWeightGrams:0,capacityUnits:0,contentKind:"BOTH",compatibleFillWeightGrams:0,active:true},
+  {id:"C5",code:"CNS-GEL-500",name:"ژل‌پک ۵۰۰ گرمی",category:"GEL_PACK",stock:360,unit:"عدد",weightGrams:500,capacityKg:0,fillWeightGrams:0,capacityUnits:0,contentKind:"BOTH",compatibleFillWeightGrams:0,active:true},
+  {id:"C6",code:"CNS-MET-100",name:"پاکت متالایز ۱۰۰ گرمی",category:"METALLIZED_POUCH",stock:860,unit:"عدد",weightGrams:5,capacityKg:0,fillWeightGrams:100,capacityUnits:0,contentKind:"POUCH",compatibleFillWeightGrams:0,active:true},
+  {id:"C7",code:"CNS-MET-250",name:"پاکت متالایز ۲۵۰ گرمی",category:"METALLIZED_POUCH",stock:420,unit:"عدد",weightGrams:8,capacityKg:0,fillWeightGrams:250,capacityUnits:0,contentKind:"POUCH",compatibleFillWeightGrams:0,active:true},
+  {id:"C8",code:"CNS-MET-500",name:"پاکت متالایز ۵۰۰ گرمی",category:"METALLIZED_POUCH",stock:260,unit:"عدد",weightGrams:12,capacityKg:0,fillWeightGrams:500,capacityUnits:0,contentKind:"POUCH",compatibleFillWeightGrams:0,active:true},
+  {id:"C9",code:"CNS-CTN-P100",name:"کارتن پاکت ۱۰۰ گرمی · ۴۸ عدد",category:"CARTON",stock:90,unit:"عدد",weightGrams:420,capacityKg:0,fillWeightGrams:0,capacityUnits:48,contentKind:"POUCH",compatibleFillWeightGrams:100,active:true},
+  {id:"C10",code:"CNS-CTN-P250",name:"کارتن پاکت ۲۵۰ گرمی · ۲۴ عدد",category:"CARTON",stock:75,unit:"عدد",weightGrams:480,capacityKg:0,fillWeightGrams:0,capacityUnits:24,contentKind:"POUCH",compatibleFillWeightGrams:250,active:true},
+  {id:"C11",code:"CNS-CTN-P500",name:"کارتن پاکت ۵۰۰ گرمی · ۱۲ عدد",category:"CARTON",stock:60,unit:"عدد",weightGrams:520,capacityKg:0,fillWeightGrams:0,capacityUnits:12,contentKind:"POUCH",compatibleFillWeightGrams:500,active:true},
+  {id:"C12",code:"CNS-CTN-EPS",name:"کارتن یونولیت · ۴ عدد",category:"CARTON",stock:55,unit:"عدد",weightGrams:900,capacityKg:0,fillWeightGrams:0,capacityUnits:4,contentKind:"STYROFOAM",compatibleFillWeightGrams:0,active:true},
+]
+function readPrototypeConsumables():PrototypeConsumable[]{try{const raw=localStorage.getItem(PROTOTYPE_CONSUMABLES_KEY),rows=raw?JSON.parse(raw):null;if(Array.isArray(rows)){const existingCodes=new Set(rows.map((row:any)=>String(row.code||"").toUpperCase())),merged=[...rows,...PROTOTYPE_CONSUMABLES_DEFAULT.filter((row)=>!existingCodes.has(row.code))];return merged.map((row:any)=>({...row,stock:Math.max(0,Number(row.stock)||0),weightGrams:Math.max(0,Number(row.weightGrams)||0),capacityKg:Math.max(0,Number(row.capacityKg)||0),fillWeightGrams:Math.max(0,Number(row.fillWeightGrams)||0),capacityUnits:Math.max(0,Math.floor(Number(row.capacityUnits)||0)),contentKind:["POUCH","STYROFOAM","BOTH"].includes(row.contentKind)?row.contentKind:"BOTH",compatibleFillWeightGrams:Math.max(0,Number(row.compatibleFillWeightGrams)||0),active:row.active!==false}))}}catch{}return PROTOTYPE_CONSUMABLES_DEFAULT.map(row=>({...row}))}
+function writePrototypeConsumables(rows:PrototypeConsumable[]){localStorage.setItem(PROTOTYPE_CONSUMABLES_KEY,JSON.stringify(rows));window.dispatchEvent(new Event("storemesh-consumables"))}
+function consumePrototypeConsumables(usages:{code:string;quantity:number}[]){const rows=readPrototypeConsumables(),totals=new Map<string,number>();usages.forEach(({code,quantity})=>totals.set(code,(totals.get(code)||0)+quantity));totals.forEach((quantity,code)=>{const row=rows.find((item)=>item.code===code&&item.active);if(!row)throw Error(`قلم مصرفی فعال ${code} در تنظیمات پیدا نشد.`);if(row.stock<quantity)throw Error(`موجودی ${row.name} کافی نیست.`)});writePrototypeConsumables(rows.map((row)=>totals.has(row.code)?{...row,stock:row.stock-totals.get(row.code)!}:row))}
+
+function FreshExportScreen({ terminalMode = false }: { terminalMode?: boolean } = {}) {
+  const [chosen,setChosen]=useState(""),[boxCode,setBoxCode]=useState(""),[gelCode,setGelCode]=useState(""),[gelQuantity,setGelQuantity]=useState("2"),[packageWeightKg,setPackageWeightKg]=useState(""),[notice,setNotice]=useState(""),[error,setError]=useState(""),[revision,setRevision]=useState(0)
+  const ledger=readProductionLedger(),live=ledger.items.filter(item=>!item.consumed&&!item.blocked),eligible=live.filter(item=>(item.destination==="FRESH_EXPORT"||item.operationalDestination==="FRESH_EXPORT")&&item.nextZone==="PACKAGING"&&item.stage!=="PACKAGED"),batches=pwFreezeBatchGroups(eligible),selected=batches.find(row=>row.code===chosen)
+  const consumables=readPrototypeConsumables(),boxes=consumables.filter(row=>row.active&&row.category==="STYROFOAM_BOX"),gelPacks=consumables.filter(row=>row.active&&row.category==="GEL_PACK"),box=boxes.find(row=>row.code===boxCode)||boxes[0],gel=gelPacks.find(row=>row.code===gelCode)||gelPacks[0],netWeightKg=pwNumber(packageWeightKg),gelCount=Number(gelQuantity),packagingWeightGrams=(box?.weightGrams||0)+(gel?.weightGrams||0)*(Number.isInteger(gelCount)?gelCount:0),grossWeightKg=pwNumber(netWeightKg+packagingWeightGrams/1000),prepared=live.filter(item=>item.stage==="PACKAGED"&&item.operationalDestination==="FRESH_EXPORT")
+  const chooseBatch=(code:string)=>{setChosen(code);setError("");setNotice("");const row=batches.find(item=>item.code===code),activeBox=box||boxes[0];setPackageWeightKg(row&&activeBox?String(Math.min(activeBox.capacityKg,row.weightKg)):"")}
+  const createFreshExportBox=()=>{try{
+    if(!chosen||!selected)throw Error("ابتدا بچ آماده صادرات تازه را انتخاب کنید.")
+    if(!box||!gel)throw Error("ابتدا یونولیت و ژل‌پک فعال را در تنظیمات اقلام مصرفی تعریف کنید.")
+    if(!(netWeightKg>0)||netWeightKg>selected.weightKg||netWeightKg>box.capacityKg)throw Error("وزن محصول باید مثبت و در محدوده مانده بچ و ظرفیت یونولیت باشد.")
+    if(!Number.isInteger(gelCount)||gelCount<1)throw Error("تعداد ژل‌پک باید یک عدد صحیح مثبت باشد.")
+    if(box.stock<1)throw Error("موجودی یونولیت انتخاب‌شده تمام شده است.")
+    if(gel.stock<gelCount)throw Error("موجودی ژل‌پک برای این بسته کافی نیست.")
+    const next=readProductionLedger(),sources=next.items.filter(item=>!item.consumed&&!item.blocked&&(item.batchCode||item.code)===chosen&&(item.destination==="FRESH_EXPORT"||item.operationalDestination==="FRESH_EXPORT")&&item.nextZone==="PACKAGING"&&item.stage!=="PACKAGED")
+    if(!sources.length)throw Error("بچ انتخاب‌شده دیگر برای بسته‌بندی صادرات تازه آماده نیست.")
+    const available=pwNumber(sources.reduce((sum,item)=>sum+item.weightKg,0));if(netWeightKg>available)throw Error("وزن بسته از مانده واقعی بچ بیشتر است.")
+    const contributions=pwProportionalParentContributions(sources.map(item=>({code:item.id,gross:item.weightKg,tare:0})),netWeightKg,{})
+    contributions.forEach((part:any)=>{const source=sources.find(item=>item.id===part.batchId)!;source.weightKg=pwNumber(source.weightKg-part.inputWeightKg);source.nextZone="PACKAGING";source.nextAction="مانده صادرات تازه؛ در انتظار بسته‌بندی";source.remainderForPackaging=true;if(source.weightKg<=0.0005){source.weightKg=0;source.consumed=true;source.stage="CONSUMED";source.currentState="CONSUMED_BY_FRESH_EXPORT_PACKAGING";source.nextZone=null;source.remainderForPackaging=false}})
+    const id=pwId(next,"FEX"),packaged:PWItem={id,code:id,batchCode:chosen,parentId:sources.map(item=>item.id).join(","),parentIds:sources.map(item=>item.id),parentContributions:contributions.map((part:any)=>({id:part.batchId,weightKg:part.inputWeightKg})),inputCodes:sources.flatMap(item=>item.inputCodes||[]),product:sources[0].product,grade:sources[0].grade,size:sources[0].size,weightKg:netWeightKg,stage:"PACKAGED",zone:"PACKAGING",currentLocation:"PACKAGING",physicalLocation:"COLD_ROOM_POSITIVE_DIRTY",currentState:"FINISHED_PACKAGE",destination:null,operationalDestination:"FRESH_EXPORT",nextZone:null,nextAction:"آماده ارسال تازه",containerCode:"",trays:[],allocated:false,consumed:false,blocked:false,packagingSessionId:`FEX-${chosen}`,freshExportBoxCode:box.code,freshExportBoxTareWeightGrams:box.weightGrams,gelPackCode:gel.code,gelPackQuantity:gelCount,gelPackUnitWeightGrams:gel.weightGrams,grossWeightGrams:Math.round(grossWeightKg*1000),labelPrintedAt:new Date().toISOString()}
+    next.items.push(packaged);const remainingKg=pwNumber(sources.reduce((sum,item)=>sum+item.weightKg,0));pwEvent(next,"بسته‌بندی صادرات تازه",id,{batchCode:chosen,netWeightKg,remainingKg,boxCode:box.code,gelPackCode:gel.code,gelPackQuantity:gelCount,grossWeightGrams:packaged.grossWeightGrams,labelPrinted:true})
+    const nextConsumables=consumables.map(row=>row.code===box.code?{...row,stock:row.stock-1}:row.code===gel.code?{...row,stock:row.stock-gelCount}:row);writePrototypeConsumables(nextConsumables);saveProductionLedger(next);setNotice(remainingKg>0?`جعبه و برچسب ثبت شد؛ ${remainingKg.toFixed(3)} کیلوگرم از بچ باقی مانده است.`:"آخرین جعبه ثبت شد و بچ صادرات تازه کامل بسته‌بندی شد.");setError("");setPackageWeightKg(remainingKg>0?String(Math.min(box.capacityKg,remainingKg)):"");setRevision(value=>value+1)
+  }catch(failure:any){setError(failure.message||"بسته صادرات تازه ثبت نشد.")}}
   return (
     <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl">
-      <div className="flex items-start justify-between mb-4">
+      {!terminalMode&&<div className="flex items-start justify-between mb-4">
         <div>
           <h2 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[22px]">صادرات تازه</h2>
-          <p className="font-['Vazirmatn:Regular',sans-serif] text-[#718079] text-[13px]">مدیریت صادرات محصولات تازه</p>
+          <p className="font-['Vazirmatn:Regular',sans-serif] text-[#718079] text-[13px]">بسته‌بندی بچ‌محور با یونولیت، ژل‌پک و برچسب مستقل هر جعبه</p>
         </div>
         <Badge text="سایت ایران" color="#176b50" bg="#e1f2eb" />
-      </div>
+      </div>}
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <StatCard label="صادرات امروز" value="۱۴.۵t" />
-        <StatCard label="مقصدها" value="۶" />
-        <StatCard label="در راه" value="۳" />
-      </div>
-
-      <Card>
-        <div className="p-3 border-b border-[#edf2ef] flex justify-between items-center">
-          <h4 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[13px]">محموله‌های صادراتی</h4>
-          <GreenBtn>+ محموله جدید</GreenBtn>
-        </div>
-        <TableHeader cols={["وضعیت", "وزن (t)", "مقصد", "محصول", "شناسه"]} />
-        {[
-          { id: "EXP-001", product: "تماتو A", dest: "آلمان", weight: "۴.۸", status: "در راه", sc: "#176b50", sb: "#e1f2eb" },
-          { id: "EXP-002", product: "خیار B", dest: "هلند", weight: "۳.۲", status: "بارگیری", sc: "#c67518", sb: "#fff0dc" },
-          { id: "EXP-003", product: "فلفل A", dest: "انگلستان", weight: "۲.۵", status: "آماده", sc: "#35a17b", sb: "#dff3e9" },
-        ].map((row, i) => (
-          <TableRow key={i} cells={[row.status, row.weight, row.dest, row.product, row.id]} badge={{ text: row.status, color: row.sc, bg: row.sb }} />
-        ))}
-      </Card>
+      <div className="grid grid-cols-3 gap-3 mb-4"><StatCard label="بچ آماده بسته‌بندی" value={String(batches.length)} /><StatCard label="جعبه آماده‌شده" value={String(prepared.length)} /><StatCard label="وزن آماده" value={`${batches.reduce((sum,row)=>sum+row.weightKg,0).toFixed(3)} kg`} /></div>
+      {error&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mb-3 text-[12px]">{error}</p>}{notice&&<p className="bg-[#e1f2eb] text-[#176b50] p-3 rounded-lg mb-3 text-[12px]">{notice}</p>}
+      <div className="grid grid-cols-2 gap-4 items-start"><Card className="p-4"><h3 className="font-bold text-[16px] mb-3">ساخت جعبه صادرات تازه</h3>{!batches.length?<p className="text-[#718079] text-[12px]">بچ مرتب‌شده با مقصد «ارسال تازه» و آماده بسته‌بندی وجود ندارد.</p>:<div className="space-y-3"><label className="text-[11px]">بچ آماده<select value={chosen} onChange={event=>chooseBatch(event.target.value)} className="w-full h-11 border rounded-lg px-3 mt-1"><option value="">انتخاب بچ…</option>{batches.map(row=><option key={row.code} value={row.code}>{row.code} · {row.product} / {row.grade} / {row.items[0]?.size} · {row.weightKg.toFixed(3)} kg</option>)}</select></label>{selected&&<div className="rounded-xl bg-[#eef7f3] p-3 text-[12px]">مانده بچ: <b>{selected.weightKg.toFixed(3)} kg</b> · {selected.items.length} واحد والد</div>}<label className="text-[11px]">اندازه جعبه یونولیت<select value={box?.code||""} onChange={event=>{setBoxCode(event.target.value);const next=boxes.find(row=>row.code===event.target.value);if(next&&selected)setPackageWeightKg(String(Math.min(next.capacityKg,selected.weightKg)))}} className="w-full h-11 border rounded-lg px-3 mt-1"><option value="">انتخاب یونولیت…</option>{boxes.map(row=><option key={row.code} value={row.code}>{row.name} · ظرفیت {row.capacityKg} kg · موجودی {row.stock}</option>)}</select></label><div className="grid grid-cols-2 gap-3"><label className="text-[11px]">نوع ژل‌پک<select value={gel?.code||""} onChange={event=>setGelCode(event.target.value)} className="w-full h-11 border rounded-lg px-3 mt-1"><option value="">انتخاب ژل‌پک…</option>{gelPacks.map(row=><option key={row.code} value={row.code}>{row.name} · {row.weightGrams} g · موجودی {row.stock}</option>)}</select></label><label className="text-[11px]">تعداد ژل‌پک<input type="number" min="1" step="1" value={gelQuantity} onChange={event=>setGelQuantity(event.target.value)} className="w-full h-11 border rounded-lg px-3 mt-1" /></label></div>{selected&&box&&<WashingScaleConsole mode="EXIT" code={selected.code} net={netWeightKg} previousNet={0} tare={packagingWeightGrams/1000} onSimulate={setPackageWeightKg} testWeights={Array.from(new Set([2.5,5,10,box.capacityKg]))}/>}<div className="grid grid-cols-3 gap-2"><div className="rounded-lg bg-[#f5f8f7] p-3 text-[11px]">خالص محصول<br/><b>{netWeightKg.toFixed(3)} kg</b></div><div className="rounded-lg bg-[#f5f8f7] p-3 text-[11px]">یونولیت + ژل‌پک<br/><b>{packagingWeightGrams} g</b></div><div className="rounded-lg bg-[#f5f8f7] p-3 text-[11px]">ناخالص<br/><b>{grossWeightKg.toFixed(3)} kg</b></div></div><button onClick={createFreshExportBox} disabled={!selected||!box||!gel||!(netWeightKg>0)} className="w-full bg-[#176b50] text-white rounded-lg py-3 font-bold disabled:opacity-40">ثبت این جعبه، کسر اقلام و چاپ برچسب</button></div>}</Card><Card><div className="p-4 border-b"><h3 className="font-bold">جعبه‌های آماده صادرات تازه</h3></div>{!prepared.length?<p className="p-6 text-center text-[#718079] text-[12px]">هنوز جعبه‌ای ساخته نشده است.</p>:<div><TableHeader cols={["خالص / ناخالص","ژل‌پک","یونولیت","بچ","برچسب"]}/>{prepared.slice().reverse().map(item=><TableRow key={item.id} cells={[`${item.weightKg.toFixed(3)} / ${((item.grossWeightGrams||0)/1000).toFixed(3)} kg`,`${item.gelPackQuantity} × ${item.gelPackCode}`,item.freshExportBoxCode,item.batchCode,item.code]}/>)}</div>}</Card></div>
     </div>
   );
 }
@@ -4090,59 +4176,68 @@ function QualityScreen() {
   );
 }
 
-function PackagingScreen() {
-  const [scanOpen,setScanOpen]=useState(false),[scanned,setScanned]=useState(""),[scanError,setScanError]=useState("");
-  const handleScan=(raw:string)=>{const code=raw.trim().toUpperCase();try{const ledger=readProductionLedger(),item=ledger.items.find(row=>!row.consumed&&[row.containerCode,...(row.trays||[]).map((tray:any)=>tray.code)].map(pwCode).includes(code));if(!item||(item.zone!=="PACKAGING"&&item.nextZone!=="PACKAGING"))throw Error("این کد برای ورود به بسته‌بندی واجد شرایط نیست.");const from=item.zone;item.zone="PACKAGING";item.currentLocation="PACKAGING";item.currentState="PACKAGING_INPUT_CONFIRMED";item.nextAction="شروع دستور بسته‌بندی";pwEvent(ledger,"اسکن ورود بسته‌بندی",item.code,{scan:code,from,to:"PACKAGING"});saveProductionLedger(ledger);setScanned(code);setScanError("")}catch(failure:any){setScanError(failure.message)}};
+function PackagingScreen({ terminalMode = false }: { terminalMode?: boolean } = {}) {
+  const [ledger,setLedger]=useState<PWLedger>(()=>readProductionLedger()),[cartonTypeCode,setCartonTypeCode]=useState(""),[draftIds,setDraftIds]=useState<string[]>([]),[scanCode,setScanCode]=useState(""),[scanOpen,setScanOpen]=useState(false),[notice,setNotice]=useState(""),[error,setError]=useState("");
+  const consumables=readPrototypeConsumables(),cartonTypes=consumables.filter(row=>row.active&&row.category==="CARTON"),selectedCarton=cartonTypes.find(row=>row.code===cartonTypeCode)||cartonTypes[0]
+  const live=ledger.items.filter(item=>!item.consumed&&!item.blocked),packageKind=(item:any):"POUCH"|"STYROFOAM"|""=>item.pouchCode?"POUCH":item.freezeBoxCode||item.freshExportBoxCode?"STYROFOAM":"",requiresCarton=(item:any)=>["DRYING","FREEZE_DRYING"].includes(item.operationalDestination)
+  const eligible=live.filter(item=>item.stage==="PACKAGED"&&!item.nestedInCarton&&!!packageKind(item)),draftItems=draftIds.map(id=>eligible.find(item=>item.id===id)).filter(Boolean) as PWItem[],sealedCartons=live.filter(item=>item.stage==="CARTONED"&&item.currentState==="LABEL_PRINTED")
+  const compatible=(item:any,carton=selectedCarton)=>{if(!carton)return false;const kind=packageKind(item);if(carton.contentKind!=="BOTH"&&carton.contentKind!==kind)return false;if(kind==="POUCH"&&carton.compatibleFillWeightGrams>0&&Number(item.packageUnitWeightGrams)!==carton.compatibleFillWeightGrams)return false;const base=draftItems[0];return !base||(base.product===item.product&&base.grade===item.grade&&base.operationalDestination===item.operationalDestination&&packageKind(base)===kind)}
+  const suggested=eligible.find(item=>!draftIds.includes(item.id)&&compatible(item))?.code||""
+  const selectCarton=(code:string)=>{setCartonTypeCode(code);setDraftIds([]);setError("");setNotice("")}
+  const handleScan=(raw:string)=>{const code=pwCode(raw);try{const next=readProductionLedger(),item=next.items.find(row=>!row.consumed&&!row.blocked&&pwCode(row.code)===code);const carton=cartonTypes.find(row=>row.code===(cartonTypeCode||selectedCarton?.code));if(!carton)throw Error("ابتدا یک کارتن فعال را در تنظیمات اقلام مصرفی تعریف و انتخاب کنید.");if(!item||item.stage!=="PACKAGED"||item.nestedInCarton)throw Error("این QR یک بسته آزاد و آماده کارتن‌گذاری نیست.");if(draftIds.includes(item.id))throw Error("این بسته قبلاً در کارتن جاری اسکن شده است.");if(draftIds.length>=carton.capacityUnits)throw Error("ظرفیت تعداد بسته این کارتن تکمیل شده است.");if(!compatible(item,carton))throw Error(packageKind(item)==="POUCH"?"اندازه پاکت یا محصول/گرید این بسته با کارتن جاری سازگار نیست.":"نوع یونولیت یا محصول این بسته با کارتن جاری سازگار نیست.");setLedger(next);setDraftIds(ids=>[...ids,item.id]);setError("");setNotice(`بسته ${item.code} به کارتن جاری افزوده شد.`)}catch(failure:any){setError(failure.message||"اسکن بسته پذیرفته نشد.")}}
+  const sealCarton=()=>{try{const next=readProductionLedger(),carton=readPrototypeConsumables().find(row=>row.active&&row.category==="CARTON"&&row.code===(cartonTypeCode||selectedCarton?.code));if(!carton)throw Error("کارتن انتخاب‌شده فعال نیست.");if(carton.stock<1)throw Error("موجودی کارتن انتخاب‌شده تمام شده است.");if(!draftIds.length)throw Error("حداقل یک بسته را اسکن کنید.");const children=draftIds.map(id=>next.items.find(item=>item.id===id)).filter(Boolean) as PWItem[];if(children.length!==draftIds.length||children.some(item=>item.consumed||item.nestedInCarton||item.stage!=="PACKAGED"))throw Error("یکی از بسته‌های اسکن‌شده دیگر قابل کارتن‌گذاری نیست.");if(children.length>carton.capacityUnits)throw Error("تعداد بسته‌ها از ظرفیت کارتن بیشتر است.");const id=pwId(next,"CTN"),netWeightKg=pwNumber(children.reduce((sum,item)=>sum+item.weightKg,0)),grossWeightGrams=Math.round(netWeightKg*1000+carton.weightGrams),parentIds=children.map(item=>item.id);children.forEach(item=>{item.nestedInCarton=true;item.cartonCode=id;item.cartonParentId=id;item.currentState="PACKED_IN_CARTON";item.nextAction=`داخل کارتن ${id}`});const packed:PWItem={id,code:id,batchCode:id,parentId:parentIds.join(","),parentIds,parentContributions:children.map(item=>({id:item.id,weightKg:item.weightKg})),inputCodes:children.flatMap(item=>item.inputCodes||[]),product:children[0].product,grade:children[0].grade,size:`${children.length} بسته`,weightKg:netWeightKg,stage:"CARTONED",zone:"PACKAGING",currentLocation:"PACKAGING",physicalLocation:"PACKAGING",currentState:"LABEL_PRINTED",destination:null,operationalDestination:children[0].operationalDestination,nextZone:null,nextAction:"کارتن آماده ارسال",containerCode:"",trays:[],allocated:false,consumed:false,blocked:false,cartonConsumableCode:carton.code,cartonTareWeightGrams:carton.weightGrams,childPackageIds:parentIds,childPackageCodes:children.map(item=>item.code),contentKind:packageKind(children[0]),grossWeightGrams,labelPrintedAt:new Date().toISOString()};next.items.push(packed);pwEvent(next,"ساخت و بستن کارتن",id,{cartonConsumableCode:carton.code,childPackageIds:parentIds,childPackageCodes:packed.childPackageCodes,netWeightKg,grossWeightGrams,labelPrinted:true});saveProductionLedger(next);consumePrototypeConsumables([{code:carton.code,quantity:1}]);setLedger(next);setDraftIds([]);setNotice(`کارتن ${id} بسته شد و برچسب رهگیری آن چاپ شد.`);setError("")}catch(failure:any){setError(failure.message||"ساخت کارتن انجام نشد.")}}
   return (
     <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl">
-      <div className="flex items-start justify-between mb-4">
+      {!terminalMode&&<div className="flex items-start justify-between mb-4">
         <div>
           <h2 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[22px]">بسته‌بندی</h2>
-          <p className="font-['Vazirmatn:Regular',sans-serif] text-[#718079] text-[13px]">مدیریت خطوط بسته‌بندی</p>
+          <p className="font-['Vazirmatn:Regular',sans-serif] text-[#718079] text-[13px]">ساخت کارتن مادر با اسکن بسته‌ها و برچسب رهگیری</p>
         </div>
         <Badge text="سایت ایران" color="#176b50" bg="#e1f2eb" />
-      </div>
+      </div>}
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <StatCard label="خطوط فعال" value="۴" />
-        <StatCard label="بسته‌بندی امروز" value="۶۸,۴۰۰" />
-        <StatCard label="نرخ بهره‌وری" value="۸۸%" />
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        <StatCard label="پاکت خشک/فریزدرای منتظر کارتن" value={String(eligible.filter(requiresCarton).length)} />
+        <StatCard label="یونولیت با کارتن اختیاری" value={String(eligible.filter(item=>packageKind(item)==="STYROFOAM").length)} />
+        <StatCard label="بسته در کارتن جاری" value={String(draftIds.length)} />
+        <StatCard label="کارتن آماده ارسال" value={String(sealedCartons.length)} />
       </div>
-      {scanError&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mb-3 text-[12px]">{scanError}</p>}<div className="bg-white border border-[#c9ddd5] rounded-xl p-3 mb-4 flex items-center gap-3"><div className="ml-auto"><b className="text-[12px]">ورود بچ به بسته‌بندی با اسکن</b><p className="text-[11px] text-[#718079]">{scanned?`تأیید شد: ${scanned}`:"ظرف یا سینی واجد شرایط را اسکن کنید."}</p></div><button onClick={()=>setScanOpen(true)} className="bg-[#176b50] text-white rounded-lg px-4 py-2 text-[12px] font-bold">⌗ اسکن</button></div>
+      {error&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mb-3 text-[12px]">{error}</p>}{notice&&<p className="bg-[#e1f2eb] text-[#176b50] p-3 rounded-lg mb-3 text-[12px]">{notice}</p>}
+      <div className="bg-[#fff8e3] text-[#765b15] rounded-xl p-3 mb-4 text-[12px]">بسته‌های خشک و فریزدرای باید پیش از ارسال داخل کارتن قرار گیرند. کارتن‌کردن یونولیت محصول فریز یا صادرات تازه اختیاری است و آن‌ها می‌توانند مستقیم هم ارسال شوند.</div>
 
       <div className="grid grid-cols-2 gap-4">
         <Card className="p-4">
-          <h4 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[13px] mb-3">ثبت دستور بسته‌بندی</h4>
-          <div className="space-y-2">
-            <InputField label="محصول" />
-            <InputField label="نوع بسته‌بندی" />
-            <InputField label="تعداد واحد" />
-            <InputField label="وزن هر واحد (g)" />
-            <GreenBtn>شروع بسته‌بندی</GreenBtn>
-          </div>
+          <h4 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[15px] mb-3">کارتن جاری</h4>
+          <label className="text-[11px]">نوع کارتن<select value={selectedCarton?.code||""} onChange={event=>selectCarton(event.target.value)} className="w-full h-11 border rounded-lg px-3 mt-1 bg-white"><option value="">انتخاب کارتن…</option>{cartonTypes.map(row=><option key={row.code} value={row.code}>{row.name} · ظرفیت {row.capacityUnits} بسته · موجودی {row.stock}</option>)}</select></label>
+          {selectedCarton&&<div className="grid grid-cols-3 gap-2 my-3"><div className="bg-[#eef7f3] rounded-lg p-3 text-[11px]">نوع محتوا<br/><b>{selectedCarton.contentKind==="POUCH"?`پاکت ${selectedCarton.compatibleFillWeightGrams} گرمی`:selectedCarton.contentKind==="STYROFOAM"?"یونولیت":"هر دو نوع"}</b></div><div className="bg-[#eef7f3] rounded-lg p-3 text-[11px]">ظرفیت<br/><b>{draftIds.length} / {selectedCarton.capacityUnits}</b></div><div className="bg-[#eef7f3] rounded-lg p-3 text-[11px]">موجودی کارتن<br/><b>{selectedCarton.stock}</b></div></div>}
+          <div className="flex gap-2"><input value={scanCode} onChange={event=>setScanCode(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();handleScan(scanCode);setScanCode("")}}} className="flex-1 h-11 border rounded-lg px-3 font-mono" placeholder="QR هر بسته را اسکن کنید"/><button onClick={()=>setScanOpen(true)} disabled={!selectedCarton} className="bg-[#176b50] disabled:opacity-40 text-white rounded-lg px-4 py-2 text-[12px] font-bold">⌗ شبیه‌ساز اسکن</button></div>
+          <div className="border rounded-xl overflow-hidden mt-4"><div className="grid grid-cols-[.8fr_1fr_.7fr_.7fr] gap-2 bg-[#eef3f0] p-2 text-[10px] font-bold"><span>QR بسته</span><span>محصول / گرید</span><span>نوع</span><span>وزن</span></div>{!draftItems.length?<p className="p-5 text-center text-[#718079] text-[11px]">هنوز بسته‌ای اسکن نشده است.</p>:draftItems.map(item=><div key={item.id} className="grid grid-cols-[.8fr_1fr_.7fr_.7fr] gap-2 border-t p-2 text-[11px]"><b className="font-mono">{item.code}</b><span>{item.product} / {item.grade}</span><span>{packageKind(item)==="POUCH"?`${item.packageUnitWeightGrams} g`:item.freezeBoxCode||item.freshExportBoxCode}</span><b>{item.weightKg.toFixed(3)} kg</b></div>)}</div>
+          <button onClick={sealCarton} disabled={!draftItems.length||!selectedCarton||selectedCarton.stock<1} className="w-full mt-4 bg-[#176b50] disabled:opacity-40 text-white rounded-lg py-3 text-[12px] font-bold">بستن کارتن، کسر موجودی و چاپ برچسب</button>
         </Card>
 
         <Card>
           <div className="p-3 border-b border-[#edf2ef]">
-            <h4 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[13px]">وضعیت خطوط</h4>
+            <h4 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[13px]">کارتن‌های آماده ارسال</h4>
           </div>
-          <TableHeader cols={["وضعیت", "محصول", "خط"]} />
-          {[
-            { line: "خط ۱", product: "تماتو ۵۰۰g", status: "فعال", sc: "#16825b", sb: "#dff3e9" },
-            { line: "خط ۲", product: "خیار ۱kg", status: "فعال", sc: "#16825b", sb: "#dff3e9" },
-            { line: "خط ۳", product: "فلفل ۲۵۰g", status: "توقف", sc: "#c67518", sb: "#fff0dc" },
-            { line: "خط ۴", product: "بادمجان ۷۵۰g", status: "فعال", sc: "#16825b", sb: "#dff3e9" },
-          ].map((row, i) => (
-            <TableRow key={i} cells={[row.status, row.product, row.line]} badge={{ text: row.status, color: row.sc, bg: row.sb }} />
-          ))}
+          {!sealedCartons.length?<p className="p-6 text-center text-[#718079] text-[12px]">هنوز کارتن نهایی ساخته نشده است.</p>:<><TableHeader cols={["برچسب", "خالص / ناخالص", "تعداد", "نوع کارتن", "کارتن"]} />{sealedCartons.slice().reverse().map(item=><TableRow key={item.id} cells={[item.labelPrintedAt?"چاپ شد":"—",`${item.weightKg.toFixed(3)} / ${((item.grossWeightGrams||0)/1000).toFixed(3)} kg`,String(item.childPackageIds?.length||0),item.cartonConsumableCode,item.code]} badge={{text:"آماده ارسال",color:"#16825b",bg:"#dff3e9"}}/>)}</>}
         </Card>
       </div>
-      <ScanSimulator open={scanOpen} title="اسکن ورود بسته‌بندی" suggestedCode={scanned} onClose={()=>setScanOpen(false)} onScan={handleScan}/>
+      <ScanSimulator open={scanOpen} title="اسکن QR بسته برای کارتن جاری" suggestedCode={suggested} onClose={()=>setScanOpen(false)} onScan={code=>{handleScan(code);setScanCode("")}}/>
     </div>
   );
 }
 
 function ConsumablesScreen() {
+  const empty:PrototypeConsumable={id:"",code:"",name:"",category:"STYROFOAM_BOX",stock:0,unit:"عدد",weightGrams:0,capacityKg:0,fillWeightGrams:0,capacityUnits:0,contentKind:"BOTH",compatibleFillWeightGrams:0,active:true};
+  const [items,setItems]=useState<PrototypeConsumable[]>(()=>readPrototypeConsumables()),[open,setOpen]=useState(false),[editing,setEditing]=useState(""),[form,setForm]=useState<PrototypeConsumable>(empty),[error,setError]=useState("");
+  useEffect(()=>{const refresh=()=>setItems(readPrototypeConsumables());window.addEventListener("storemesh-consumables",refresh);return()=>window.removeEventListener("storemesh-consumables",refresh)},[]);
+  const labels:Record<PrototypeConsumableCategory,string>={STYROFOAM_BOX:"جعبه یونولیت",GEL_PACK:"یخ ژل‌پک",METALLIZED_POUCH:"پاکت متالایز",CARTON:"کارتن مادر",OTHER:"سایر اقلام"};
+  const persist=(next:PrototypeConsumable[])=>{setItems(next);writePrototypeConsumables(next)};
+  const startCreate=()=>{setEditing("");setForm({...empty,id:`CNS-${Date.now()}`});setError("");setOpen(true)};
+  const startEdit=(row:PrototypeConsumable)=>{setEditing(row.id);setForm({...row});setError("");setOpen(true)};
+  const save=()=>{const code=form.code.trim().toUpperCase(),name=form.name.trim(),stock=Math.floor(Number(form.stock)),weightGrams=Number(form.weightGrams),capacityKg=Number(form.capacityKg),fillWeightGrams=Number(form.fillWeightGrams),capacityUnits=Math.floor(Number(form.capacityUnits)),compatibleFillWeightGrams=Number(form.compatibleFillWeightGrams);if(!name||!code){setError("نام و کد قلم الزامی است.");return}if(items.some(row=>row.code===code&&row.id!==editing)){setError("این کد قبلاً ثبت شده است.");return}if(!Number.isFinite(stock)||stock<0){setError("موجودی باید عدد صحیح صفر یا بیشتر باشد.");return}if(form.category==="STYROFOAM_BOX"&&(capacityKg<=0||weightGrams<=0)){setError("ظرفیت و وزن خالی جعبه یونولیت باید بیشتر از صفر باشد.");return}if(form.category==="GEL_PACK"&&weightGrams<=0){setError("وزن هر ژل‌پک باید بیشتر از صفر باشد.");return}if(form.category==="METALLIZED_POUCH"&&(fillWeightGrams<=0||weightGrams<=0)){setError("ظرفیت پرکردن و وزن خالی پاکت متالایز باید بیشتر از صفر باشد.");return}if(form.category==="CARTON"&&(capacityUnits<=0||weightGrams<=0)){setError("ظرفیت تعداد و وزن خالی کارتن باید بیشتر از صفر باشد.");return}if(form.category==="CARTON"&&form.contentKind==="POUCH"&&compatibleFillWeightGrams<=0){setError("اندازه پاکت سازگار با این کارتن را وارد کنید.");return}const row={...form,id:editing||form.id||`CNS-${Date.now()}`,code,name,stock,weightGrams:Math.max(0,weightGrams||0),capacityKg:form.category==="STYROFOAM_BOX"?capacityKg:0,fillWeightGrams:form.category==="METALLIZED_POUCH"?fillWeightGrams:0,capacityUnits:form.category==="CARTON"?capacityUnits:0,contentKind:form.category==="CARTON"?form.contentKind:"BOTH",compatibleFillWeightGrams:form.category==="CARTON"&&form.contentKind==="POUCH"?compatibleFillWeightGrams:0,unit:form.unit.trim()||"عدد"};persist(editing?items.map(item=>item.id===editing?row:item):[row,...items]);setOpen(false)};
+  const toggle=(row:PrototypeConsumable)=>persist(items.map(item=>item.id===row.id?{...item,active:!item.active}:item));
+  const active=items.filter(row=>row.active),low=active.filter(row=>row.stock<=20),boxStock=active.filter(row=>row.category==="STYROFOAM_BOX").reduce((sum,row)=>sum+row.stock,0),gelStock=active.filter(row=>row.category==="GEL_PACK").reduce((sum,row)=>sum+row.stock,0),pouchStock=active.filter(row=>row.category==="METALLIZED_POUCH").reduce((sum,row)=>sum+row.stock,0),cartonStock=active.filter(row=>row.category==="CARTON").reduce((sum,row)=>sum+row.stock,0);
   return (
     <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl">
       <div className="flex items-start justify-between mb-4">
@@ -4152,38 +4247,59 @@ function ConsumablesScreen() {
         </div>
         <div className="flex gap-2 items-center">
           <Badge text="سایت ایران" color="#176b50" bg="#e1f2eb" />
-          <GreenBtn>+ سفارش جدید</GreenBtn>
+          <GreenBtn onClick={startCreate}>+ افزودن قلم مصرفی</GreenBtn>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <StatCard label="اقلام کم‌موجود" value="۴" />
-        <StatCard label="سفارش در راه" value="۲" />
-        <StatCard label="مصرف هفتگی" value="۱۲.۴t" />
+      <div className="grid grid-cols-6 gap-3 mb-4">
+        <StatCard label="اقلام فعال" value={String(active.length)} />
+        <StatCard label="اقلام کم‌موجود" value={String(low.length)} />
+        <StatCard label="یونولیت قابل مصرف" value={String(boxStock)} />
+        <StatCard label="ژل‌پک قابل مصرف" value={String(gelStock)} />
+        <StatCard label="پاکت متالایز قابل مصرف" value={String(pouchStock)} />
+        <StatCard label="کارتن قابل مصرف" value={String(cartonStock)} />
       </div>
 
       <Card>
-        <TableHeader cols={["وضعیت", "موجودی", "واحد", "نام قلم"]} />
-        {[
-          { name: "سلفون بسته‌بندی", unit: "رول", qty: "۴۵", status: "کافی", sc: "#16825b", sb: "#dff3e9" },
-          { name: "کارتن ۵kg", unit: "عدد", qty: "۱۲۰", status: "کم", sc: "#c67518", sb: "#fff0dc" },
-          { name: "برچسب قیمت", unit: "برگ", qty: "۵۰۰", status: "کافی", sc: "#16825b", sb: "#dff3e9" },
-          { name: "تسمه پلاستیک", unit: "رول", qty: "۸", status: "بحرانی", sc: "#c64545", sb: "#fbe6e6" },
-          { name: "چسب حرارتی", unit: "کارتن", qty: "۳", status: "کم", sc: "#c67518", sb: "#fff0dc" },
-        ].map((row, i) => (
-          <TableRow key={i} cells={[row.status, row.qty, row.unit, row.name]} badge={{ text: row.status, color: row.sc, bg: row.sb }} />
-        ))}
+        <TableHeader cols={["عملیات", "وضعیت", "موجودی", "مشخصات", "کد", "نام قلم"]} />
+        {items.map(row=><TableRow key={row.id} cells={[
+          <div className="flex gap-2 justify-center"><button onClick={()=>startEdit(row)} className="text-[#176b50] font-bold">ویرایش</button><button onClick={()=>toggle(row)} className="text-[#9b5c19]">{row.active?"غیرفعال":"فعال"}</button></div>,
+          row.active?"فعال":"غیرفعال",
+          `${row.stock} ${row.unit}`,
+          row.category==="STYROFOAM_BOX"?`ظرفیت ${row.capacityKg} kg · وزن خالی ${row.weightGrams} g`:row.category==="GEL_PACK"?`وزن هر عدد ${row.weightGrams} g`:row.category==="METALLIZED_POUCH"?`پرکردن ${row.fillWeightGrams} g · وزن خالی ${row.weightGrams} g`:row.category==="CARTON"?`${row.capacityUnits} بسته · ${row.contentKind==="POUCH"?`پاکت ${row.compatibleFillWeightGrams} گرمی`:row.contentKind==="STYROFOAM"?"یونولیت":"هر دو نوع"} · وزن خالی ${row.weightGrams} g`:"—",
+          <span className="font-mono">{row.code}</span>,
+          <div><b>{row.name}</b><small className="block text-[#718079] mt-1">{labels[row.category]}</small></div>
+        ]} badge={{text:row.active?(row.stock<=20?"کم‌موجود":"فعال"):"غیرفعال",color:row.active?(row.stock<=20?"#c67518":"#16825b"):"#718079",bg:row.active?(row.stock<=20?"#fff0dc":"#dff3e9"):"#edf2ef"}}/>)}
       </Card>
+      {open&&<div className="fixed inset-0 z-[110] bg-[#09231dcc] flex items-center justify-center">
+        <div className="bg-white rounded-2xl p-6 w-[700px]" dir="rtl">
+          <div className="flex justify-between"><h3 className="font-bold text-[18px]">{editing?"ویرایش قلم مصرفی":"افزودن قلم مصرفی"}</h3><button onClick={()=>setOpen(false)} className="text-xl">×</button></div>
+          {error&&<p role="alert" className="bg-[#fbe7e7] text-[#a43838] p-3 rounded-lg mt-3 text-[12px]">{error}</p>}
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <label className="text-[11px]">نام قلم<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1" placeholder="مثلاً یونولیت صادراتی ۱۰ کیلو"/></label>
+            <label className="text-[11px]">کد<input value={form.code} onChange={e=>setForm({...form,code:e.target.value.toUpperCase()})} className="w-full border rounded-lg h-11 px-3 mt-1 font-mono" placeholder="FOAM-10KG"/></label>
+            <label className="text-[11px]">نوع قلم<select value={form.category} onChange={e=>setForm({...form,category:e.target.value as PrototypeConsumableCategory})} className="w-full border rounded-lg h-11 px-3 mt-1 bg-white"><option value="STYROFOAM_BOX">جعبه یونولیت</option><option value="GEL_PACK">یخ ژل‌پک</option><option value="METALLIZED_POUCH">پاکت متالایز</option><option value="CARTON">کارتن مادر</option><option value="OTHER">سایر اقلام</option></select></label>
+            <label className="text-[11px]">موجودی<input type="number" min="0" step="1" value={form.stock} onChange={e=>setForm({...form,stock:Number(e.target.value)})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>
+            <label className="text-[11px]">واحد<input value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>
+            <label className="text-[11px]">وزن خالی هر عدد (گرم)<input type="number" min="0" value={form.weightGrams} onChange={e=>setForm({...form,weightGrams:Number(e.target.value)})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>
+            {form.category==="STYROFOAM_BOX"&&<label className="text-[11px] col-span-2">ظرفیت محصول (kg)<input type="number" min="0" step="0.1" value={form.capacityKg} onChange={e=>setForm({...form,capacityKg:Number(e.target.value)})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>}
+            {form.category==="METALLIZED_POUCH"&&<label className="text-[11px] col-span-2">وزن هدف پرکردن پاکت (گرم)<input type="number" min="1" step="1" value={form.fillWeightGrams} onChange={e=>setForm({...form,fillWeightGrams:Number(e.target.value)})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>}
+            {form.category==="CARTON"&&<><label className="text-[11px]">محتوای مجاز<select value={form.contentKind} onChange={e=>setForm({...form,contentKind:e.target.value as PrototypeConsumable["contentKind"]})} className="w-full border rounded-lg h-11 px-3 mt-1 bg-white"><option value="POUCH">پاکت خشک / فریزدرای</option><option value="STYROFOAM">یونولیت فریز / تازه</option><option value="BOTH">هر دو نوع</option></select></label><label className="text-[11px]">ظرفیت تعداد بسته<input type="number" min="1" step="1" value={form.capacityUnits} onChange={e=>setForm({...form,capacityUnits:Number(e.target.value)})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>{form.contentKind==="POUCH"&&<label className="text-[11px] col-span-2">اندازه پاکت سازگار (گرم)<input type="number" min="1" step="1" value={form.compatibleFillWeightGrams} onChange={e=>setForm({...form,compatibleFillWeightGrams:Number(e.target.value)})} className="w-full border rounded-lg h-11 px-3 mt-1"/></label>}</>}
+          </div>
+          <label className="flex gap-2 mt-4 text-[12px]"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/>فعال و قابل انتخاب در عملیات مرتبط</label>
+          <div className="flex gap-2 mt-5"><button onClick={save} className="bg-[#176b50] text-white rounded-lg px-6 py-3 font-bold">ذخیره قلم</button><button onClick={()=>setOpen(false)} className="border rounded-lg px-5 py-3 text-[#718079]">انصراف</button></div>
+        </div>
+      </div>}
     </div>
   );
 }
 
-function ShipmentsScreen() {
+function ShipmentsScreen({ terminalMode = false }: { terminalMode?: boolean } = {}) {
   const [scanOpen,setScanOpen]=useState(false),[scanned,setScanned]=useState(""),[scanError,setScanError]=useState("");
-  const handleScan=(raw:string)=>{const code=raw.trim().toUpperCase();try{const ledger=readProductionLedger(),item=ledger.items.find(row=>!row.consumed&&[row.containerCode,...(row.trays||[]).map((tray:any)=>tray.code)].map(pwCode).includes(code));if(!item||item.zone!=="PACKAGING")throw Error("فقط موجودی تکمیل‌شده بسته‌بندی برای ارسال پذیرفته می‌شود.");item.zone="SHIPPING";item.currentLocation="SHIPPING";item.currentState="OUTBOUND_STAGED";item.destination=null;item.nextAction="افزودن به محموله خروجی";pwEvent(ledger,"اسکن ورود ارسال",item.code,{scan:code,from:"PACKAGING",to:"SHIPPING"});saveProductionLedger(ledger);setScanned(code);setScanError("")}catch(failure:any){setScanError(failure.message)}};
+  const handleScan=(raw:string)=>{const code=raw.trim().toUpperCase();try{const ledger=readProductionLedger(),item=ledger.items.find(row=>!row.consumed&&[row.code,row.containerCode,...(row.trays||[]).map((tray:any)=>tray.code)].map(pwCode).includes(code));if(!item||item.zone!=="PACKAGING")throw Error("فقط موجودی تکمیل‌شده بسته‌بندی برای ارسال پذیرفته می‌شود.");if(item.nestedInCarton)throw Error(`این بسته داخل کارتن ${item.cartonCode} است؛ QR خود کارتن را اسکن کنید.`);const carton=item.stage==="CARTONED"&&item.currentState==="LABEL_PRINTED",directStyrofoam=item.stage==="PACKAGED"&&!!(item.freezeBoxCode||item.freshExportBoxCode);if(!carton&&!directStyrofoam)throw Error("بسته خشک و فریزدرای باید ابتدا در بخش بسته‌بندی داخل کارتن قرار گیرد؛ فقط یونولیت فریز یا تازه می‌تواند مستقیم ارسال شود.");item.zone="SHIPPING";item.currentLocation="SHIPPING";item.currentState="OUTBOUND_STAGED";item.destination=null;item.nextAction="افزودن به محموله خروجی";if(carton)(item.childPackageIds||[]).forEach((id:string)=>{const child=ledger.items.find(row=>row.id===id);if(child){child.zone="SHIPPING";child.currentLocation="SHIPPING";child.nextAction=`داخل کارتن ${item.code}؛ آماده ارسال`}});pwEvent(ledger,"اسکن ورود ارسال",item.code,{scan:code,from:"PACKAGING",to:"SHIPPING",childPackageIds:item.childPackageIds||[]});saveProductionLedger(ledger);setScanned(code);setScanError("")}catch(failure:any){setScanError(failure.message)}};
   return (
     <div className="flex-1 bg-[#f4f7f5] p-5 overflow-auto" dir="rtl">
-      <div className="flex items-start justify-between mb-4">
+      {!terminalMode&&<div className="flex items-start justify-between mb-4">
         <div>
           <h2 className="font-['Vazirmatn:Bold',sans-serif] font-bold text-[#18302a] text-[22px]">ارسال‌ها</h2>
           <p className="font-['Vazirmatn:Regular',sans-serif] text-[#718079] text-[13px]">مدیریت محموله‌های خروجی</p>
@@ -4193,7 +4309,7 @@ function ShipmentsScreen() {
           <Badge text="سایت ایران" color="#176b50" bg="#e1f2eb" />
           <GreenBtn>+ ارسال جدید</GreenBtn>
         </div>
-      </div>
+      </div>}
 
       <div className="grid grid-cols-4 gap-3 mb-4">
         <StatCard label="آماده ارسال" value="۳۲" />
@@ -4655,6 +4771,73 @@ const screenTitles: Record<WebScreen, { title: string; subtitle: string }> = {
   cloud: { title: "ابری", subtitle: "Web / cloud" },
   system: { title: "سیستم", subtitle: "Web / system" },
 };
+
+export type TerminalStationId =
+  | "receiving"
+  | "sorting-entry"
+  | "sorting-exit"
+  | "wash-entry"
+  | "wash-exit"
+  | "slice"
+  | "freeze-output"
+  | "dryer-output"
+  | "freeze-dry-entry"
+  | "freeze-dry-output"
+  | "packaging"
+  | "fresh-export"
+  | "shipping";
+
+export { authenticatePrototypeTerminal };
+export type { PrototypeTerminalIdentity };
+
+export const TERMINAL_STATIONS: Array<{
+  id: TerminalStationId;
+  group: "دریافت" | "تولید" | "بسته‌بندی و ارسال";
+  label: string;
+  description: string;
+}> = [
+  { id: "receiving", group: "دریافت", label: "دریافت", description: "تعریف محموله، اسکن و توزین ظروف و تحویل به سردخانه" },
+  { id: "sorting-entry", group: "تولید", label: "ورود به سورتینگ", description: "اسکن چند سبد، وزن اختیاری و قفل نشست سورت" },
+  { id: "sorting-exit", group: "تولید", label: "خروج از سورتینگ", description: "ثبت تک‌به‌تک خروجی، گرید، اندازه و مقصد نهایی" },
+  { id: "wash-entry", group: "تولید", label: "ورود به شست‌وشو", description: "ساخت و قفل نشست همگن محصول، گرید و مقصد" },
+  { id: "wash-exit", group: "تولید", label: "خروج از شست‌وشو", description: "اسکن سبدهای تازه، توزین و ثبت مسیر بعدی" },
+  { id: "slice", group: "تولید", label: "ورود به اسلایس", description: "قفل ورودی، ثبت گروه‌های سینی و مانده احتمالی" },
+  { id: "freeze-output", group: "تولید", label: "خروج از فریز و بسته‌بندی", description: "انتخاب بچ فریز، ساخت جعبه، چاپ برچسب و ثبت مانده" },
+  { id: "dryer-output", group: "تولید", label: "خروج از خشک‌کن و بسته‌بندی", description: "تفکیک گرید خروج خشک و بسته‌بندی تک‌به‌تک" },
+  { id: "freeze-dry-entry", group: "تولید", label: "ورود به فریزدرای", description: "ثبت سینی‌ها و شروع چرخه دستگاه فریزدرای" },
+  { id: "freeze-dry-output", group: "تولید", label: "خروج از فریزدرای و بسته‌بندی", description: "تفکیک خروج، بسته‌بندی، برچسب و ثبت مانده" },
+  { id: "packaging", group: "بسته‌بندی و ارسال", label: "بسته‌بندی", description: "کارتن‌کردن بسته‌ها یا یونولیت‌ها و چاپ برچسب کارتن" },
+  { id: "fresh-export", group: "بسته‌بندی و ارسال", label: "صادرات تازه", description: "بسته‌بندی بچ تازه با یونولیت و ژل پک" },
+  { id: "shipping", group: "بسته‌بندی و ارسال", label: "ارسال", description: "ساخت محموله خروجی، کنترل آمادگی و ثبت ارسال" },
+];
+
+const TERMINAL_PRODUCTION_TABS: Partial<Record<TerminalStationId, string>> = {
+  "sorting-entry": "sorting-entry",
+  "sorting-exit": "sorting-exit",
+  "wash-entry": "wash-entry",
+  "wash-exit": "wash-exit",
+  slice: "slice",
+  "freeze-output": "FREEZE",
+  "dryer-output": "DRY",
+  "freeze-dry-entry": "FREEZE_DRY_ENTRY",
+  "freeze-dry-output": "FREEZE_DRY_EXIT",
+};
+
+export function TerminalStationWorkspace({ station }: { station: TerminalStationId }) {
+  ensurePrototypeTestFixtures();
+  const productionTab = TERMINAL_PRODUCTION_TABS[station];
+  if (productionTab) return <ProductionScreen key={station} initialTab={productionTab} terminalMode />;
+  switch (station) {
+    case "receiving":
+      return <ReceivingScreen navigate={() => undefined} terminalMode />;
+    case "packaging":
+      return <PackagingScreen terminalMode />;
+    case "fresh-export":
+      return <FreshExportScreen terminalMode />;
+    case "shipping":
+      return <ShipmentsScreen terminalMode />;
+  }
+}
 
 export default function WebApp({ onExit }: { onExit: () => void }) {
   ensurePrototypeTestFixtures();
