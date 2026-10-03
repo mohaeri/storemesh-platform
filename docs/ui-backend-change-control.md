@@ -1,6 +1,19 @@
 # UI / Backend Change Control
 
-Last updated: 2026-09-26
+Last updated: 2026-10-03
+
+## 2026-10-03 — Label designer and terminal-specific print routing
+
+- Approval and decision: Mohamad approved completing everything required for configurable label design and assigning printers and label sizes to individual terminals or Web consoles.
+- UI requirement: Settings → Printing now authors named label templates with paper width/height, DPI, orientation, object type, print point, selected data fields, positioned elements, and a live preview. It also assigns a template and an active printer to a registered Terminal/PDA for each print point.
+- Existing backend/contract mismatch: the existing LABEL configuration selected data fields and the operational session selected a default printer, but neither preserved a structured physical layout nor supported routing by terminal + print point + template.
+- Approved backend behavior: active LABEL configuration may contain versioned templates and assignments. Print routing prefers a device-specific assignment, then a station assignment, then a site default. Strict routing fails closed when no route exists. Every queued attempt snapshots the resolved template, printer, print point, object type, assignment, and workstation identity so later configuration changes cannot alter historical print evidence.
+- Repositories and files: `storemesh-site-server` domain, HTTP route, PostgreSQL repository, migration 079, and tests; `storemesh-contracts` OpenAPI and contract test; `storemesh-web` Settings/Printing designer, preview, route editor, and tests; the local Figma Make prototype received the corresponding Settings screen.
+- Routes, requests, responses, or events: existing print-job responses gained routing/template metadata. `POST /api/containers/{containerId}/label` accepts optional `sessionId` and `printerId`; existing empty requests remain compatible.
+- Database/migration impact: migration `079_label_template_device_routing.sql` adds immutable routing/template snapshot columns to `print_attempts` plus a routing lookup index.
+- Tests and real PostgreSQL result: backend full suite **549 passed, 0 failed, 0 skipped** against an isolated real PostgreSQL 17 database; Web full suite **102 passed, 0 failed, 0 skipped** against the same database; contracts **79 passed, 0 failed, 0 skipped**; prototype production build passed.
+- Commit SHAs and PR links: recorded after commit/push in the delivery summary.
+- Compatibility/deployment notes: legacy LABEL configurations without templates/assignments continue to use the existing session/default-printer path unless `strictRouting` is enabled. Sites should register printers and terminal devices before activating strict routing.
 
 ## 2026-09-26 — Thirteen-station Terminal workspace (local UI rewrite)
 
