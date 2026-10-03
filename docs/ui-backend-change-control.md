@@ -2,6 +2,17 @@
 
 Last updated: 2026-10-03
 
+## 2026-10-03 — Dry warehouse for dried and freeze-dried cartons
+
+- Approval and decision: Mohamad requested a new physical destination named «انبار خشک» for cartonized dried and freeze-dried products.
+- UI behavior: sealing a carton of `DRYING` or `FREEZE_DRYING` product keeps it at Packaging until the operator selects «ثبت ورود به انبار خشک». The carton and its child packages then move to `DRY_WAREHOUSE`. Shipping refuses these cartons before that physical move is recorded. Frozen and fresh-product cartons keep their existing routes.
+- Approved backend behavior: `DRY_WAREHOUSE` is an active site zone. A carton whose complete recursive batch content is exclusively `DRYING` and/or `FREEZE_DRYING` may enter Finished Goods only at `DRY_WAREHOUSE`, and neither customer shipment nor inter-site transfer may reserve it before that location is recorded.
+- Repositories and files: `storemesh-site-server` domain, migration 080, and Finished Goods/PostgreSQL tests; `storemesh-web` Finished Goods action and UI guard test; local Figma Make prototype Packaging, Shipping, physical-destination reference, and demo warehouse data.
+- Routes, requests, and responses: no route, request, or response shape changed. The existing Finished Goods transfer operation carries `warehouseLocation: "DRY_WAREHOUSE"`; shipment eligibility now enforces the approved physical-state rule.
+- Database/migration impact: migration `080_dry_warehouse.sql` activates `DRY_WAREHOUSE` («انبار خشک») for every site without duplicating an existing site-zone row.
+- Tests: backend full suite **550 passed, 0 failed, 0 skipped** against real PostgreSQL 17 with `DATABASE_URL`; Web full suite **106 passed, 0 failed, 0 skipped**; local prototype production build passed.
+- Deployment note: apply migration 080 before enabling the new Packaging action. Existing dried-product cartons must be physically checked into `DRY_WAREHOUSE` before shipment.
+
 ## 2026-10-03 — Label designer and terminal-specific print routing
 
 - Approval and decision: Mohamad approved completing everything required for configurable label design and assigning printers and label sizes to individual terminals or Web consoles.
