@@ -12,7 +12,7 @@ Last updated: 2026-10-03
 - Routes, requests, responses, or events: existing print-job responses gained routing/template metadata. `POST /api/containers/{containerId}/label` accepts optional `sessionId` and `printerId`; existing empty requests remain compatible.
 - Database/migration impact: migration `079_label_template_device_routing.sql` adds immutable routing/template snapshot columns to `print_attempts` plus a routing lookup index.
 - Tests and real PostgreSQL result: backend full suite **549 passed, 0 failed, 0 skipped** against an isolated real PostgreSQL 17 database; Web full suite **102 passed, 0 failed, 0 skipped** against the same database; contracts **79 passed, 0 failed, 0 skipped**; prototype production build passed.
-- Commit SHAs and PR links: recorded after commit/push in the delivery summary.
+- Commit SHAs and PR links: `storemesh-site-server@4ab7296`, `storemesh-web@281449a`, `storemesh-contracts@d8f1e96`; platform record finalized in the immediately following documentation commit on the same branch. Existing branch PRs, if any, receive these pushes automatically.
 - Compatibility/deployment notes: legacy LABEL configurations without templates/assignments continue to use the existing session/default-printer path unless `strictRouting` is enabled. Sites should register printers and terminal devices before activating strict routing.
 
 ## 2026-09-26 — Thirteen-station Terminal workspace (local UI rewrite)
