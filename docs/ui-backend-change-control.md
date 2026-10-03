@@ -2,6 +2,16 @@
 
 Last updated: 2026-10-03
 
+## 2026-10-03 — Consumable editing, reasoned stock write-off, and safe deletion
+
+- Approval and decision: Mohamad requested edit and delete controls for Settings → Consumables, required deletion to be blocked while stock remains, and required a reasoned one-click stock reset for damaged supplies such as torn pouches or broken styrofoam boxes.
+- UI behavior: authorized users can edit a consumable, zero positive stock with a mandatory reason, and delete only after the balance reaches zero. The delete control is disabled while stock remains. The local prototype also shows the latest write-off reason and retains a hidden tombstone so deleted default demo items do not reappear after refresh.
+- Approved backend behavior: zeroing creates an auditable `WRITE_OFF` consumable transaction containing the negative quantity, zero balance, reason, and occurrence time. Deletion is logical (`DELETED`) rather than physical so receipt, consumption, reversal, write-off, audit, and inventory-ledger evidence remains intact. Active reorder/shortage exceptions are system-resolved when the zero-stock item is deleted.
+- Routes, requests, and responses: `POST /api/consumables/{id}/zero` accepts `{reason}` and rejects a missing reason or an already-zero balance; `DELETE /api/consumables/{id}` rejects positive stock and removes the logically deleted item from normal list responses. The OpenAPI contract was updated in the same round.
+- Repositories and files: `storemesh-site-server` domain, HTTP routes, error taxonomy, PostgreSQL/lifecycle/HTTP tests; `storemesh-contracts` OpenAPI and contract test; `storemesh-web` Settings controls and UI test; local Figma Make prototype Consumables screen.
+- Database/migration impact: no schema migration is required. Existing `consumables.status`, append-only `consumable_transactions`, audit events, outbox events, and inventory ledger preserve the behavior.
+- Tests: backend full suite **553 passed, 0 failed, 0 skipped** against real PostgreSQL 17 with `DATABASE_URL`; Web full suite **106 passed, 0 failed, 0 skipped**; contracts full suite **80 passed, 0 failed, 0 skipped**; local prototype production build passed.
+
 ## 2026-10-03 — Dry warehouse for dried and freeze-dried cartons
 
 - Approval and decision: Mohamad requested a new physical destination named «انبار خشک» for cartonized dried and freeze-dried products.
